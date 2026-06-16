@@ -1,0 +1,11 @@
+/*
+ * styles.css — RETIRED in Phase 2 (ADR-009)
+ *
+ * All layout, component, and utility rules have been migrated to:
+ *   - Tailwind CSS utility classes inline on JSX elements
+ *   - shadcn/ui component defaults
+ *   - globals.css (shadcn theme tokens + base resets)
+ *
+ * This file is intentionally empty. The import in main.tsx can be
+ * removed in a future cleanup pass once confident no rules are needed.
+ */

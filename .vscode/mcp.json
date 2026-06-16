@@ -1,0 +1,14 @@
+{
+  "servers": {
+    "jira": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["tsx", "${workspaceFolder}/packages/mcp-jira/src/index.ts"]
+    },
+    "github-prs": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["tsx", "${workspaceFolder}/packages/mcp-github/src/index.ts"]
+    }
+  }
+}

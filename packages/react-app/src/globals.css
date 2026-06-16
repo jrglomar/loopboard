@@ -1,0 +1,282 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── shadcn CSS variable theme ─────────────────────────────────────────────────
+   v1.3: refined semantic token set (ADR-010).
+   Primary indigo, slate neutral ramp, semantic success/warning/error/info with
+   -bg / -foreground / -border, named status-color group, dark block ready.
+   ─────────────────────────────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    /* ── Core shadcn/Radix theme variables ────────────────────────────────── */
+    --background: 220 14% 96%;       /* #f0f2f5 — app background */
+    --foreground: 221 39% 11%;       /* #111827 — text */
+
+    --card: 0 0% 100%;               /* #ffffff — card/surface */
+    --card-foreground: 221 39% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 221 39% 11%;
+
+    /* Primary = indigo hsl(243 75% 59%) */
+    --primary: 243 75% 59%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 221 39% 11%;
+
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    /* Accent = violet hsl(258 90% 66%) — AI / code review */
+    --accent: 258 90% 66%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;        /* error red — matches --error below */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 84%;
+    --input: 220 13% 84%;
+    --ring: 243 75% 59%;             /* indigo focus ring */
+
+    /* radius: rounded-lg = 0.5rem, rounded-md = calc(0.5rem - 2px) */
+    --radius: 0.5rem;
+
+    /* ── Semantic tokens: success ─────────────────────────────────────────── */
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+    --success-bg: 142 71% 93%;       /* ~12% tint */
+    --success-border: 142 71% 80%;
+
+    /* ── Semantic tokens: warning ─────────────────────────────────────────── */
+    --warning: 38 92% 50%;
+    --warning-foreground: 24 50% 20%;
+    --warning-bg: 38 92% 93%;
+    --warning-border: 38 92% 78%;
+
+    /* ── Semantic tokens: error ───────────────────────────────────────────── */
+    --error: 0 72% 51%;
+    --error-foreground: 0 0% 100%;
+    --error-bg: 0 72% 94%;
+    --error-border: 0 72% 80%;
+
+    /* ── Semantic tokens: info ────────────────────────────────────────────── */
+    --info: 217 91% 60%;
+    --info-foreground: 0 0% 100%;
+    --info-bg: 217 91% 93%;
+    --info-border: 217 91% 78%;
+
+    /* ── Status token group ───────────────────────────────────────────────── */
+    /* todo — slate */
+    --status-todo: 215 25% 55%;
+    --status-todo-fg: 0 0% 100%;
+    --status-todo-bg: 210 40% 96%;
+    --status-todo-text: 215 25% 40%;
+    --status-todo-border: 215 20% 80%;
+
+    /* inprogress — blue */
+    --status-inprogress: 224 71% 52%;
+    --status-inprogress-fg: 0 0% 100%;
+    --status-inprogress-bg: 213 100% 95%;
+    --status-inprogress-text: 224 71% 42%;
+    --status-inprogress-border: 213 97% 87%;
+
+    /* codereview — violet hsl(258 90% 66%) */
+    --status-codereview: 258 90% 66%;
+    --status-codereview-fg: 0 0% 100%;
+    --status-codereview-bg: 258 90% 95%;
+    --status-codereview-text: 258 80% 45%;
+    --status-codereview-border: 258 80% 82%;
+
+    /* done — emerald */
+    --status-done: 142 69% 40%;
+    --status-done-fg: 0 0% 100%;
+    --status-done-bg: 140 100% 96%;
+    --status-done-text: 142 69% 30%;
+    --status-done-border: 141 79% 85%;
+
+    /* blocked — red */
+    --status-blocked: 0 72% 51%;
+    --status-blocked-fg: 0 0% 100%;
+    --status-blocked-bg: 0 72% 95%;
+    --status-blocked-text: 0 72% 40%;
+    --status-blocked-border: 0 72% 80%;
+
+    /* ── Legacy app-specific tokens (kept for backward compat) ──────────────── */
+    --bg: hsl(220 14% 96%);
+    --surface: hsl(0 0% 100%);
+    --surface-raised: hsl(210 40% 98%);
+    --text: hsl(221 39% 11%);
+    --text-muted: hsl(215 16% 47%);
+    --text-on-accent: hsl(0 0% 100%);
+    --app-accent: hsl(243 75% 59%);
+    --app-accent-hover: hsl(243 75% 53%);
+    --accent-light: hsl(239 84% 93%);
+
+    /* ── Shadows ─────────────────────────────────────────────────────────── */
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md: 0 4px 6px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.04);
+  }
+
+  /* ── Dark mode variable block (no toggle UI yet — ready for future) ─────── */
+  .dark {
+    --background: 222 47% 11%;
+    --foreground: 213 31% 91%;
+
+    --card: 222 47% 14%;
+    --card-foreground: 213 31% 91%;
+
+    --popover: 222 47% 14%;
+    --popover-foreground: 213 31% 91%;
+
+    --primary: 243 75% 65%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 222 47% 18%;
+    --secondary-foreground: 213 31% 91%;
+
+    --muted: 222 47% 18%;
+    --muted-foreground: 215 20% 60%;
+
+    --accent: 258 90% 70%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 222 47% 22%;
+    --input: 222 47% 22%;
+    --ring: 243 75% 65%;
+
+    --success: 142 71% 50%;
+    --success-foreground: 0 0% 100%;
+    --success-bg: 142 71% 15%;
+    --success-border: 142 71% 30%;
+
+    --warning: 38 92% 55%;
+    --warning-foreground: 38 92% 20%;
+    --warning-bg: 38 92% 15%;
+    --warning-border: 38 92% 35%;
+
+    --error: 0 72% 56%;
+    --error-foreground: 0 0% 100%;
+    --error-bg: 0 72% 15%;
+    --error-border: 0 72% 35%;
+
+    --info: 217 91% 65%;
+    --info-foreground: 0 0% 100%;
+    --info-bg: 217 91% 15%;
+    --info-border: 217 91% 35%;
+
+    --status-todo-bg: 222 47% 18%;
+    --status-todo-text: 215 20% 70%;
+    --status-todo-border: 215 20% 30%;
+
+    --status-inprogress-bg: 213 80% 18%;
+    --status-inprogress-text: 224 71% 70%;
+    --status-inprogress-border: 213 70% 35%;
+
+    --status-codereview-bg: 258 70% 18%;
+    --status-codereview-text: 258 80% 75%;
+    --status-codereview-border: 258 70% 40%;
+
+    --status-done-bg: 140 60% 15%;
+    --status-done-text: 142 60% 60%;
+    --status-done-border: 141 60% 30%;
+
+    --status-blocked-bg: 0 60% 15%;
+    --status-blocked-text: 0 70% 65%;
+    --status-blocked-border: 0 60% 35%;
+  }
+}
+
+/* ── Print / Save-as-PDF stylesheet (ADR-012 export) ─────────────────────────
+   Hides app chrome; shows only the sprint report content cleanly.
+   Works with window.print() — no jspdf dependency (ADR-012 §4).
+   ─────────────────────────────────────────────────────────────────────────── */
+@media print {
+  /* Hide the app nav / sidebar / export buttons */
+  nav,
+  aside,
+  [data-sidebar],
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* Reset backgrounds for readability on paper */
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 12pt;
+    min-width: 0 !important;
+  }
+
+  /* Card surfaces — white, no shadow */
+  .bg-background,
+  .bg-card,
+  .bg-muted,
+  [class*="bg-[hsl"] {
+    background: white !important;
+  }
+
+  /* Ensure links show their URLs for printed copies */
+  a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.8em;
+    color: #555;
+  }
+
+  /* Keep page title + sprint header visible */
+  .print-report-header {
+    display: flex !important;
+  }
+
+  /* Avoid page-breaks inside cards */
+  article > * {
+    break-inside: avoid;
+  }
+}
+
+/* ── Base resets ─────────────────────────────────────────────────────────────── */
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    line-height: 1.5;
+    min-width: 360px;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* ── Motion guard ────────────────────────────────────────────────────────────── */
+/* 150ms transitions for colors + shadow; transforms guarded so reduced-motion */
+/* disables them without removing the color transition. */
+@layer utilities {
+  .transition-card {
+    transition-property: color, background-color, border-color, box-shadow;
+    transition-duration: 150ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .transition-card-full {
+    transition-property: color, background-color, border-color, box-shadow, transform;
+    transition-duration: 150ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .transition-card-full {
+      transition-property: color, background-color, border-color, box-shadow;
+    }
+
+    * {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

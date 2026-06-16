@@ -1,0 +1,347 @@
+--- PAGE 1 ---
+LOOPBOARD
+Proof of Concept — Technical Documentation
+MCP Server + React Dashboard + GitHub Copilot Integration
+Version 1.0  •  June 2025
+Status: POC / In Development
+Audience: Engineering Team, Product Owners, Scrum Masters
+INTERNAL — NOT FOR DISTRIBUTION
+--- PAGE 2 ---
+Loopboard — POC Technical Documentation Internal
+1. Executive Summary
+This document describes the Loopboard — a proof of concept (POC) that integrates AI 
+capabilities directly into the team's existing Agile workflow. The system uses GitHub Copilot 
+(powered by Claude) and the Model Context Protocol (MCP) to automate the most time-
+consuming parts of sprint management: writing tickets, reporting on sprints, and running daily 
+standups.
+The POC targets three specific pain points identified by the team:
+• Ticket quality is inconsistent — descriptions lack acceptance criteria, context, and clear 
+scope.
+• Sprint reports are written manually, taking significant time each sprint cycle.
+• Creating separate PO and Dev tickets for the same feature is repetitive and error-prone.
+Goal:  By the end of Phase 1, a Product Owner or Scrum Master can type a plain-English feature 
+description and have properly structured PO and Dev tickets created in Jira automatically — without 
+leaving VS Code or a web browser.
+2. Problem Statement
+The following issues were identified during team retrospectives and daily standups:
+2.1  Poor ticket descriptions
+Jira tickets are often created with minimal context. Developers spend time in standup or Slack 
+clarifying requirements that should have been in the ticket. Acceptance criteria are either 
+missing or too vague to test against.
+2.2  Manual sprint reports
+At the end of each sprint, the Scrum Master manually collates completed tickets, velocity data, 
+and blockers into a report. This process typically takes 1-2 hours and is prone to missed items.
+2.3  Duplicate effort for PO and Dev tickets
+The same feature must be described from two perspectives: a user-value story for the PO board 
+and a technical task for the Dev board. These are currently written separately, leading to 
+inconsistencies between the two.
+Confidential — Engineering Team Page 2 of 10
+--- PAGE 3 ---
+Loopboard — POC Technical Documentation Internal
+3. Solution Overview
+The Loopboard is composed of three layers that work together:
+Layer Technology Purpose
+AI / Chat interface GitHub Copilot + 
+Claude model
+Natural language interface for the whole team
+MCP middleware Node.js + 
+@modelcontextprotocol/
+sdk
+Bridges Copilot to Jira, GitHub, and other 
+services
+React dashboard Vite + React + 
+TypeScript
+Centralized UI for sprint view, huddle, and 
+reports
+The MCP (Model Context Protocol) server is the key architectural component. It exposes a set 
+of tools — such as create_po_ticket and get_daily_huddle — that Claude can call automatically 
+based on a natural language prompt. No manual API calls or form-filling is required.
+Example interaction:  User types: "Create a PO story and dev task for password reset via email" — 
+Claude calls create_po_ticket and create_dev_ticket via MCP, both tickets appear in Jira within 
+seconds.
+4. Architecture
+4.1  System layers
+The system is structured in four layers, each with a distinct responsibility:
+Layer Component Technology Responsibility
+Users PO, SM, Developer VS Code / Browser Interact via Copilot Chat or React 
+UI
+Frontend React App Vite + React + 
+TypeScript
+Dashboard, ticket generator, 
+reports viewer
+MCP Layer Jira MCP Server Node.js + MCP SDK Tool execution, Jira REST API 
+calls
+External Jira Cloud Jira REST API v3 + 
+Agile API
+Source of truth for tickets and 
+sprints
+Confidential — Engineering Team Page 3 of 10
+--- PAGE 4 ---
+Loopboard — POC Technical Documentation Internal
+4.2  MCP server — tool registry
+The Jira MCP server registers the following tools. Each tool has a name, a description (read by 
+Claude to decide when to call it), and a typed input schema validated with Zod.
+Tool name Input Output Use case
+create_po_ticket summary, description, 
+storyPoints
+key, url, board PO creates a new user 
+story on PO board
+create_dev_ticket summary, description, 
+linkedPoTicketKey
+key, url, board Dev task created and linked 
+to PO story
+get_active_sprint boardId, maxResults sprint info, issues by 
+status
+Dashboard load, huddle 
+digest source
+get_ticket ticketKey Full ticket fields Read before update or 
+linking
+update_ticket ticketKey, description, 
+summary
+Updated fields list Enhance existing ticket 
+description
+get_daily_huddle boardId In-progress, blocked, 
+done, up-next
+Morning standup digest 
+generation
+4.3  Data flow — ticket creation
+When a PO or SM triggers ticket creation, the following sequence occurs:
+1. User types a plain-English feature description in Copilot Chat or the React UI.
+2. The prompt is sent to Claude (via GitHub Copilot extension + MCP configuration).
+3. Claude generates two structured ticket drafts: one PO story, one Dev task — each with 
+acceptance criteria.
+4. Claude calls create_po_ticket and create_dev_ticket via the Jira MCP server.
+5. The MCP server sends POST requests to the Jira REST API using the service account 
+token from .env.
+6. Both tickets are created in Jira and linked to each other as parent/child.
+7. The React UI (or Copilot Chat) displays the ticket keys and URLs as confirmation.
+4.4  Authentication flow
+All Jira API calls are authenticated using HTTP Basic Auth with a Jira API token. The token is 
+stored only in the .env file on the developer's machine and is never sent to the browser or 
+committed to source control.
+Credential Where it lives
+JIRA_API_TOKEN .env file on developer machine only
+Confidential — Engineering Team Page 4 of 10
+--- PAGE 5 ---
+Loopboard — POC Technical Documentation Internal
+JIRA_EMAIL .env file — the email tied to the Atlassian account
+JIRA_BASE_URL .env file — e.g. https://yourcompany.atlassian.net
+GITHUB_TOKEN .env file — for GitHub MCP server (Phase 2)
+5. Repository Structure
+The project uses a monorepo layout. Each package is independently runnable. The React app 
+and MCP server communicate over a local HTTP connection during development.
+loopboard/
+├── packages/
+│   ├── mcp-jira/              ← Jira MCP server (Phase 1 — built)
+│   │   ├── src/
+│   │   │   ├── index.ts       ← MCP server entry, registers all tools
+│   │   │   ├── lib/
+│   │   │   │   ├── jiraClient.ts   ← Axios + auth headers
+│   │   │   │   └── prompts.ts      ← Claude prompt templates
+│   │   │   └── tools/
+│   │   │       ├── createPoTicket.ts
+│   │   │       ├── createDevTicket.ts
+│   │   │       ├── getSprint.ts
+│   │   │       ├── getTicket.ts
+│   │   │       ├── updateTicket.ts
+│   │   │       └── getDailyHuddle.ts
+│   │   ├── .env.example       ← Template — safe to commit
+│   │   ├── package.json
+│   │   └── tsconfig.json
+│   │
+│   ├── react-app/             ← Dashboard UI (Phase 2 — planned)
+│   │   └── src/
+│   │       ├── pages/         ← TicketGen, Dashboard, Reports
+│   │       ├── components/    ← ChatPanel, SprintBoard, HuddleDigest
+│   │       └── hooks/         ← useMCP, useJira
+│   │
+│   └── mcp-github/            ← GitHub MCP server (Phase 2 — planned)
+│
+├── .env.example               ← Root-level template
+├── .gitignore                 ← Excludes all .env files
+└── README.md
+6. Developer Setup Guide
+This guide works identically on a personal PC and a company laptop. The credentials are tied to 
+your Atlassian account, not the machine.
+Confidential — Engineering Team Page 5 of 10
+--- PAGE 6 ---
+Loopboard — POC Technical Documentation Internal
+6.1  Prerequisites
+Requirement Details
+Node.js 18+ Check with: node --version
+npm 9+ Comes with Node.js
+VS Code With GitHub Copilot extension installed
+GitHub Copilot License with Claude model enabled
+Jira access Project-level access on PO and Dev boards
+6.2  Step-by-step setup
+Step 1 — Clone the repository
+git clone https://github.com/your-org/loopboard.git
+cd loopboard/packages/mcp-jira
+Step 2 — Install dependencies
+npm install
+Step 3 — Create your .env file
+cp .env.example .env
+# Open .env and fill in your values (see Section 6.3)
+Step 4 — Run the MCP server
+npm run dev
+Expected output: Jira MCP server running — waiting for tool calls...
+Step 5 — Register in VS Code Copilot
+Open VS Code Settings (Cmd/Ctrl + ,), search for copilot mcp, click Edit in settings.json, and 
+add:
+{
+  "mcp": {
+    "servers": {
+      "jira": {
+        "command": "npx",
+        "args": ["tsx", "/absolute/path/to/mcp-jira/src/index.ts"],
+        "env": {}
+Confidential — Engineering Team Page 6 of 10
+--- PAGE 7 ---
+Loopboard — POC Technical Documentation Internal
+      }
+    }
+  }
+}
+6.3  Environment variables reference
+Variable Example value Where to find it Required
+JIRA_BASE_URL https://co.atlassian.net Your Jira instance URL Yes
+JIRA_EMAIL user@company.com Your Atlassian login email Yes
+JIRA_API_TOKEN ATATxxxxxxx id.atlassian.com > API tokens Yes
+JIRA_PO_PROJECT_KE
+Y
+PO Jira project settings Yes
+JIRA_DEV_PROJECT_K
+EY
+DEV Jira project settings Yes
+JIRA_PO_BOARD_ID 10001 Last number in board URL Yes
+JIRA_DEV_BOARD_ID 10002 Last number in board URL Yes
+How to get your Jira API token:  Go to https://id.atlassian.com/manage-profile/security/api-tokens → 
+Create API token → Copy it immediately. You only see it once.
+How to find your Board ID:  Open the Jira board in your browser. The URL looks like: 
+https://yourcompany.atlassian.net/jira/software/projects/DEV/boards/10002 — the last number 
+(10002) is the Board ID.
+7. Product Roadmap
+Phase Feature area Timeline Status
+Phase 1 Ticket creation engine — prompt to Jira 
+PO + Dev tickets via MCP
+Weeks 1–3 In development
+Phase 1 Ticket enhancer — rewrite existing 
+ticket descriptions with ACs
+Weeks 1–3 In development
+Phase 2 Sprint dashboard — live board view 
+with status and blockers
+Weeks 4–7 Planned
+Phase 2 Daily huddle digest — AI standup 
+briefing from sprint data
+Weeks 4–7 Planned
+Confidential — Engineering Team Page 7 of 10
+--- PAGE 8 ---
+Loopboard — POC Technical Documentation Internal
+Phase 2 Centralized chat panel — ask anything 
+about the sprint in the UI
+Weeks 4–7 Planned
+Phase 2 GitHub MCP integration — link PRs to 
+Jira tickets automatically
+Weeks 4–7 Planned
+Phase 3 Sprint report generator — auto-draft at 
+sprint close
+Weeks 8–11 Planned
+Phase 3 Sprint report viewer — history, PDF 
+export, shareable link
+Weeks 8–11 Planned
+Phase 3 Velocity forecasting — suggest story 
+point targets for next sprint
+Weeks 8–11 Planned
+Phase 4+ Blocker detection — flag tickets stuck 
+beyond average cycle time
+TBD Suggested
+Phase 4+ Retro assistant — draft went-well / to-
+improve from sprint data
+TBD Suggested
+Phase 4+ Role-based dashboard views — PO, 
+Dev, SM each see tailored data
+TBD Suggested
+Phase 4+ Teams integration — post huddle digest 
+to Teams channel via MCP
+TBD Suggested
+8. Technical Decisions
+The following decisions were made deliberately and are documented here to prevent revisiting 
+them without cause.
+Why MCP instead of a custom API?
+MCP is the standard protocol for connecting AI models to external tools. By building MCP-
+compliant servers, the same tools work with GitHub Copilot today and with any future MCP-
+compatible model or client. A custom REST API would lock us into one integration path.
+Why GitHub Copilot instead of a direct Claude API integration?
+The team already has GitHub Copilot licenses. Using Copilot avoids additional subscription 
+cost, keeps the toolchain inside the existing GitHub ecosystem, and allows developers to 
+interact with the AI companion without leaving VS Code.
+Why skip the Teams Calendar MCP for now?
+Microsoft Graph OAuth for calendar write access requires app registration, admin consent, and 
+redirect URL configuration — significant setup overhead for a POC. Calendar automation will be 
+added in Phase 3 once the core ticket and sprint features are validated.
+Confidential — Engineering Team Page 8 of 10
+--- PAGE 9 ---
+Loopboard — POC Technical Documentation Internal
+Why Node.js for the MCP server?
+The official @modelcontextprotocol/sdk is first-class in Node.js/TypeScript. The Jira REST API 
+client (axios) and schema validation (Zod) also have mature TypeScript support. The entire 
+stack is in one language, reducing context switching for the development team.
+Why a monorepo?
+The React app and MCP servers share type definitions and configuration. A monorepo with npm 
+workspaces keeps them in sync without publishing to a package registry. Splitting into separate 
+repos would create version drift on shared interfaces.
+9. Troubleshooting
+Symptom Likely cause Fix
+Missing Jira credentials 
+error on startup
+.env file missing or 
+incomplete
+Run: cp .env.example .env and fill in all 
+values
+401 Unauthorized from 
+Jira
+API token expired or wrong Generate a new token at id.atlassian.com > 
+API tokens
+No active sprint found Board has no active sprint Start a sprint in Jira for the given Board ID
+Story points not saving 
+to Jira
+Wrong custom field ID for 
+your instance
+Call GET /rest/api/3/issue/ANY-KEY and 
+check for the story points field name, 
+update customfield_10016 if different
+MCP server not visible 
+in Copilot
+settings.json path wrong or 
+server not running
+Check absolute path in settings.json; run 
+npm run dev and look for the startup 
+message
+Tickets created on 
+wrong board
+Wrong project key in .env Check JIRA_PO_PROJECT_KEY and 
+JIRA_DEV_PROJECT_KEY match actual 
+Jira project keys
+10. Glossary
+Term Definition
+MCP Model Context Protocol — an open standard for connecting AI models 
+to external tools and data sources
+MCP Server A Node.js service that exposes tools (functions) that Claude can call 
+via the MCP protocol
+Confidential — Engineering Team Page 9 of 10
+--- PAGE 10 ---
+Loopboard — POC Technical Documentation Internal
+MCP Tool A named, typed function registered on the MCP server — e.g. 
+create_po_ticket
+Copilot GitHub Copilot — the AI coding assistant; uses Claude as its model in 
+this setup
+PO Board The Jira board used by Product Owners to track stories and epics
+Dev Board The Jira board used by Developers to track technical tasks and bugs
+ADF Atlassian Document Format — the JSON structure Jira uses for rich 
+text fields
+Zod A TypeScript schema validation library used to type-check MCP tool 
+inputs
+Vite A fast frontend build tool used to scaffold the React app
+Sprint digest A short AI-generated summary of sprint status used in daily standups
+End of document — Loopboard POC v1.0
+Confidential — Engineering Team Page 10 of 10

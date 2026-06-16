@@ -1,0 +1,35 @@
+# Build context excludes — keep images small and reproducible.
+# node_modules are reinstalled via `npm ci` inside the image.
+node_modules
+**/node_modules
+
+# Build outputs
+dist
+**/dist
+coverage
+**/coverage
+
+# Secrets & host-local state (NEVER bake into an image)
+.env
+.env.*
+**/.env
+**/.loopboard-leaves.json
+**/.loopboard-team.json
+
+# VCS / tooling / editor
+.git
+.gitignore
+.github
+.vscode
+.claude
+.idea
+
+# Logs & OS cruft
+*.log
+**/*.log
+.DS_Store
+Thumbs.db
+
+# Docs are not needed at build/runtime (keep nginx.conf — it's not .md)
+*.md
+docs

@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+coverage/
+
+# Environment — never commit credentials (spec §4.4)
+.env
+.env.*
+!.env.example
+
+# Leaves/offset + team roster stores (v1.5/v1.8 — host-local JSON, never committed)
+.loopboard-leaves.json
+*.loopboard-leaves.json
+.loopboard-team.json
+*.loopboard-team.json
+
+# Editor / OS
+.DS_Store
+*.local
+.idea/

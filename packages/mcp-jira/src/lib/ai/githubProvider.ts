@@ -1,0 +1,180 @@
+/**
+ * GitHub Models provider for AI drafting — raw fetch, no official SDK.
+ *
+ * Per contract §4.9:
+ * - POST {baseUrl}/chat/completions
+ * - response_format: { type: "json_object" }
+ * - Parse with zod/v4 schema; on parse failure retry ONCE with re-ask message.
+ * - 401/403 → UpstreamError "GitHub Models authentication failed — check ..."
+ * - 404 → hint about GITHUB_MODELS_BASE_URL
+ * - Never logs the token.
+ */
+
+import * as z from "zod/v4";
+import type { AiProvider, AiCompletion } from "./provider.js";
+import { UpstreamError } from "../errors.js";
+
+const RE_ASK_MESSAGE =
+  "Your previous reply was not valid JSON matching the required schema. Reply with ONLY the JSON object.";
+
+export class GithubProvider implements AiProvider {
+  readonly name = "github" as const;
+  readonly model: string;
+  private readonly token: string;
+  private readonly baseUrl: string;
+
+  constructor(token: string, model: string, baseUrl: string) {
+    // Never log token
+    this.token = token;
+    this.model = model;
+    this.baseUrl = baseUrl;
+  }
+
+  async complete(
+    system: string,
+    messages: Array<{ role: "user" | "assistant"; content: string }>,
+    options: { maxTokens: number }
+  ): Promise<AiCompletion> {
+    const text = await this.fetchCompletion(system, messages, options.maxTokens);
+    return { text };
+  }
+
+  /**
+   * Fetch completion and parse with a zod/v4 schema (with one retry).
+   * Used by draftService for structured JSON outputs.
+   */
+  async completeWithSchema<T extends z.ZodObject<z.ZodRawShape>>(
+    system: string,
+    messages: Array<{ role: "user" | "assistant"; content: string }>,
+    schema: T
+  ): Promise<z.output<T>> {
+    const maxTokens = 4096;
+    const text = await this.fetchCompletion(system, messages, maxTokens);
+
+    // Attempt to parse
+    const first = tryParse(text, schema);
+    if (first !== null) return first;
+
+    // Retry with re-ask message
+    const retryMessages: Array<{ role: "user" | "assistant"; content: string }> = [
+      ...messages,
+      { role: "assistant", content: text },
+      { role: "user", content: RE_ASK_MESSAGE },
+    ];
+    const retryText = await this.fetchCompletion(system, retryMessages, maxTokens);
+    const second = tryParse(retryText, schema);
+    if (second !== null) return second;
+
+    throw new UpstreamError("AI returned an unparseable response", 502);
+  }
+
+  private async fetchCompletion(
+    system: string,
+    messages: Array<{ role: "user" | "assistant"; content: string }>,
+    maxTokens: number
+  ): Promise<string> {
+    const body = {
+      model: this.model,
+      messages: [
+        { role: "system" as const, content: system },
+        ...messages,
+      ],
+      max_tokens: maxTokens,
+      response_format: { type: "json_object" as const },
+    };
+
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new UpstreamError(`GitHub Models request failed: ${msg}`, 502);
+    }
+
+    if (!response.ok) {
+      const status = response.status;
+      if (status === 401 || status === 403) {
+        throw new UpstreamError(
+          "GitHub Models authentication failed — check GITHUB_MODELS_TOKEN / GITHUB_TOKEN (PAT needs models:read)",
+          status
+        );
+      }
+      if (status === 404) {
+        throw new UpstreamError(
+          "GitHub Models endpoint not found — check GITHUB_MODELS_BASE_URL",
+          404
+        );
+      }
+      let detail = "";
+      try {
+        detail = await response.text();
+      } catch {
+        // ignore
+      }
+      throw new UpstreamError(
+        `GitHub Models error (${status}): ${detail}`,
+        status
+      );
+    }
+
+    let data: unknown;
+    try {
+      data = await response.json();
+    } catch {
+      throw new UpstreamError("GitHub Models returned non-JSON response", 502);
+    }
+
+    return extractChoiceText(data);
+  }
+}
+
+function tryParse<T extends z.ZodObject<z.ZodRawShape>>(
+  text: string,
+  schema: T
+): z.output<T> | null {
+  try {
+    const json: unknown = JSON.parse(text);
+    const result = schema.safeParse(json);
+    if (result.success) return result.data as z.output<T>;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function extractChoiceText(data: unknown): string {
+  if (
+    data !== null &&
+    typeof data === "object" &&
+    "choices" in data &&
+    Array.isArray((data as { choices: unknown[] }).choices) &&
+    (data as { choices: unknown[] }).choices.length > 0
+  ) {
+    const choice = (data as { choices: unknown[] }).choices[0];
+    if (
+      choice !== null &&
+      typeof choice === "object" &&
+      "message" in (choice as object)
+    ) {
+      const msg = (choice as { message: unknown }).message;
+      if (
+        msg !== null &&
+        typeof msg === "object" &&
+        "content" in (msg as object)
+      ) {
+        const content = (msg as { content: unknown }).content;
+        if (typeof content === "string") return content;
+      }
+    }
+  }
+  throw new UpstreamError("GitHub Models returned unexpected response shape", 502);
+}

@@ -1,0 +1,24 @@
+{
+  "name": "loopboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Loopboard POC — MCP servers + React dashboard for AI-assisted sprint management",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "dev:jira": "npm run dev -w packages/mcp-jira",
+    "dev:jira:http": "npm run dev:http -w packages/mcp-jira",
+    "dev:github": "npm run dev -w packages/mcp-github",
+    "dev:github:http": "npm run dev:http -w packages/mcp-github",
+    "dev:app": "npm run dev -w packages/react-app",
+    "dev:all": "node scripts/dev-all.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  }
+}
