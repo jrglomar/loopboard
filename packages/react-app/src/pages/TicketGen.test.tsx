@@ -242,6 +242,39 @@ describe("TicketGen", () => {
     });
   });
 
+  it("v1.12: draft preview has a Regenerate control that re-drafts from a comment", async () => {
+    const { getAiStatus, aiDraftTickets } = await import("../lib/aiClient");
+    vi.mocked(getAiStatus).mockResolvedValueOnce({ enabled: true, provider: "github", model: "m" });
+    vi.mocked(aiDraftTickets)
+      .mockResolvedValueOnce({
+        assistantMessage: "v1", po: { summary: "PO v1", description: "d", storyPoints: null },
+        dev: { summary: "Dev v1", description: "d" }, provider: "github", model: "m",
+      })
+      .mockResolvedValueOnce({
+        assistantMessage: "v2", po: { summary: "PO v2 refined", description: "d", storyPoints: null },
+        dev: { summary: "Dev v2 refined", description: "d" }, provider: "github", model: "m",
+      });
+
+    const user = userEvent.setup();
+    render(<TicketGen />);
+    await waitFor(() => expect(screen.getByText(/AI: github/)).toBeTruthy());
+
+    await user.type(screen.getByLabelText(/describe the feature/i), "Build login");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+    await waitFor(() => expect(screen.getByDisplayValue("PO v1")).toBeTruthy());
+
+    // Comment + Regenerate → re-draft from the comment
+    await user.type(screen.getByLabelText(/Comment to refine the draft/i), "add 2FA");
+    await user.click(screen.getByRole("button", { name: /Regenerate/i }));
+
+    await waitFor(() => {
+      const calls = vi.mocked(aiDraftTickets).mock.calls;
+      const last = calls[calls.length - 1]![0];
+      expect(last.messages[last.messages.length - 1]).toMatchObject({ role: "user", content: "add 2FA" });
+    });
+    expect(await screen.findByDisplayValue("PO v2 refined")).toBeTruthy();
+  });
+
   it("switches to fallback when AI_UNAVAILABLE on send", async () => {
     const { getAiStatus, aiDraftTickets } = await import("../lib/aiClient");
     vi.mocked(getAiStatus).mockResolvedValueOnce({

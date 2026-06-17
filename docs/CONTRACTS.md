@@ -1,6 +1,6 @@
 # Integration Contracts
 
-**Status: FINAL — AUTHORITATIVE (v1.11)**  
+**Status: FINAL — AUTHORITATIVE (v1.12)**  
 Builder agents implement exactly what this document says. If something here is
 ambiguous, file a note to the Architect agent; do NOT invent new surface area or
 prefer the spec over this document — this document supersedes the spec on all
@@ -876,7 +876,10 @@ Dedupe, preserve first-seen order. Pure function, unit-tested. No side effects.
       sprints pre-seed from the planning context** — the current board's planned sprint is
       pre-selected for that board's ticket (PO planned sprint → PO Story, Dev planned sprint
       → Dev Task), still overridable via the two sprint selects (v1.6). All prior TicketGen
-      behavior is preserved.
+      behavior is preserved. **Comment & regenerate (v1.12, ADR-023):** the AI draft preview
+      gets a **comment box + "Regenerate"** button (AI mode only) that appends the comment to the
+      conversation and re-calls `POST /api/ai/draft-tickets`, refreshing the PO+Dev pair — the
+      same shared `RefineDraftControl` used on the Linking page.
     - **(v1.11, ADR-022) — "Create Dev ticket for an existing PO story" MOVED OFF Planning** to
       the new **Linking** page (below), which generalises it to **bulk** creation. The
       single-PO `LinkDevTicketCard` is removed.
@@ -933,7 +936,12 @@ Dedupe, preserve first-seen order. Pure function, unit-tested. No side effects.
        stories → one proposed Dev draft (`devSummary` + `devDescription`) per PO. The **plan is
        an editable list** (per-PO summary/description). When AI is off, each item is seeded from
        the deterministic template (`buildDraftPair(po.summary).dev`); a banner explains.
-    4. **Create all** — iterate the plan, calling `create_dev_ticket({ summary, description,
+    4. **Comment & regenerate per draft (v1.12, ADR-023)** — each plan item has a **comment box
+       + "Regenerate"** button (shown only when AI is enabled). It re-calls
+       `POST /api/ai/plan-dev-tickets` for **that single PO**, passing the reviewer comment + the
+       current draft as `instructions`, and replaces that item's `devSummary`/`devDescription`.
+       No new endpoint.
+    5. **Create all** — iterate the plan, calling `create_dev_ticket({ summary, description,
        linkedPoTicketKey: <PO key>, sprintId: <dev sprint> })` per item. Show a **live status
        log**: per item ⏳→✓ `DEV-xxx` (link → `<PO>`) or ✗ with the error; a final "N created,
        M failed" summary. Created links open in Jira. Non-fatal `linkWarning`/`sprintWarning`
@@ -1568,3 +1576,16 @@ Changes made by the Architect agent during finalization:
     never an MCP tool). `draftService.planDevTickets` + `PlanDevTicketsOutputSchema`.
 79. **No new bulk-create tool** — the client loops the existing `create_dev_ticket` so each PO
     gets its own ✓/✗ status. `create_dev_ticket` unchanged.
+
+---
+
+## Changelog v1.12 (2026-06-17 — user: per-draft comment & regenerate; ADR-023)
+
+80. **§6 — per-draft "Comment & regenerate" (frontend-only; no new backend surface).** A shared
+    `RefineDraftControl` (comment box + "Regenerate", AI mode only) attaches to each draft:
+    - **Linking** — per plan item: re-calls `POST /api/ai/plan-dev-tickets` for that single PO,
+      passing the reviewer comment + the current draft as `instructions`; replaces that item.
+    - **TicketGen** — on the AI draft preview: appends the comment to the conversation and
+      re-calls `POST /api/ai/draft-tickets`, refreshing the PO+Dev pair.
+    No tool/endpoint/field changes — both existing AI endpoints already accept the needed inputs
+    (`instructions` / `messages`).

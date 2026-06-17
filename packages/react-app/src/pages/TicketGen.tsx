@@ -2,6 +2,7 @@ import { useState, useEffect, useId, useRef, Fragment } from "react";
 import { buildDraftPair } from "../lib/ticketTemplates";
 import { createTicketPair, useSprintList } from "../hooks/useJira";
 import { getAiStatus, aiDraftTickets } from "../lib/aiClient";
+import { RefineDraftControl } from "../components/RefineDraftControl";
 import { useBoards } from "../lib/boards";
 import { type McpError } from "../lib/mcpClient";
 import { type TicketRef, type AiStatus, type AiMessage } from "../lib/types";
@@ -457,11 +458,13 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
 
   // ── AI mode handlers ───────────────────────────────────────────────────────
 
-  const handleAiSend = async () => {
-    const text = aiInput.trim();
+  const handleAiSend = async (textArg?: string) => {
+    // v1.12 (ADR-023): textArg lets the draft's "Regenerate" control re-draft from
+    // a comment without touching the main chat input.
+    const text = (textArg ?? aiInput).trim();
     if (!text || aiSending) return;
 
-    setAiInput("");
+    if (textArg === undefined) setAiInput("");
     const userBubble: BubbleMessage = { id: nextBubbleId(), role: "user", text };
     setBubbles((prev) => [...prev, userBubble]);
 
@@ -944,6 +947,15 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
             </div>
 
             <DraftPreview draft={draft} onChangeDraft={setDraft} formId={formId} />
+
+            {/* v1.12 (ADR-023): comment + regenerate the PO+Dev pair via the conversation */}
+            <div className="mt-3">
+              <RefineDraftControl
+                busy={aiSending}
+                placeholder="Comment to refine both tickets (e.g. 'make the dev checklist shorter'), then regenerate…"
+                onRegenerate={(c) => void handleAiSend(c)}
+              />
+            </div>
 
             <div className="flex gap-3 mt-5">
               <Button

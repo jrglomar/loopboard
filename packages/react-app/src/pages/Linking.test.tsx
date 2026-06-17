@@ -103,4 +103,33 @@ describe("Linking page (v1.11)", () => {
     expect(await screen.findByRole("link", { name: /Open DEV-99 in Jira/i })).toBeTruthy();
     expect(await screen.findByText(/1 created/i)).toBeTruthy();
   });
+
+  it("v1.12: a plan item has a Regenerate control that re-plans that PO from a comment", async () => {
+    vi.mocked(aiClientModule.getAiStatus).mockResolvedValue({ enabled: true, provider: "github", model: "m" });
+    vi.mocked(aiClientModule.aiPlanDevTickets)
+      .mockResolvedValueOnce({ assistantMessage: "plan", items: [{ poKey: "PO-2", devSummary: "v1 dev", devDescription: "d1" }], provider: "github", model: "m" })
+      .mockResolvedValueOnce({ assistantMessage: "refined", items: [{ poKey: "PO-2", devSummary: "v2 dev refined", devDescription: "d2" }], provider: "github", model: "m" });
+
+    render(<Linking />);
+    fireEvent.change(screen.getByRole("combobox", { name: /PO board sprint/i }), { target: { value: "200" } });
+    await screen.findByText(/→ DEV-5/);
+    await waitFor(() => expect((screen.getByRole("checkbox", { name: /Select PO-2/i }) as HTMLInputElement).checked).toBe(true));
+
+    // AI on → "Generate plan with AI"
+    fireEvent.click(screen.getByRole("button", { name: /Generate plan with AI/i }));
+    expect(await screen.findByDisplayValue("v1 dev")).toBeTruthy();
+
+    // Comment + Regenerate that item
+    fireEvent.change(screen.getByLabelText(/Comment to refine the draft for PO-2/i), { target: { value: "focus on the API layer" } });
+    fireEvent.click(screen.getByRole("button", { name: /Regenerate/i }));
+
+    await waitFor(() => {
+      const calls = vi.mocked(aiClientModule.aiPlanDevTickets).mock.calls;
+      const last = calls[calls.length - 1]![0];
+      expect(last.poStories).toHaveLength(1);
+      expect(last.poStories[0]!.key).toBe("PO-2");
+      expect(last.instructions).toContain("focus on the API layer");
+    });
+    expect(await screen.findByDisplayValue("v2 dev refined")).toBeTruthy();
+  });
 });

@@ -24,6 +24,7 @@ import { useBoards } from "../lib/boards";
 import { useActiveSprint, useSprintList, createLinkedDevTicket } from "../hooks/useJira";
 import { getLinkedIssues } from "../lib/linkClient";
 import { getAiStatus, aiPlanDevTickets } from "../lib/aiClient";
+import { RefineDraftControl } from "../components/RefineDraftControl";
 import { buildDraftPair } from "../lib/ticketTemplates";
 import { formatPoints } from "../lib/format";
 import type { McpError } from "../lib/mcpClient";
@@ -173,6 +174,32 @@ export function Linking() {
 
   function editPlanItem(poKey: string, patch: Partial<PlanDevTicketItem>) {
     setPlan((prev) => prev.map((p) => (p.poKey === poKey ? { ...p, ...patch } : p)));
+  }
+
+  // ── Regenerate one plan item from a reviewer comment (v1.12, ADR-023) ────────
+  const [regeneratingKey, setRegeneratingKey] = useState<string | null>(null);
+  async function regenerateItem(poKey: string, comment: string) {
+    const po = poTickets.find((t) => t.key === poKey);
+    const current = plan.find((p) => p.poKey === poKey);
+    if (!po || !current) return;
+    setRegeneratingKey(poKey);
+    try {
+      const instructions =
+        `A reviewer left this comment on the current Dev task draft: "${comment}". ` +
+        `Current draft summary: "${current.devSummary}". ` +
+        `Current draft description:\n${current.devDescription}\n\n` +
+        `Rewrite the Dev task to address the comment, keeping what still applies.`;
+      const res = await aiPlanDevTickets({
+        poStories: [{ key: po.key, summary: po.summary }],
+        instructions,
+      });
+      const item = res.items.find((i) => i.poKey === poKey) ?? res.items[0];
+      if (item) editPlanItem(poKey, { devSummary: item.devSummary, devDescription: item.devDescription });
+    } catch {
+      // Keep the current draft on failure — non-fatal.
+    } finally {
+      setRegeneratingKey(null);
+    }
   }
 
   // ── Bulk create (sequential so the log streams + we don't hammer Jira) ────────
@@ -380,6 +407,13 @@ export function Linking() {
                     className="font-mono text-[0.8125rem]"
                     onChange={(e) => editPlanItem(item.poKey, { devDescription: e.target.value })} />
                 </div>
+                {aiStatus.enabled && (
+                  <RefineDraftControl
+                    busy={regeneratingKey === item.poKey}
+                    labelFor={item.poKey}
+                    onRegenerate={(c) => void regenerateItem(item.poKey, c)}
+                  />
+                )}
               </div>
             ))}
             <div className="flex items-center gap-3">
