@@ -1,18 +1,20 @@
 import { useState } from "react";
 import { Dashboard } from "./pages/Dashboard";
 import { Planning } from "./pages/Planning";
+import { Linking } from "./pages/Linking";
 import { Reports } from "./pages/Reports";
 import { cn } from "@/lib/utils";
 
 // ── Tab types ─────────────────────────────────────────────────────────────────
 
 // v1.7 (ADR-018): "Ticket Generator" tab removed; replaced by "Planning" tab.
-// Ticket generation now lives inside the Planning page.
-type Tab = "dashboard" | "planning" | "reports";
+// v1.11 (ADR-022): "Linking" tab added (bulk PO→Dev ticket creation).
+type Tab = "dashboard" | "planning" | "linking" | "reports";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "dashboard", label: "Dashboard" },
   { id: "planning", label: "Planning" },
+  { id: "linking", label: "Linking" },
   { id: "reports", label: "Reports" },
 ];
 
@@ -87,6 +89,7 @@ export function App() {
       >
         {activeTab === "dashboard" && <Dashboard />}
         {activeTab === "planning" && <Planning />}
+        {activeTab === "linking" && <Linking />}
         {activeTab === "reports" && <Reports />}
       </main>
     </div>

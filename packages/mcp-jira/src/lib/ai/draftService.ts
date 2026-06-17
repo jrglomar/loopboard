@@ -48,6 +48,20 @@ export const SprintSummaryOutputSchema = z.object({
 
 export type SprintSummaryOutput = z.infer<typeof SprintSummaryOutputSchema>;
 
+// v1.11 (ADR-022): bulk plan — one Dev draft per PO story.
+export const PlanDevTicketsOutputSchema = z.object({
+  assistantMessage: z.string(),
+  items: z.array(
+    z.object({
+      poKey: z.string(),
+      devSummary: z.string(),
+      devDescription: z.string(),
+    })
+  ),
+});
+
+export type PlanDevTicketsOutput = z.infer<typeof PlanDevTicketsOutputSchema>;
+
 // ---------------------------------------------------------------------------
 // System prompts — same conventions as lib/prompts.ts
 // ---------------------------------------------------------------------------
@@ -162,6 +176,46 @@ BEHAVIOUR:
 - Put your improvements summary in assistantMessage (short, conversational, 1-3 sentences).
 - Keep the summary under 255 characters.`;
 
+const PLAN_DEV_SYSTEM = `You are an expert Agile coach and tech lead. For EACH Product Owner story you are given, plan and draft the single developer Task needed to deliver it.
+
+IMPORTANT: You MUST return a JSON object matching this schema exactly (no extra fields):
+{
+  "assistantMessage": "1-3 sentence overview of the plan and any cross-cutting assumptions",
+  "items": [
+    {
+      "poKey": "the EXACT PO key as given (e.g. PO-42)",
+      "devSummary": "concise technical task summary, max 255 chars",
+      "devDescription": "full technical description with ## headings and - bullets"
+    }
+  ]
+}
+
+Return EXACTLY one item per PO story, using its exact key. Do NOT invent extra POs or omit any.
+
+Description format — use EXACTLY these conventions so the text converts cleanly to Atlassian Document Format:
+- Use "## " headings
+- Use "- " bullet list items
+- Blank lines between paragraphs
+
+Dev Task description template:
+## Overview
+[What needs to be built to deliver this PO story]
+
+## Implementation Checklist
+- [ ] [concrete implementation step]
+- [ ] [concrete implementation step]
+
+## Acceptance Criteria
+- Given [technical precondition] / When [action] / Then [verifiable result]
+
+## Notes
+[Dependencies, risks, sequencing relative to the other tasks]
+
+BEHAVIOUR:
+- Exactly one dev task per PO story; reference that story's intent.
+- Keep each devSummary under 255 characters.
+- Be concrete and technical; note dependencies between tasks where relevant.`;
+
 // ---------------------------------------------------------------------------
 // Service functions
 // ---------------------------------------------------------------------------
@@ -248,6 +302,49 @@ export async function draftSprintSummary(
     SPRINT_SUMMARY_SYSTEM,
     messages,
     SprintSummaryOutputSchema
+  );
+
+  return {
+    ...output,
+    provider: provider.name,
+    model: provider.model,
+  };
+}
+
+/**
+ * Plan + draft one Dev task per PO story in a single call (v1.11, §4.9, ADR-022).
+ */
+export async function planDevTickets(
+  provider: AiProvider,
+  poStories: Array<{ key: string; summary: string; description?: string }>,
+  instructions?: string
+): Promise<PlanDevTicketsOutput & { provider: "anthropic" | "github"; model: string }> {
+  const lines = poStories
+    .map(
+      (s, i) =>
+        `${i + 1}. [${s.key}] ${s.summary}` +
+        (s.description ? `\n   Details: ${s.description}` : "")
+    )
+    .join("\n");
+
+  const userContent = [
+    "Plan and draft the developer Task needed to deliver each of these PO stories.",
+    "Return EXACTLY one item per PO story, keyed by its exact key.",
+    instructions ? `Global instructions: ${instructions}` : "",
+    `PO stories:\n${lines}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const messages: Array<{ role: "user" | "assistant"; content: string }> = [
+    { role: "user", content: userContent },
+  ];
+
+  const output = await callProvider(
+    provider,
+    PLAN_DEV_SYSTEM,
+    messages,
+    PlanDevTicketsOutputSchema
   );
 
   return {

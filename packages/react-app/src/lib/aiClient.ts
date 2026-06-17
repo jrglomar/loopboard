@@ -12,6 +12,8 @@ import type {
   EnhanceResponse,
   SprintSummaryRequest,
   SprintSummaryResponse,
+  PlanDevTicketsRequest,
+  PlanDevTicketsResponse,
 } from "./types";
 
 /** HTTP bridge base URL — same as mcpClient jira base */
@@ -151,4 +153,15 @@ export async function aiSprintSummary(
   body: SprintSummaryRequest
 ): Promise<SprintSummaryResponse> {
   return postAi<SprintSummaryResponse>("/api/ai/sprint-summary", body);
+}
+
+/**
+ * POST /api/ai/plan-dev-tickets — bulk plan: one Dev draft per PO story (v1.11, ADR-022).
+ * Throws McpError. AI_UNAVAILABLE (503) throws McpError{ code: "AI_UNAVAILABLE" } so the
+ * Linking page can fall back to deterministic templates.
+ */
+export async function aiPlanDevTickets(
+  body: PlanDevTicketsRequest
+): Promise<PlanDevTicketsResponse> {
+  return postAi<PlanDevTicketsResponse>("/api/ai/plan-dev-tickets", body);
 }

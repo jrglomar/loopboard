@@ -16,6 +16,7 @@ import { assignIssueTool } from "./assignIssue.js";
 import { getRecentAssigneesTool } from "./getRecentAssignees.js";
 import { getTeamMembersTool } from "./getTeamMembers.js";
 import { setTeamMembersTool } from "./setTeamMembers.js";
+import { getLinkedIssuesTool } from "./getLinkedIssues.js";
 
 export const tools: ToolDef[] = [
   createPoTicket,
@@ -35,4 +36,5 @@ export const tools: ToolDef[] = [
   getRecentAssigneesTool,
   getTeamMembersTool,
   setTeamMembersTool,
+  getLinkedIssuesTool,
 ];

@@ -657,6 +657,55 @@ export async function getIssue(ticketKey: string): Promise<{
   }
 }
 
+export interface LinkedIssueRef {
+  key: string;
+  summary: string;
+  status: string;
+  url: string;
+}
+
+/**
+ * Fetch the issues linked to a Jira issue (v1.11, ADR-022).
+ *
+ * Returns ALL linked issues (the caller filters by project). Each Jira issue link
+ * carries either an `inwardIssue` or an `outwardIssue` — we take whichever is
+ * present. A 404 (key gone/typo) returns `[]` rather than throwing, so a bulk
+ * caller stays resilient to one bad key.
+ */
+export async function getLinkedIssues(key: string): Promise<LinkedIssueRef[]> {
+  const client = getClient();
+  const cfg = getConfig();
+  type LinkSide = {
+    key: string;
+    fields?: { summary?: string; status?: { name?: string } };
+  };
+  try {
+    const res = await client.get<{
+      fields?: {
+        issuelinks?: Array<{ inwardIssue?: LinkSide; outwardIssue?: LinkSide }>;
+      };
+    }>(`/rest/api/3/issue/${key}?fields=issuelinks`);
+    const links = res.data.fields?.issuelinks ?? [];
+    const out: LinkedIssueRef[] = [];
+    for (const link of links) {
+      const other = link.inwardIssue ?? link.outwardIssue;
+      if (!other) continue;
+      out.push({
+        key: other.key,
+        summary: other.fields?.summary ?? "",
+        status: other.fields?.status?.name ?? "",
+        url: `${cfg.JIRA_BASE_URL}/browse/${other.key}`,
+      });
+    }
+    return out;
+  } catch (err) {
+    if (isAxiosError(err) && err.response?.status === 404) {
+      return [];
+    }
+    throw mapAxiosError(err);
+  }
+}
+
 /**
  * Fetch users assignable to a Jira project (v1.7 — get_assignable_users).
  * GET /rest/api/3/user/assignable/search?project={projectKey}&maxResults={maxResults}

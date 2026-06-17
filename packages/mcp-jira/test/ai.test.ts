@@ -644,5 +644,65 @@ describe("AI endpoints not in GET /api/tools", () => {
     expect(names).not.toContain("enhance-ticket");
     expect(names).not.toContain("ai/draft-tickets");
     expect(names).not.toContain("ai/enhance-ticket");
+    // v1.11: plan-dev-tickets is bridge-only too
+    expect(names).not.toContain("plan-dev-tickets");
+  });
+});
+
+// ---- v1.11 (ADR-022): POST /api/ai/plan-dev-tickets ----
+
+const validPlanBody = {
+  poStories: [
+    { key: "PO-1", summary: "Password reset via email" },
+    { key: "PO-2", summary: "Profile avatar upload" },
+  ],
+};
+
+describe("POST /api/ai/plan-dev-tickets", () => {
+  it("returns 503 AI_UNAVAILABLE when AI_PROVIDER is unset", async () => {
+    const res = await post("/api/ai/plan-dev-tickets", validPlanBody);
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("AI_UNAVAILABLE");
+  });
+
+  it("returns 400 VALIDATION when poStories is empty", async () => {
+    process.env["AI_PROVIDER"] = "anthropic";
+    process.env["ANTHROPIC_API_KEY"] = "test-key-anthropic";
+    resetConfigCache();
+    const res = await post("/api/ai/plan-dev-tickets", { poStories: [] });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("VALIDATION");
+  });
+
+  it("Anthropic happy path returns one Dev draft per PO (items)", async () => {
+    process.env["AI_PROVIDER"] = "anthropic";
+    process.env["ANTHROPIC_API_KEY"] = "test-key-anthropic";
+    process.env["ANTHROPIC_MODEL"] = "claude-opus-4-8";
+    resetConfigCache();
+
+    const mockParsedOutput = {
+      assistantMessage: "Planned 2 dev tasks.",
+      items: [
+        { poKey: "PO-1", devSummary: "Build reset endpoint", devDescription: "## Overview\n..." },
+        { poKey: "PO-2", devSummary: "Add avatar upload", devDescription: "## Overview\n..." },
+      ],
+    };
+    MockAnthropicClass.mockImplementation(() => ({
+      messages: { parse: vi.fn().mockResolvedValue({ parsed_output: mockParsedOutput }) },
+    }));
+
+    const res = await post("/api/ai/plan-dev-tickets", validPlanBody);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      data: { assistantMessage: string; items: Array<{ poKey: string; devSummary: string }>; provider: string };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.data.items).toHaveLength(2);
+    expect(body.data.items[0]!.poKey).toBe("PO-1");
+    expect(body.data.items[1]!.devSummary).toBe("Add avatar upload");
+    expect(body.data.provider).toBe("anthropic");
   });
 });

@@ -91,6 +91,8 @@ const EXPECTED_JIRA_TOOLS = [
   "get_recent_assignees",
   "get_team_members",
   "set_team_members",
+  // v1.11 — existing PO→Dev links (Linking page)
+  "get_linked_issues",
 ];
 
 const EXPECTED_GITHUB_TOOLS = [
@@ -468,6 +470,22 @@ if (!jiraReady) {
     }
   } catch (e) {
     fail("[JIRA] POST /api/ai/sprint-summary → 503 AI_UNAVAILABLE", String(e));
+  }
+
+  // JIRA v1.11: AI plan-dev-tickets → 503 AI_UNAVAILABLE when AI disabled
+  try {
+    const { status, body } = await httpPost(
+      `http://127.0.0.1:${JIRA_PORT}/api/ai/plan-dev-tickets`,
+      { poStories: [{ key: "PO-1", summary: "x" }] }
+    );
+    if (status === 503 && body.ok === false && body.error?.code === "AI_UNAVAILABLE") {
+      pass("[JIRA] POST /api/ai/plan-dev-tickets → 503 AI_UNAVAILABLE when AI disabled");
+    } else {
+      fail("[JIRA] POST /api/ai/plan-dev-tickets → 503 AI_UNAVAILABLE",
+        `status=${status} code=${body.error?.code} body=${JSON.stringify(body).slice(0, 200)}`);
+    }
+  } catch (e) {
+    fail("[JIRA] POST /api/ai/plan-dev-tickets → 503 AI_UNAVAILABLE", String(e));
   }
 }
 

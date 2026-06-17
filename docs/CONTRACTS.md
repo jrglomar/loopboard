@@ -1,6 +1,6 @@
 # Integration Contracts
 
-**Status: FINAL — AUTHORITATIVE (v1.10)**  
+**Status: FINAL — AUTHORITATIVE (v1.11)**  
 Builder agents implement exactly what this document says. If something here is
 ambiguous, file a note to the Architect agent; do NOT invent new surface area or
 prefer the spec over this document — this document supersedes the spec on all
@@ -482,6 +482,19 @@ export interface AiProvider {
 - **Output:** `{ summary: string; provider: "anthropic" | "github"; model: string }`
 - Pure-AI, no Jira call. Same provider port + error mapping as the other AI endpoints.
 
+`POST /api/ai/plan-dev-tickets` (v1.11 — bulk Dev planning for the Linking page; ADR-022)
+- **Input (zod):** `{ poStories: Array<{ key: string, summary: string, description?: string }> (1..20),
+  instructions?: string (≤2000) }` — the selected PO stories the user wants Dev tasks for.
+- **Behavior:** ONE provider call. The system prompt asks the model to **plan and draft the
+  developer Task needed to deliver each PO story**, returning one Dev draft per PO (same ADF
+  description conventions — `## ` headings + `- ` bullets). `instructions` is optional global
+  guidance. Bridge-only REST, NEVER an MCP tool (circular for Copilot). Lives in
+  `lib/ai/draftService.ts` (`planDevTickets` + `PlanDevTicketsOutputSchema`, zod/v4).
+- **Output:** `{ assistantMessage: string; items: Array<{ poKey: string; devSummary: string;
+  devDescription: string }>; provider: "anthropic" | "github"; model: string }`. The UI matches
+  `items` to the selected POs by `poKey`; any PO the model omits falls back to a deterministic
+  template client-side. The UI reviews/edits the plan before bulk-creating via `create_dev_ticket`.
+
 **Errors (all AI endpoints):**
 | Case | Status | `code` |
 |---|---|---|
@@ -698,6 +711,24 @@ export interface TeamMember { accountId: string; displayName: string }
   `JIRA_TEAM_FILE` at a temp path / mock the Jira client; keyless/offline; cover recent-assignee
   derivation (distinct + counts + sort, null-assignee skip), team round-trip set→get, replace/clear.
 
+### 4.17 `get_linked_issues` (v1.11 — existing PO→Dev links; ADR-022)
+
+Used by the Linking page to show whether a PO story already has a linked Dev ticket
+("one or none") so bulk creation doesn't duplicate.
+
+- **Input:** `{ keys: string[] (1+), projectKey?: string }`. `projectKey` filters the
+  returned links to a project (default = `JIRA_DEV_PROJECT_KEY`, i.e. only the Dev tickets
+  linked to each PO). Pass `projectKey: ""` to return links to ANY project.
+- **Behavior:** for each key, fetch the issue's `issuelinks`
+  (`GET /rest/api/3/issue/{key}?fields=issuelinks,summary,status`), take the linked issue on
+  each link (`inwardIssue ?? outwardIssue`), and keep those whose key is in `projectKey`
+  (prefix `${projectKey}-`). Fetches run in parallel. A missing/unreadable key contributes an
+  empty array (non-fatal — never throws for one bad key).
+- **Output:** `{ links: Record<string, Array<{ key: string; summary: string; status: string; url: string }>> }`
+  keyed by the input PO key (every input key present; `[]` when no matching links).
+- New jiraClient helper `getLinkedIssues(key)` → all linked issues of one key (the tool filters).
+- Registered MCP tool (stdio + `/api/tools` + bridge). Tests mock the Jira client; keyless.
+
 ## 5. mcp-github tools (Phase 2) — exact IO
 
 ```ts
@@ -826,9 +857,9 @@ Dedupe, preserve first-seen order. Pure function, unit-tested. No side effects.
   Dev-only. A board with **no active/future sprints** (e.g. a Kanban PO board) shows a
   friendly empty state ("No sprints on the PO board"), not a hard error — map the
   `UPSTREAM`/"No active or future sprint" case to that empty state.
-- **Tab nav (v1.7, ADR-018):** **Dashboard · Planning · Reports**. The old "Ticket
-  Generator" tab is REMOVED — its functionality moves into **Planning** (below). Dashboard
-  and Reports keep their tabs.
+- **Tab nav (v1.7, ADR-018; v1.11):** **Dashboard · Planning · Linking · Reports**. The old
+  "Ticket Generator" tab is REMOVED — its functionality moved into **Planning**. **Linking
+  (v1.11, ADR-022)** is a new tab for bulk PO→Dev ticket creation (below).
 - Pages (react-router not required — a simple state-based tab nav is fine):
   - **Planning (v1.7, ADR-018) — the sprint-preparation / grooming workspace.** A
     board-and-sprint-scoped page that consolidates the prep actions:
@@ -846,18 +877,9 @@ Dedupe, preserve first-seen order. Pure function, unit-tested. No side effects.
       pre-selected for that board's ticket (PO planned sprint → PO Story, Dev planned sprint
       → Dev Task), still overridable via the two sprint selects (v1.6). All prior TicketGen
       behavior is preserved.
-    - **Create Dev ticket for an existing PO story (NEW, v1.10 — ADR-021):** a `LinkDevTicketCard`
-      that, unlike TicketGen (which creates a NEW PO+Dev pair), links a **new Dev Task to an
-      EXISTING PO story**. Flow: (1) a **PO board sprint** select (`list_sprints` on `boards.po.id`,
-      active+future+closed) → (2) lists that sprint's tickets (`get_active_sprint(po.id, sprintId)`,
-      all buckets) in a **PO ticket** select (key + summary) → (3) Dev **summary + description**
-      fields, pre-seeded from the chosen PO story and editable, with an optional **"Generate with
-      AI"** (reuses `POST /api/ai/draft-tickets` seeded by the PO story; takes the `.dev` side;
-      falls back to deterministic templates when AI is off) → (4) a **Dev board sprint** select
-      (`list_sprints` on `boards.dev.id`) → (5) **Create** calls
-      `create_dev_ticket({ summary, description, linkedPoTicketKey: <PO key>, sprintId: <dev sprint> })`
-      (existing tool — no backend change; link + sprint are non-fatal, surfaced as
-      `linkWarning`/`sprintWarning`). Success shows the new Dev ticket key→link + "linked to <PO key>".
+    - **(v1.11, ADR-022) — "Create Dev ticket for an existing PO story" MOVED OFF Planning** to
+      the new **Linking** page (below), which generalises it to **bulk** creation. The
+      single-PO `LinkDevTicketCard` is removed.
     - **Team roster (v1.8, ADR-019) — the source of truth for who appears.** Both the leaves
       plotter and the assignment dropdown roster from the **curated per-board team**
       (`useTeamMembers(boardId)`), NOT the org-wide assignable list. A **"Manage team"**
@@ -898,6 +920,27 @@ Dedupe, preserve first-seen order. Pure function, unit-tested. No side effects.
       `getRecentAssignees`), `useTeamMembers(boardId)`, `useRecentAssignees(boardId)`; a
       `TeamManager` component. `useAssignableUsers` powers the v1.9 **"Search all people"**
       add box in TeamManager. Reuse `useLeaves`, `capacity.ts`, `useActiveSprint`. a11y + states.
+  - **Linking (NEW page, v1.11 — ADR-022)** — bulk-create Dev tasks for existing PO stories.
+    A guided workflow on its own tab (`pages/Linking.tsx`):
+    1. **Pick a PO board sprint** (`list_sprints` on `boards.po.id`) and the **target Dev
+       sprint** (`list_sprints` on `boards.dev.id`).
+    2. **Multi-select PO tickets** — the PO sprint's tickets (`get_active_sprint(po.id,
+       sprintId)`, all buckets) as a **checkbox list**. Each row shows the existing **linked Dev
+       ticket(s)** (`get_linked_issues(keys, projectKey=dev)` — "one or none"): a row that
+       already has a Dev link is badged (e.g. "→ DEV-123") and **deselected by default** (to
+       avoid duplicates), but can still be selected. "Select all without a Dev link" helper.
+    3. **Generate the plan with AI** — `POST /api/ai/plan-dev-tickets` with the selected PO
+       stories → one proposed Dev draft (`devSummary` + `devDescription`) per PO. The **plan is
+       an editable list** (per-PO summary/description). When AI is off, each item is seeded from
+       the deterministic template (`buildDraftPair(po.summary).dev`); a banner explains.
+    4. **Create all** — iterate the plan, calling `create_dev_ticket({ summary, description,
+       linkedPoTicketKey: <PO key>, sprintId: <dev sprint> })` per item. Show a **live status
+       log**: per item ⏳→✓ `DEV-xxx` (link → `<PO>`) or ✗ with the error; a final "N created,
+       M failed" summary. Created links open in Jira. Non-fatal `linkWarning`/`sprintWarning`
+       are surfaced per row. (No new bulk MCP tool — the client loops `create_dev_ticket`.)
+    New `src/lib`: `linkClient.ts` (`getLinkedIssues`, `planDevTickets`), reuse
+    `createLinkedDevTicket` (v1.10), `useActiveSprint`, `useSprintList`, `useBoards`,
+    `buildDraftPair`. a11y: labeled checkboxes, `role="status"`/`aria-live` log, keyboard-OK.
   - **Dashboard** — owns `selectedBoardId` (v1.6, default = `boards.dev.id`),
     `selectedSprintId: number | null` state (v1.1), and `assigneeFilter: string | null`
     state (v1.2). `SprintBoard` + a sidebar that stacks **`ChatPanel` on top, then
@@ -1507,3 +1550,21 @@ Changes made by the Architect agent during finalization:
     → pick a **Dev board sprint** → `create_dev_ticket({ summary, description, linkedPoTicketKey,
     sprintId })`. **No backend change** — `create_dev_ticket` already supports `linkedPoTicketKey`
     + `sprintId` (link/sprint non-fatal → `linkWarning`/`sprintWarning`).
+
+---
+
+## Changelog v1.11 (2026-06-17 — user: separate Linking page + bulk PO→Dev creation; ADR-022)
+
+76. **§6 — new Linking page/tab (bulk PO→Dev).** The v1.10 single-PO `LinkDevTicketCard` is
+    MOVED off Planning into a dedicated **Linking** tab and generalised to **bulk**: pick a PO
+    sprint + a target Dev sprint → **multi-select** PO tickets (each showing its existing linked
+    Dev ticket, "one or none") → **AI plan** (one Dev draft per PO) → **Create all** with a live
+    per-item **status log**. Tab nav becomes **Dashboard · Planning · Linking · Reports**.
+77. **§4.17 (new) — `get_linked_issues`** `{ keys[], projectKey? }` → `{ links: { poKey:
+    LinkedIssue[] } }` (existing Dev tickets linked to each PO; parallel; per-key non-fatal). New
+    jiraClient `getLinkedIssues`. Registered MCP tool.
+78. **§4.9 (new) — `POST /api/ai/plan-dev-tickets`** `{ poStories[], instructions? }` → `{ items:
+    [{ poKey, devSummary, devDescription }], assistantMessage }` (one provider call, bridge-only,
+    never an MCP tool). `draftService.planDevTickets` + `PlanDevTicketsOutputSchema`.
+79. **No new bulk-create tool** — the client loops the existing `create_dev_ticket` so each PO
+    gets its own ✓/✗ status. `create_dev_ticket` unchanged.

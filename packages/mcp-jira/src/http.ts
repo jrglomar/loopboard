@@ -25,7 +25,7 @@ import { getConfig } from "./lib/config.js";
 import { UpstreamError, ConfigError } from "./lib/errors.js";
 import { ZodError } from "zod";
 import { getAiProvider, getAiStatus } from "./lib/ai/provider.js";
-import { draftTickets, enhanceTicket, draftSprintSummary } from "./lib/ai/draftService.js";
+import { draftTickets, enhanceTicket, draftSprintSummary, planDevTickets } from "./lib/ai/draftService.js";
 
 // ---- Read package version at startup ----
 const _require = createRequire(import.meta.url);
@@ -122,6 +122,22 @@ const enhanceTicketInputSchema = z.object({
     summary: z.string(),
     description: z.string(),
   }),
+});
+
+// ---- Input zod schema for plan-dev-tickets AI endpoint (v1.11, ADR-022) ----
+
+const planDevTicketsInputSchema = z.object({
+  poStories: z
+    .array(
+      z.object({
+        key: z.string().min(1),
+        summary: z.string().min(1),
+        description: z.string().optional(),
+      })
+    )
+    .min(1)
+    .max(20),
+  instructions: z.string().max(2000).optional(),
 });
 
 // ---- Input zod schema for sprint-summary AI endpoint (v1.4) ----
@@ -367,6 +383,55 @@ app.post("/api/ai/sprint-summary", async (req, res) => {
   // Call service
   try {
     const result = await draftSprintSummary(provider, parsed.data);
+    res.json({ ok: true, data: result });
+  } catch (err) {
+    if (err instanceof UpstreamError) {
+      errorResponse(res, 502, "UPSTREAM", err.message);
+      return;
+    }
+    if (err instanceof ConfigError) {
+      errorResponse(res, 500, "CONFIG", err.message);
+      return;
+    }
+    const msg = err instanceof Error ? err.message : "Internal server error";
+    errorResponse(res, 500, "INTERNAL", msg);
+  }
+});
+
+// POST /api/ai/plan-dev-tickets (v1.11, §4.9, ADR-022)
+app.post("/api/ai/plan-dev-tickets", async (req, res) => {
+  const parsed = planDevTicketsInputSchema.safeParse(req.body);
+  if (!parsed.success) {
+    errorResponse(res, 400, "VALIDATION", "Input validation failed", parsed.error.issues);
+    return;
+  }
+
+  // Resolve provider
+  let provider;
+  try {
+    provider = await getAiProvider();
+  } catch (err) {
+    if (err instanceof ConfigError) {
+      errorResponse(res, 500, "CONFIG", err.message);
+      return;
+    }
+    const msg = err instanceof Error ? err.message : "Internal server error";
+    errorResponse(res, 500, "INTERNAL", msg);
+    return;
+  }
+
+  if (provider === null) {
+    errorResponse(res, 503, "AI_UNAVAILABLE", AI_UNAVAILABLE_MSG);
+    return;
+  }
+
+  // Call service
+  try {
+    const result = await planDevTickets(
+      provider,
+      parsed.data.poStories,
+      parsed.data.instructions
+    );
     res.json({ ok: true, data: result });
   } catch (err) {
     if (err instanceof UpstreamError) {

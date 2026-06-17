@@ -300,6 +300,42 @@ export interface SprintSummaryResponse {
   model: string;
 }
 
+// ── Linking types (CONTRACTS.md §4.17 + §4.9 plan-dev-tickets, v1.11, ADR-022) ─
+
+/** A single issue linked to another (from get_linked_issues). */
+export interface LinkedIssue {
+  key: string;
+  summary: string;
+  status: string;
+  url: string;
+}
+
+/** get_linked_issues output — keyed by the input (PO) key. */
+export interface GetLinkedIssuesResponse {
+  links: Record<string, LinkedIssue[]>;
+}
+
+/** POST /api/ai/plan-dev-tickets input. */
+export interface PlanDevTicketsRequest {
+  poStories: Array<{ key: string; summary: string; description?: string }>;
+  instructions?: string;
+}
+
+/** One planned Dev draft for a PO story. */
+export interface PlanDevTicketItem {
+  poKey: string;
+  devSummary: string;
+  devDescription: string;
+}
+
+/** POST /api/ai/plan-dev-tickets output. */
+export interface PlanDevTicketsResponse {
+  assistantMessage: string;
+  items: PlanDevTicketItem[];
+  provider: "anthropic" | "github";
+  model: string;
+}
+
 // ── Assignment types (CONTRACTS.md §4.15 v1.7, ADR-018) ─────────────────────
 
 /**
