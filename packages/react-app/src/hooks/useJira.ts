@@ -120,6 +120,27 @@ export async function createTicketPair(
   return { po, dev };
 }
 
+// ── createLinkedDevTicket (v1.10, ADR-021) ───────────────────────────────────
+
+/**
+ * Create a single Dev Task linked to an EXISTING PO story (no new PO ticket),
+ * optionally adding it to a Dev sprint. Wraps create_dev_ticket — link + sprint
+ * are non-fatal (returned as linkWarning/sprintWarning).
+ */
+export async function createLinkedDevTicket(input: {
+  summary: string;
+  description: string;
+  linkedPoTicketKey: string;
+  sprintId?: number;
+}): Promise<CreateDevTicketOutput> {
+  return callTool<CreateDevTicketOutput>("jira", "create_dev_ticket", {
+    summary: input.summary,
+    description: input.description,
+    linkedPoTicketKey: input.linkedPoTicketKey,
+    ...(input.sprintId !== undefined ? { sprintId: input.sprintId } : {}),
+  });
+}
+
 // ── enhanceTicket ─────────────────────────────────────────────────────────────
 
 /** Fetches the ticket then updates it with new description notes */
@@ -188,9 +209,12 @@ export function useSprintReport(
  * Fetches the velocity data for the given boardId (optional — defaults server-side to Dev).
  *
  * v1.5 (ADR-015): optional `beforeSprintId` — when provided, velocity is the N
- * closed sprints BEFORE that sprint. Reports passes the selected sprintId so the
- * velocity chart tracks the picker and refetches on sprint change. When omitted,
- * falls back to prior "latest N closed" behavior.
+ * sprints BEFORE that sprint. Reports passes the selected sprintId so the
+ * velocity chart tracks the picker and refetches on sprint change.
+ *
+ * v1.10 (ADR-021): always sends `includeActive: true` so the pool includes active
+ * sprints (not just closed) — the board rarely closes sprints, so closed-only
+ * returned stale results. The current/selected sprint is still excluded server-side.
  *
  * v1.6 (ADR-017): optional `boardId` — thread to get_velocity for PO/Dev reports.
  *
@@ -201,9 +225,12 @@ export function useVelocity(
   boardId?: number
 ): UseMCPState<VelocityData> {
   const fn = useCallback(() => {
-    const input: Record<string, number> = {};
+    const input: Record<string, number | boolean> = {};
     if (beforeSprintId != null) input.beforeSprintId = beforeSprintId;
     if (boardId !== undefined) input.boardId = boardId;
+    // v1.10 (ADR-021): always pool active sprints too, so the chart reflects the
+    // latest delivered work even on boards that rarely formally close sprints.
+    input.includeActive = true;
     return callTool<VelocityData>("jira", "get_velocity", input);
   }, [beforeSprintId, boardId]);
 

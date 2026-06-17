@@ -564,6 +564,84 @@ describe("get_velocity DoD v1.5 (ADR-014)", () => {
 });
 
 // ========================================================================
+// A2. get_velocity — includeActive (v1.10, ADR-021)
+// ========================================================================
+
+describe("get_velocity includeActive (v1.10 ADR-021)", () => {
+  // An active sprint that ENDS later than the latest closed sprint completed.
+  const activeRecent = {
+    id: 60,
+    name: "Sprint 9 (active)",
+    state: "active",
+    startDate: "2026-06-15T00:00:00.000Z",
+    endDate: "2026-06-28T00:00:00.000Z",
+    completeDate: null,
+    goal: null,
+  };
+
+  it("default (includeActive omitted) pools ONLY closed sprints — one getSprintsByState call", async () => {
+    client.getSprintsByState.mockResolvedValueOnce([closedSprintB]); // "closed"
+    client.getSprintIssues.mockResolvedValueOnce([
+      makeIssue({ key: "DEV-1", statusCategory: "done", storyPoints: 4 }),
+    ]);
+
+    const result = (await getVelocityTool.handler({ sprintCount: 1 })) as {
+      sprints: { id: number }[];
+    };
+
+    expect(client.getSprintsByState).toHaveBeenCalledTimes(1);
+    expect(client.getSprintsByState).toHaveBeenCalledWith(expect.anything(), "closed");
+    expect(result.sprints[0]!.id).toBe(51); // closedSprintB
+  });
+
+  it("includeActive=true pools active sprints too; latest-active outranks older closed", async () => {
+    client.getSprintsByState
+      .mockResolvedValueOnce([closedSprintB]) // "closed" (completeDate 2026-05-14)
+      .mockResolvedValueOnce([activeRecent]); // "active" (endDate 2026-06-28 — more recent)
+    // Latest by completeDate??endDate is the active sprint → fetched first
+    client.getSprintIssues.mockResolvedValueOnce([
+      makeIssue({ key: "DEV-9", statusCategory: "done", storyPoints: 7 }),
+    ]);
+
+    const result = (await getVelocityTool.handler({
+      sprintCount: 1,
+      includeActive: true,
+    })) as { sprints: { id: number; completedPoints: number }[] };
+
+    // Fetched BOTH states
+    expect(client.getSprintsByState).toHaveBeenCalledWith(expect.anything(), "closed");
+    expect(client.getSprintsByState).toHaveBeenCalledWith(expect.anything(), "active");
+    // The active sprint is the most recent → it is the one selected
+    expect(result.sprints).toHaveLength(1);
+    expect(result.sprints[0]!.id).toBe(60);
+    expect(result.sprints[0]!.completedPoints).toBe(7);
+  });
+
+  it("includeActive=true with beforeSprintId still excludes the selected sprint", async () => {
+    // anchor = sprintMeta (id 55, startDate 2026-06-15). activeRecent starts ON the anchor
+    // (2026-06-15) → NOT strictly before → excluded. closedSprintB (2026-05-14) qualifies.
+    client.getSprintsByState
+      .mockResolvedValueOnce([closedSprintB]) // closed
+      .mockResolvedValueOnce([activeRecent]); // active (starts on anchor → filtered out)
+    client.getSprintMeta.mockResolvedValueOnce(sprintMeta);
+    client.getSprintIssues.mockResolvedValueOnce([
+      makeIssue({ key: "DEV-2", statusCategory: "done", storyPoints: 5 }),
+    ]);
+
+    const result = (await getVelocityTool.handler({
+      sprintCount: 3,
+      beforeSprintId: 55,
+      includeActive: true,
+    })) as { sprints: { id: number }[] };
+
+    const ids = result.sprints.map((s) => s.id);
+    expect(ids).toContain(51); // closedSprintB before anchor
+    expect(ids).not.toContain(60); // activeRecent not strictly before anchor
+    expect(ids).not.toContain(55); // never the selected sprint itself
+  });
+});
+
+// ========================================================================
 // B. get_velocity — beforeSprintId (ADR-015)
 // ========================================================================
 

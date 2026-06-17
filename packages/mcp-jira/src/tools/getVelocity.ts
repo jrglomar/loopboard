@@ -25,6 +25,10 @@ const schema = z.object({
   boardId: z.number().int().positive().optional(),
   sprintCount: z.number().int().positive().optional(),
   beforeSprintId: z.number().int().positive().optional(),
+  // v1.10 (ADR-021): also pool ACTIVE sprints, not just closed. Fixes velocity on
+  // boards that rarely formally close sprints (they sit "active" indefinitely), where
+  // closed-only returns stale/old sprints and misses recent delivered work.
+  includeActive: z.boolean().optional().default(false),
 });
 
 interface VelocitySprintEntry {
@@ -53,11 +57,17 @@ async function handler(input: unknown): Promise<GetVelocityOutput> {
   // v1.5 (ADR-014): use the DoD predicate (done OR code review).
   const isDone = makeDodPredicate(cfg.JIRA_CODE_REVIEW_STATUSES);
 
-  // Fetch closed sprints
+  // Velocity pool: closed sprints, PLUS active sprints when includeActive
+  // (v1.10, ADR-021). Future sprints are never included.
   const rawClosed = await getSprintsByState(boardId, "closed");
+  const rawActive = args.includeActive
+    ? await getSprintsByState(boardId, "active")
+    : [];
+  const rawPool = [...rawClosed, ...rawActive];
 
-  // Sort latest-completed-first (by completeDate fallback startDate)
-  const sortedClosed = [...rawClosed].sort((a, b) => {
+  // Sort latest-first (by completeDate fallback endDate — active sprints have no
+  // completeDate, so they sort by their planned endDate).
+  const sortedPool = [...rawPool].sort((a, b) => {
     const aDate = a.completeDate ?? a.endDate;
     const bDate = b.completeDate ?? b.endDate;
     if (aDate === null && bDate === null) return b.id - a.id;
@@ -68,16 +78,16 @@ async function handler(input: unknown): Promise<GetVelocityOutput> {
     return b.id - a.id;
   });
 
-  // v1.5 (ADR-015): when beforeSprintId is provided, filter to only closed sprints
+  // v1.5 (ADR-015): when beforeSprintId is provided, filter to only sprints
   // that come strictly before the selected sprint.
-  let candidateClosed = sortedClosed;
+  let candidatePool = sortedPool;
   if (args.beforeSprintId !== undefined) {
     // Fetch the selected sprint's meta to get its startDate/completeDate anchor.
     const selectedMeta = await getSprintMeta(args.beforeSprintId);
     // The anchor date is selectedMeta.startDate, fallback selectedMeta.completeDate.
     const anchorDate = selectedMeta.startDate ?? selectedMeta.completeDate;
 
-    candidateClosed = sortedClosed.filter((s) => {
+    candidatePool = sortedPool.filter((s) => {
       // Exclude the selected sprint itself.
       if (s.id === args.beforeSprintId) return false;
 
@@ -94,8 +104,8 @@ async function handler(input: unknown): Promise<GetVelocityOutput> {
     });
   }
 
-  // Take the first N (most recently completed) from the filtered window
-  const selected = candidateClosed.slice(0, sprintCount);
+  // Take the first N (most recent) from the filtered window
+  const selected = candidatePool.slice(0, sprintCount);
 
   if (selected.length === 0) {
     return {
@@ -149,11 +159,13 @@ export const getVelocityTool: ToolDef = {
   name: "get_velocity",
   description:
     "Get velocity data for a board: averages completed story points (done OR in code review) " +
-    "over the last N closed sprints (default JIRA_VELOCITY_SPRINTS = 6). " +
+    "over the last N sprints (default JIRA_VELOCITY_SPRINTS = 6). " +
     "Returns sprints in chronological order (oldest→newest) with committedPoints and " +
     "completedPoints per sprint, plus averageCompleted and a heuristic forecastNext — not a commitment. " +
     "Pass beforeSprintId to limit velocity to sprints that come before a specific sprint " +
     "(useful for the Reports page: 'the N sprints prior to the one I am viewing'). " +
+    "Pass includeActive=true to ALSO pool active sprints (not just closed) — needed on boards " +
+    "that rarely formally close sprints, so the latest delivered work is reflected. Default false (closed-only). " +
     "Empty window → zeros, no error.",
   schema,
   handler,

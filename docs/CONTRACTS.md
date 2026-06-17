@@ -1,6 +1,6 @@
 # Integration Contracts
 
-**Status: FINAL — AUTHORITATIVE (v1.9)**  
+**Status: FINAL — AUTHORITATIVE (v1.10)**  
 Builder agents implement exactly what this document says. If something here is
 ambiguous, file a note to the Architect agent; do NOT invent new surface area or
 prefer the spec over this document — this document supersedes the spec on all
@@ -574,14 +574,22 @@ export interface SprintRef {
 ```
 
 ### 4.13 `get_velocity`
-- **Input:** `{ boardId?: number, sprintCount?: number (default `JIRA_VELOCITY_SPRINTS` → 6), beforeSprintId?: number }`
-- **Behavior:** list closed sprints (latest-completed first). **Selected-sprint context
-  (v1.5, ADR-015):** when `beforeSprintId` is provided, consider only the closed sprints
-  that come **before** that sprint — i.e. exclude `beforeSprintId` itself and any closed
+- **Input:** `{ boardId?: number, sprintCount?: number (default `JIRA_VELOCITY_SPRINTS` → 6), beforeSprintId?: number, includeActive?: boolean (default false) }`
+- **Behavior:** list closed sprints (latest-completed first). **`includeActive` (v1.10,
+  ADR-021):** when `true`, the candidate pool ALSO includes **active** sprints (state
+  `closed` + `active`, never `future`), sorted latest-first by `completeDate` (fallback
+  `endDate`). This fixes velocity on boards that **rarely formally close sprints** (sprints
+  sit in `active` indefinitely) — closed-only would otherwise return stale/old sprints and
+  miss recent delivered work. The UI passes `includeActive: true` so the chart reflects the
+  latest sprints "even if active." `beforeSprintId` still excludes the selected sprint and
+  any sprint not strictly before it, so the current in-progress sprint is not double-counted.
+  When `false`, behavior is unchanged (closed-only). **Selected-sprint context
+  (v1.5, ADR-015):** when `beforeSprintId` is provided, consider only the sprints
+  that come **before** that sprint — i.e. exclude `beforeSprintId` itself and any
   sprint whose `completeDate` (fallback `startDate`) is not earlier than the selected
   sprint's `startDate` (fallback `completeDate`). This makes the Reports velocity "the N
   sprints prior to the one I'm looking at." When `beforeSprintId` is omitted, use the
-  latest closed sprints (prior behavior). Take the first `sprintCount`, run the
+  latest sprints (prior behavior). Take the first `sprintCount`, run the
   `get_sprint_report` point math per sprint (completed uses the same DoD = done OR code
   review, §4.12), reverse to chronological order. `averageCompleted` = mean of
   `completedPoints` (0 when none). **Forecast** = that average (≤2 decimals), labeled a
@@ -838,6 +846,18 @@ Dedupe, preserve first-seen order. Pure function, unit-tested. No side effects.
       pre-selected for that board's ticket (PO planned sprint → PO Story, Dev planned sprint
       → Dev Task), still overridable via the two sprint selects (v1.6). All prior TicketGen
       behavior is preserved.
+    - **Create Dev ticket for an existing PO story (NEW, v1.10 — ADR-021):** a `LinkDevTicketCard`
+      that, unlike TicketGen (which creates a NEW PO+Dev pair), links a **new Dev Task to an
+      EXISTING PO story**. Flow: (1) a **PO board sprint** select (`list_sprints` on `boards.po.id`,
+      active+future+closed) → (2) lists that sprint's tickets (`get_active_sprint(po.id, sprintId)`,
+      all buckets) in a **PO ticket** select (key + summary) → (3) Dev **summary + description**
+      fields, pre-seeded from the chosen PO story and editable, with an optional **"Generate with
+      AI"** (reuses `POST /api/ai/draft-tickets` seeded by the PO story; takes the `.dev` side;
+      falls back to deterministic templates when AI is off) → (4) a **Dev board sprint** select
+      (`list_sprints` on `boards.dev.id`) → (5) **Create** calls
+      `create_dev_ticket({ summary, description, linkedPoTicketKey: <PO key>, sprintId: <dev sprint> })`
+      (existing tool — no backend change; link + sprint are non-fatal, surfaced as
+      `linkWarning`/`sprintWarning`). Success shows the new Dev ticket key→link + "linked to <PO key>".
     - **Team roster (v1.8, ADR-019) — the source of truth for who appears.** Both the leaves
       plotter and the assignment dropdown roster from the **curated per-board team**
       (`useTeamMembers(boardId)`), NOT the org-wide assignable list. A **"Manage team"**
@@ -990,9 +1010,11 @@ Dedupe, preserve first-seen order. Pure function, unit-tested. No side effects.
       **Completed** list and a **Carryover / not completed** list (each issue: key→Jira
       link, summary, assignee, points; blocked flagged). Loading/error/empty states.
     - **Velocity + forecast** (`get_velocity`, v1.5 selected-sprint context): a CSS bar
-      chart (no charting dep) of the closed sprints **before the selected sprint** —
-      `useVelocity` passes the selected sprintId as `beforeSprintId`, so the chart is "the
-      N sprints prior to the one you're viewing" and refetches on sprint change. Committed
+      chart (no charting dep) of the sprints **before the selected sprint** —
+      `useVelocity` passes the selected sprintId as `beforeSprintId` AND **`includeActive: true`
+      (v1.10, ADR-021)** so the chart reflects the latest sprints even if they are still
+      `active` (this board rarely closes sprints; closed-only returned stale sprints). The
+      chart is "the N sprints prior to the one you're viewing" and refetches on sprint change. Committed
       vs completed points per sprint (via `formatPoints`) + `averageCompleted` +
       `forecastNext`, labeled "suggested capacity (avg of last N before this sprint), not a
       commitment". Empty state when none.
@@ -1466,3 +1488,22 @@ Changes made by the Architect agent during finalization:
     same-origin reverse proxy `/jira`→:4001, `/github`→:4002), `.dockerignore`,
     `.env.docker.example` — plus `docs/DEPLOYMENT.md` and `docs/ARCHITECTURE.md` §7–§8. No tool
     IO changed.
+
+---
+
+## Changelog v1.10 (2026-06-17 — user: Dev-ticket-from-existing-PO + velocity fix; ADR-021)
+
+74. **Bug: Reports velocity showed the wrong (stale) sprints.** `get_velocity` pooled only
+    **closed** sprints, but this board rarely closes sprints (they sit `active` indefinitely),
+    so the window returned old closed sprints and missed recent delivered work. **Fix (§4.13,
+    ADR-021):** new `includeActive?: boolean` (default false). When true, the candidate pool =
+    `closed` + `active` sprints (never `future`), sorted latest-first by `completeDate`
+    (fallback `endDate`); `beforeSprintId` still excludes the selected/in-progress sprint. The
+    Reports + capacity `useVelocity` calls pass `includeActive: true`. Default (closed-only)
+    unchanged for other callers.
+75. **§6 — Create a Dev ticket for an EXISTING PO story (new `LinkDevTicketCard`).** Distinct
+    from TicketGen (new PO+Dev pair): pick a **PO board sprint** → pick one of its tickets →
+    edit a Dev summary/description (pre-seeded from the PO story; optional **Generate with AI**)
+    → pick a **Dev board sprint** → `create_dev_ticket({ summary, description, linkedPoTicketKey,
+    sprintId })`. **No backend change** — `create_dev_ticket` already supports `linkedPoTicketKey`
+    + `sprintId` (link/sprint non-fatal → `linkWarning`/`sprintWarning`).

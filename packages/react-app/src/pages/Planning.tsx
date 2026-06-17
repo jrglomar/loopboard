@@ -17,6 +17,7 @@ import { BoardToggle } from "../components/BoardToggle";
 import { CreateSprintDialog } from "../components/CreateSprintDialog";
 import { LeavesPlotterCard } from "../components/LeavesPlotterCard";
 import { AssignmentList } from "../components/AssignmentList";
+import { LinkDevTicketCard } from "../components/LinkDevTicketCard";
 import { TeamManager } from "../components/TeamManager";
 import { TicketGen } from "./TicketGen";
 import { useBoards } from "../lib/boards";
@@ -364,6 +365,18 @@ export function Planning() {
           initialPoSprintId={ticketGenInitialPoSprintId}
           initialDevSprintId={ticketGenInitialDevSprintId}
         />
+      </section>
+
+      {/* ── Section 2b: Dev ticket for an existing PO story (v1.10, ADR-021) ─── */}
+      {/*
+        Distinct from TicketGen (new PO+Dev pair): link a NEW Dev task to an
+        EXISTING PO story (pick a PO sprint → pick a PO ticket → draft Dev →
+        Dev sprint → create_dev_ticket with linkedPoTicketKey + sprintId).
+        Self-contained (reads boards itself); pre-seeds the Dev sprint from the
+        planning context when the Dev board is selected.
+      */}
+      <section aria-label="Dev ticket for existing PO story" className="min-w-0">
+        <LinkDevTicketCard initialDevSprintId={ticketGenInitialDevSprintId} />
       </section>
 
       {/* ── Section 3: Leaves / capacity plotter (v1.8: team roster) ────────── */}
