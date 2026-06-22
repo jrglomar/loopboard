@@ -3,6 +3,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { Planning } from "./pages/Planning";
 import { Linking } from "./pages/Linking";
 import { Reports } from "./pages/Reports";
+import type { BoardKey } from "./lib/types";
 import { cn } from "@/lib/utils";
 
 // ── Tab types ─────────────────────────────────────────────────────────────────
@@ -24,6 +25,17 @@ const TABS: { id: Tab; label: string }[] = [
 export function App() {
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
 
+  // v1.13 (ADR-024): shared board + sprint context across Dashboard/Planning/Reports.
+  // sprintId is the EXPLICIT pick (null = none → each page applies its own default).
+  const [boardKey, setBoardKey] = useState<BoardKey>("dev");
+  const [sprintId, setSprintId] = useState<number | null>(null);
+  const shared = {
+    boardKey,
+    sprintId,
+    onBoardChange: (k: BoardKey) => { setBoardKey(k); setSprintId(null); },
+    onSprintChange: (id: number) => setSprintId(id),
+  };
+
   return (
     // a11y: flex column, full viewport height
     <div className="flex flex-col min-h-screen bg-background">
@@ -44,7 +56,7 @@ export function App() {
               className="text-[0.6875rem] font-semibold px-2 py-0.5 bg-primary/10 text-primary rounded-full whitespace-nowrap"
               aria-label="Product version"
             >
-              v1.7
+              v{__APP_VERSION__}
             </span>
             {/* Spacer */}
             <div className="flex-1" />
@@ -87,10 +99,10 @@ export function App() {
         className="flex-1 max-w-[1400px] w-full mx-auto px-4 sm:px-6 py-5"
         id="main-content"
       >
-        {activeTab === "dashboard" && <Dashboard />}
-        {activeTab === "planning" && <Planning />}
+        {activeTab === "dashboard" && <Dashboard {...shared} />}
+        {activeTab === "planning" && <Planning {...shared} />}
         {activeTab === "linking" && <Linking />}
-        {activeTab === "reports" && <Reports />}
+        {activeTab === "reports" && <Reports {...shared} />}
       </main>
     </div>
   );

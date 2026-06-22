@@ -1,6 +1,6 @@
 # Integration Contracts
 
-**Status: FINAL — AUTHORITATIVE (v1.12)**  
+**Status: FINAL — AUTHORITATIVE (v1.13.1)**  
 Builder agents implement exactly what this document says. If something here is
 ambiguous, file a note to the Architect agent; do NOT invent new surface area or
 prefer the spec over this document — this document supersedes the spec on all
@@ -550,6 +550,16 @@ export interface SprintRef {
 - **Description (for Claude):** "Create a new future sprint on the board with a name, goal,
   and optional start/end dates." Stdio + HTTP both expose it (a deliberate write tool).
 
+### 4.10b `set_sprint_goal` (WRITE — v1.13, ADR-024)
+- **Input:** `{ sprintId: number, goal: string }` (`goal` may be empty string to clear).
+- **Behavior:** `POST /rest/agile/1.0/sprint/{sprintId}` with `{ goal }` — Jira's Agile API
+  treats POST as a **partial update**, so only the goal changes (name/dates/state untouched).
+  404 → `UPSTREAM` ("Sprint {id} not found"). New jiraClient `updateSprintGoal(sprintId, goal)`.
+- **Output:** `{ sprintId: number, goal: string | null }`.
+- **Description (for Claude):** "Set (or clear) the goal of an existing sprint." Registered
+  MCP tool (stdio + `/api/tools` + bridge). Used by the Planning sprint-goal editor and lets
+  the Scrum Master keep the goal current; the Dashboard shows the goal + progress.
+
 ### 4.11 `list_sprints`
 - **Input:** `{ boardId?: number, state?: "active" | "future" | "closed" | "all" (default "all"), maxResults?: number (default 50) }`
 - **Behavior:** `GET /rest/agile/1.0/board/{boardId}/sprint?state=<states>` (for `"all"`
@@ -860,6 +870,16 @@ Dedupe, preserve first-seen order. Pure function, unit-tested. No side effects.
 - **Tab nav (v1.7, ADR-018; v1.11):** **Dashboard · Planning · Linking · Reports**. The old
   "Ticket Generator" tab is REMOVED — its functionality moved into **Planning**. **Linking
   (v1.11, ADR-022)** is a new tab for bulk PO→Dev ticket creation (below).
+- **Shared board + sprint context (v1.13, ADR-024).** `App` owns `selectedBoardKey` and a
+  shared `sprintId: number | null` and threads them to **Dashboard / Planning / Reports** as
+  optional controlled props `{ boardKey, sprintId, onBoardChange, onSprintChange }`. Each page
+  is **controlled when the props are present, uncontrolled otherwise** (so a page rendered
+  standalone — e.g. in tests — keeps its own state). The shared sprint is an **explicit pick**:
+  a page shows `sharedSprintId ?? itsOwnPerCeremonyDefault` (Dashboard→active, Planning→next
+  future, Reports→latest closed), so defaults still differ per ceremony, but once the user
+  picks a sprint it **follows them across tabs**. Changing the board resets the shared sprint to
+  `null` (each page re-defaults for the new board). **Linking** keeps its own dual-board (PO
+  source + Dev target) selectors — it is not part of the shared single-sprint context.
 - Pages (react-router not required — a simple state-based tab nav is fine):
   - **Planning (v1.7, ADR-018) — the sprint-preparation / grooming workspace.** A
     board-and-sprint-scoped page that consolidates the prep actions:
@@ -870,6 +890,10 @@ Dedupe, preserve first-seen order. Pure function, unit-tested. No side effects.
     - **New Sprint (moved from Dashboard):** the `CreateSprintDialog` lives here (creates a
       future sprint on the selected board → selects it as the planning target). It is
       REMOVED from the Dashboard.
+    - **Sprint goal editor (v1.13, ADR-024):** the planning-context header shows the selected
+      sprint's **goal** with an inline edit (textarea + Save) that calls `set_sprint_goal({
+      sprintId, goal })` and refreshes; empty clears it. This is where the Scrum Master keeps the
+      goal current (the Dashboard banner then reflects it).
     - **Ticket generation (moved from the Ticket Generator tab):** the full TicketGen
       experience (AI chat + fallback templates + "Use AI drafting" + editable PO/Dev draft
       previews + create) is embedded here, reusing the existing component. The **target
@@ -949,6 +973,11 @@ Dedupe, preserve first-seen order. Pure function, unit-tested. No side effects.
     New `src/lib`: `linkClient.ts` (`getLinkedIssues`, `planDevTickets`), reuse
     `createLinkedDevTicket` (v1.10), `useActiveSprint`, `useSprintList`, `useBoards`,
     `buildDraftPair`. a11y: labeled checkboxes, `role="status"`/`aria-live` log, keyboard-OK.
+  - **Dashboard sprint-goal banner (v1.13, ADR-024):** above the board, show the active
+    sprint's **goal** with a compact progress read — `% of points done (DoD = done OR code
+    review)` and **days left** (from the sprint end date) — so the goal is the visible north
+    star. When no goal is set, a muted "No goal set — add one in Planning" hint. Reads from the
+    already-loaded `get_active_sprint` data (sprint.goal + totals + dates); no extra fetch.
   - **Dashboard** — owns `selectedBoardId` (v1.6, default = `boards.dev.id`),
     `selectedSprintId: number | null` state (v1.1), and `assigneeFilter: string | null`
     state (v1.2). `SprintBoard` + a sidebar that stacks **`ChatPanel` on top, then
@@ -1589,3 +1618,33 @@ Changes made by the Architect agent during finalization:
       re-calls `POST /api/ai/draft-tickets`, refreshing the PO+Dev pair.
     No tool/endpoint/field changes — both existing AI endpoints already accept the needed inputs
     (`instructions` / `messages`).
+
+---
+
+## Changelog v1.13 (2026-06-17 — Scrum-Master review follow-up: shared sprint context + sprint goal; ADR-024)
+
+81. **§6 — shared board + sprint across tabs.** `App` owns `selectedBoardKey` + a shared
+    `sprintId` and threads them to Dashboard/Planning/Reports as optional controlled props
+    (`boardKey`, `sprintId`, `onBoardChange`, `onSprintChange`); pages stay uncontrolled when the
+    props are absent (tests unaffected). The shared sprint is an explicit pick: `sharedSprintId ??
+    perCeremonyDefault` (Dashboard active / Planning next-future / Reports latest), so an explicit
+    pick follows the user across tabs while defaults still differ. Board change resets the shared
+    sprint. Linking keeps its own dual-board selectors.
+82. **§4.10b (new) — `set_sprint_goal` (WRITE)** `{ sprintId, goal }` → `{ sprintId, goal }`
+    (`POST /rest/agile/1.0/sprint/{id}` partial update; 404→UPSTREAM). New jiraClient
+    `updateSprintGoal`. Registered MCP tool.
+83. **§6 — sprint goal made first-class.** Dashboard shows a **goal banner** (goal + % points
+    done + days left, from the loaded sprint data); Planning gets an inline **goal editor**
+    (`set_sprint_goal`). Addresses the Scrum-Master review's "sprint goal isn't trackable" gap.
+
+## Changelog v1.13.1 (2026-06-22 — Scrum-Master review P0 fixes: version pill + Linking retry)
+
+84. **§6 — header version pill is build-derived, not hardcoded.** The pill no longer reads a
+    literal `v1.7`. `react-app/package.json` `version` is the single source of truth, injected at
+    build time via Vite `define` as the `__APP_VERSION__` global (declared in `src/global.d.ts`,
+    replaced by vitest too). Bump `package.json` and the pill follows. react-app version set to
+    `1.13.0` to match the contract line; lockfile regenerated.
+85. **§6 — Linking "Retry failed (N)".** The bulk-create done phase now shows a **Retry failed**
+    button whenever `errCount > 0`. It re-runs `create_dev_ticket` for the error rows **only**
+    (matched by `poKey`), leaving successful rows untouched, then returns to the done phase with
+    updated counts. Addresses the review's "a single failed row forces a full restart" gap.

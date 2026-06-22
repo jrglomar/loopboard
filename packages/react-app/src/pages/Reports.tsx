@@ -57,6 +57,7 @@ import type {
   SprintSummaryRequest,
   AiStatus,
   BoardKey,
+  SharedSprintProps,
 } from "../lib/types";
 import type { McpError } from "../lib/mcpClient";
 
@@ -1290,10 +1291,17 @@ function ReportsBoardToggle({ selectedKey, onChange }: ReportsBoardToggleProps) 
 
 // ── Main Reports page ─────────────────────────────────────────────────────────
 
-export function Reports() {
+// v1.13 (ADR-024): controlled by App's shared board+sprint when props present.
+export function Reports({
+  boardKey: boardKeyProp,
+  sprintId: sprintIdProp,
+  onBoardChange,
+  onSprintChange,
+}: SharedSprintProps = {}) {
   // ── v1.6 (ADR-017): board context ───────────────────────────────────────────
   const { boards, loading: boardsLoading } = useBoards();
-  const [selectedBoardKey, setSelectedBoardKey] = useState<BoardKey>("dev");
+  const [localBoardKey, setLocalBoardKey] = useState<BoardKey>("dev");
+  const selectedBoardKey = boardKeyProp ?? localBoardKey;
 
   // Numeric id for the selected board — undefined until boards loads (tools use server default)
   const selectedBoardId: number | undefined =
@@ -1301,26 +1309,37 @@ export function Reports() {
 
   // ── Sprint picker state ─────────────────────────────────────────────────────
   const sprintList = useSprintList("all", selectedBoardId);
-  const [selectedSprintId, setSelectedSprintId] = useState<number | null>(null);
+  // localSprintId holds the page DEFAULT (set by the effect) + uncontrolled picks.
+  const [localSprintId, setLocalSprintId] = useState<number | null>(null);
+  // Effective sprint (v1.13): an explicit shared pick (controlled) overrides the default.
+  const selectedSprintId: number | null =
+    onSprintChange && (sprintIdProp ?? null) !== null
+      ? (sprintIdProp ?? null)
+      : localSprintId;
+  const setSprintSelection = (id: number) => {
+    if (onSprintChange) onSprintChange(id);
+    else setLocalSprintId(id);
+  };
 
-  // Default-select: first of closed[], else first of active[]
+  // Default-select: first of closed[], else first of active[] → into LOCAL state only.
   const sprintListRef = useRef(false);
   useEffect(() => {
     if (sprintList.data && !sprintListRef.current) {
       sprintListRef.current = true;
       const { closed, active } = sprintList.data;
       if (closed.length > 0) {
-        setSelectedSprintId(closed[0].id);
+        setLocalSprintId(closed[0].id);
       } else if (active.length > 0) {
-        setSelectedSprintId(active[0].id);
+        setLocalSprintId(active[0].id);
       }
     }
   }, [sprintList.data]);
 
   // v1.6: switching board resets the sprint selection and the sprint-list auto-select flag
   const handleBoardChange = (key: BoardKey) => {
-    setSelectedBoardKey(key);
-    setSelectedSprintId(null);
+    if (onBoardChange) onBoardChange(key);
+    else setLocalBoardKey(key);
+    setLocalSprintId(null);
     sprintListRef.current = false;
   };
 
@@ -1453,7 +1472,7 @@ export function Reports() {
               closed={closed}
               active={active}
               selectedId={selectedSprintId}
-              onChange={(id) => setSelectedSprintId(id)}
+              onChange={(id) => setSprintSelection(id)}
             />
           )}
         </CardContent>

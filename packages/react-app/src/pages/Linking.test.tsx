@@ -132,4 +132,30 @@ describe("Linking page (v1.11)", () => {
     });
     expect(await screen.findByDisplayValue("v2 dev refined")).toBeTruthy();
   });
+
+  it("v1.13 P0: 'Retry failed' re-runs only the failed rows", async () => {
+    vi.mocked(useJiraModule.createLinkedDevTicket)
+      .mockRejectedValueOnce({ code: "UPSTREAM", message: "boom" })
+      .mockResolvedValueOnce({ key: "DEV-77", url: "https://jira/browse/DEV-77", board: "DEV", linkedTo: "PO-2", sprintId: 300 } as never);
+
+    render(<Linking />);
+    fireEvent.change(screen.getByRole("combobox", { name: /PO board sprint/i }), { target: { value: "200" } });
+    await screen.findByText(/→ DEV-5/);
+    await waitFor(() => expect((screen.getByRole("checkbox", { name: /Select PO-2/i }) as HTMLInputElement).checked).toBe(true));
+
+    fireEvent.click(screen.getByRole("button", { name: /Build plan/i }));
+    await screen.findByText(/Plan — 1 Dev task/i);
+    fireEvent.click(screen.getByRole("button", { name: /Create all/i }));
+
+    // First attempt fails → "1 failed" + a Retry button
+    expect(await screen.findByText(/1 failed/i)).toBeTruthy();
+    const retry = await screen.findByRole("button", { name: /Retry failed \(1\)/i });
+
+    fireEvent.click(retry);
+
+    // Retry succeeds → the created Dev ticket appears, no more failures
+    expect(await screen.findByRole("link", { name: /Open DEV-77 in Jira/i })).toBeTruthy();
+    expect(await screen.findByText(/1 created/i)).toBeTruthy();
+    expect(vi.mocked(useJiraModule.createLinkedDevTicket)).toHaveBeenCalledTimes(2);
+  });
 });

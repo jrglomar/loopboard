@@ -17,6 +17,19 @@ export interface Boards {
 /** Which board is currently selected in the UI */
 export type BoardKey = "dev" | "po";
 
+/**
+ * Shared board+sprint context props (v1.13, ADR-024). When App passes these, the
+ * page is CONTROLLED (board + the "explicit pick" sprint live in App); when absent,
+ * the page is uncontrolled and keeps its own state (standalone / tests). The shared
+ * sprintId is an explicit pick (null = none → page applies its per-ceremony default).
+ */
+export interface SharedSprintProps {
+  boardKey?: BoardKey;
+  sprintId?: number | null;
+  onBoardChange?: (key: BoardKey) => void;
+  onSprintChange?: (id: number) => void;
+}
+
 // ── mcp-jira shared types (CONTRACTS.md §4) ──────────────────────────────────
 
 /** ActiveSprintRef — one entry in the activeSprints list (CONTRACTS.md §4.3 v1.1) */

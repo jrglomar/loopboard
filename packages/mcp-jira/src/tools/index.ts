@@ -17,6 +17,7 @@ import { getRecentAssigneesTool } from "./getRecentAssignees.js";
 import { getTeamMembersTool } from "./getTeamMembers.js";
 import { setTeamMembersTool } from "./setTeamMembers.js";
 import { getLinkedIssuesTool } from "./getLinkedIssues.js";
+import { setSprintGoalTool } from "./setSprintGoal.js";
 
 export const tools: ToolDef[] = [
   createPoTicket,
@@ -37,4 +38,5 @@ export const tools: ToolDef[] = [
   getTeamMembersTool,
   setTeamMembersTool,
   getLinkedIssuesTool,
+  setSprintGoalTool,
 ];

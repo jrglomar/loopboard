@@ -93,6 +93,8 @@ const EXPECTED_JIRA_TOOLS = [
   "set_team_members",
   // v1.11 — existing PO→Dev links (Linking page)
   "get_linked_issues",
+  // v1.13 — sprint goal write (Scrum-Master review)
+  "set_sprint_goal",
 ];
 
 const EXPECTED_GITHUB_TOOLS = [
@@ -404,6 +406,18 @@ if (!jiraReady) {
     }
   } catch (e) {
     fail("[JIRA] POST assign_issue {} → 400 VALIDATION", String(e));
+  }
+
+  // JIRA v1.13: set_sprint_goal {} → 400 VALIDATION (sprintId required) — never reaches Jira (no real write)
+  try {
+    const { status, body } = await httpPost(`http://127.0.0.1:${JIRA_PORT}/api/tools/set_sprint_goal`, {});
+    if (status === 400 && body.ok === false && body.error?.code === "VALIDATION") {
+      pass("[JIRA] POST set_sprint_goal {} → 400 VALIDATION (no real goal write)");
+    } else {
+      fail("[JIRA] POST set_sprint_goal {} → 400 VALIDATION", `status=${status} code=${body.error?.code}`);
+    }
+  } catch (e) {
+    fail("[JIRA] POST set_sprint_goal {} → 400 VALIDATION", String(e));
   }
 
   // JIRA v1.8: team roster store round-trip (temp file; no Jira call) + clear

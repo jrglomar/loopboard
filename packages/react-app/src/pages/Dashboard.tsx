@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Target } from "lucide-react";
 import { SprintBoard } from "../components/SprintBoard";
 import { HuddleDigest } from "../components/HuddleDigest";
 import { ChatPanel } from "../components/ChatPanel";
@@ -6,22 +7,39 @@ import { BoardToggle } from "../components/BoardToggle";
 import { useActiveSprint, useDailyHuddle } from "../hooks/useJira";
 import { getAiStatus } from "../lib/aiClient";
 import { useBoards } from "../lib/boards";
-import type { AiStatus, BoardKey } from "../lib/types";
+import type { AiStatus, BoardKey, SharedSprintProps } from "../lib/types";
 
 // a11y: main landmark is provided by the App shell; Dashboard uses the slot.
-export function Dashboard() {
+// v1.13 (ADR-024): controlled by App's shared board+sprint when props are present;
+// uncontrolled (own state) when rendered standalone (e.g. in tests).
+export function Dashboard({
+  boardKey: boardKeyProp,
+  sprintId: sprintIdProp,
+  onBoardChange,
+  onSprintChange,
+}: SharedSprintProps = {}) {
   // v1.6: Board context — load once from health (ADR-017)
   const { boards, loading: boardsLoading } = useBoards();
 
-  // v1.6: Selected board key (default = "dev"). Null boardId until boards loads.
-  const [selectedBoardKey, setSelectedBoardKey] = useState<BoardKey>("dev");
+  // v1.6/v1.13: Selected board key (default = "dev"); shared when controlled.
+  const [localBoardKey, setLocalBoardKey] = useState<BoardKey>("dev");
+  const selectedBoardKey = boardKeyProp ?? localBoardKey;
 
   // The numeric board id passed to hooks. Null = not yet loaded → tools use server default (dev)
   const selectedBoardId: number | undefined =
     boards ? boards[selectedBoardKey].id : undefined;
 
-  // v1.1: Dashboard owns selectedSprintId (ADR-007)
-  const [selectedSprintId, setSelectedSprintId] = useState<number | null>(null);
+  // v1.1/v1.13: selected sprint. Dashboard's per-ceremony default IS null (the hook
+  // then fetches the active sprint), so the shared null works directly.
+  const [localSprintId, setLocalSprintId] = useState<number | null>(null);
+  const selectedSprintId = onSprintChange ? (sprintIdProp ?? null) : localSprintId;
+
+  // Unified setter — controlled writes to App (numbers only); else local.
+  const setSprintSelection = (id: number | null) => {
+    if (onSprintChange) { if (id !== null) onSprintChange(id); }
+    else setLocalSprintId(id);
+  };
+
   // v1.2: Dashboard owns assigneeFilter (ADR-008); null = All
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null);
   const [aiStatus, setAiStatus] = useState<AiStatus>({ enabled: false, provider: null, model: null });
@@ -48,21 +66,22 @@ export function Dashboard() {
         ...sprint.data.futureSprints,
       ];
       if (!allSelectable.some((s) => s.id === selectedSprintId)) {
-        setSelectedSprintId(null);
+        // controlled-null is a no-op (App clears on board change); local resets.
+        setSprintSelection(null);
       }
     }
-  }, [sprint.data, selectedSprintId]);
+  }, [sprint.data, selectedSprintId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSelectSprint = (id: number) => {
     // v1.2: reset assignee filter when sprint changes (ADR-008)
     setAssigneeFilter(null);
-    setSelectedSprintId(id);
+    setSprintSelection(id);
   };
 
   // v1.6: Board switch — reset sprint + filter, then refetch
   const handleBoardChange = (key: BoardKey) => {
-    setSelectedBoardKey(key);
-    setSelectedSprintId(null);
+    if (onBoardChange) onBoardChange(key); else setLocalBoardKey(key);
+    setSprintSelection(null); // controlled: App also clears; uncontrolled: clears local
     setAssigneeFilter(null);
     // sprint + huddle auto-refetch when boardId changes (via the hooks' useEffect)
   };
@@ -90,6 +109,46 @@ export function Dashboard() {
           )}
           {/* When boards not available yet, nothing shown — toggle area is empty */}
         </div>
+
+        {/* v1.13 (ADR-024): Sprint-goal banner — goal + % points done + days left */}
+        {sprint.data && !isNoSprintError && (() => {
+          const s = sprint.data.sprint;
+          const t = sprint.data.totals;
+          const total = t.storyPointsTotal;
+          const done = t.storyPointsDone + t.storyPointsCodeReview;
+          const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+          let daysLeft: number | null = null;
+          if (s.endDate) {
+            daysLeft = Math.ceil((new Date(s.endDate).getTime() - Date.now()) / 86_400_000);
+          }
+          return (
+            <div className="mb-3 rounded-lg border border-border bg-card p-3" aria-label="Sprint goal">
+              <div className="flex items-start gap-2.5">
+                <Target className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" aria-hidden="true" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[0.6875rem] font-semibold text-muted-foreground uppercase tracking-wide">Sprint goal</p>
+                  {s.goal ? (
+                    <p className="text-sm font-medium text-foreground">{s.goal}</p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground italic">No goal set — add one in Planning.</p>
+                  )}
+                </div>
+                <div className="text-right text-xs text-muted-foreground whitespace-nowrap">
+                  <p><span className="font-semibold text-foreground tabular-nums">{pct}%</span> pts done</p>
+                  {daysLeft !== null && s.state === "active" && (
+                    <p>{daysLeft >= 0 ? `${daysLeft} day${daysLeft !== 1 ? "s" : ""} left` : "overdue"}</p>
+                  )}
+                </div>
+              </div>
+              {total > 0 && (
+                <div className="mt-2 h-1.5 w-full rounded-full bg-muted overflow-hidden" role="progressbar"
+                  aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Sprint goal progress">
+                  <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${pct}%` }} />
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* v1.6: No-sprint empty state (PO Kanban or board with no sprints) */}
         {isNoSprintError ? (

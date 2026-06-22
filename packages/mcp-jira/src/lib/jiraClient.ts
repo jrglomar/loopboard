@@ -482,6 +482,31 @@ export async function createSprint(payload: {
 }
 
 /**
+ * Set (or clear) an existing sprint's goal (v1.13, ADR-024).
+ * POST /rest/agile/1.0/sprint/{id} is a PARTIAL update in the Agile API, so sending
+ * only `{ goal }` changes the goal and leaves name/dates/state untouched.
+ * 404 surfaces as UpstreamError so the tool can map it.
+ */
+export async function updateSprintGoal(
+  sprintId: number,
+  goal: string
+): Promise<{ id: number; goal: string | null }> {
+  const client = getClient();
+  try {
+    const res = await client.post<{ id: number; goal?: string | null }>(
+      `/rest/agile/1.0/sprint/${sprintId}`,
+      { goal }
+    );
+    return { id: res.data.id, goal: res.data.goal ?? null };
+  } catch (err) {
+    if (isAxiosError(err) && err.response?.status === 404) {
+      throw new UpstreamError(`Sprint ${sprintId} not found`, 404);
+    }
+    throw mapAxiosError(err);
+  }
+}
+
+/**
  * Add issues to a sprint (v1.4 — add-to-sprint helper).
  * POST /rest/agile/1.0/sprint/{id}/issue { issues: [...keys] }
  * Callers must treat failures as NON-FATAL and catch themselves.

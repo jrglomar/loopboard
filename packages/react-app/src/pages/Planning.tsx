@@ -18,13 +18,14 @@ import { CreateSprintDialog } from "../components/CreateSprintDialog";
 import { LeavesPlotterCard } from "../components/LeavesPlotterCard";
 import { AssignmentList } from "../components/AssignmentList";
 import { TeamManager } from "../components/TeamManager";
+import { SprintGoalEditor } from "../components/SprintGoalEditor";
 import { TicketGen } from "./TicketGen";
 import { useBoards } from "../lib/boards";
 import { useSprintList } from "../hooks/useJira";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { BoardKey, SprintRef } from "../lib/types";
+import type { BoardKey, SprintRef, SharedSprintProps } from "../lib/types";
 
 // ── Sprint selector ───────────────────────────────────────────────────────────
 
@@ -94,15 +95,22 @@ function PlanningSprintSelect({
 // ── Planning page ─────────────────────────────────────────────────────────────
 
 // a11y: main landmark is provided by the App shell; Planning occupies the slot.
-export function Planning() {
+// v1.13 (ADR-024): controlled by App's shared board+sprint when props present.
+export function Planning({
+  boardKey: boardKeyProp,
+  sprintId: sprintIdProp,
+  onBoardChange,
+  onSprintChange,
+}: SharedSprintProps = {}) {
   const selectId = useId();
 
   // ── Board context ────────────────────────────────────────────────────────
 
   const { boards, loading: boardsLoading } = useBoards();
 
-  // Default board = Dev (ADR-018)
-  const [selectedBoardKey, setSelectedBoardKey] = useState<BoardKey>("dev");
+  // Default board = Dev (ADR-018); shared when controlled.
+  const [localBoardKey, setLocalBoardKey] = useState<BoardKey>("dev");
+  const selectedBoardKey = boardKeyProp ?? localBoardKey;
 
   // Resolved numeric board id; undefined until boards loads (tools use server default)
   const selectedBoardId: number | undefined =
@@ -122,9 +130,18 @@ export function Planning() {
 
   // ── Planning target sprint (default = next future sprint) ────────────────
 
-  const [selectedSprintId, setSelectedSprintId] = useState<number | undefined>(
-    undefined
-  );
+  // localSprintId holds the page DEFAULT (set by the effect below) + uncontrolled picks.
+  const [localSprintId, setLocalSprintId] = useState<number | undefined>(undefined);
+  // Effective sprint (v1.13): an explicit shared pick (controlled) overrides the page default.
+  const selectedSprintId: number | undefined =
+    onSprintChange && (sprintIdProp ?? undefined) !== undefined
+      ? (sprintIdProp ?? undefined)
+      : localSprintId;
+  // Explicit user picks route to App when controlled, else to local state.
+  const setSprintSelection = (id: number) => {
+    if (onSprintChange) onSprintChange(id);
+    else setLocalSprintId(id);
+  };
 
   // The full SprintRef for the selected sprint (needed for FRONTEND-2 slots)
   const activeSprints: SprintRef[] = sprintList.data?.active ?? [];
@@ -148,11 +165,8 @@ export function Planning() {
     const future = sprintList.data?.future ?? [];
     const active = sprintList.data?.active ?? [];
     const defaultSprint = future[0] ?? active[0];
-    if (defaultSprint !== undefined) {
-      setSelectedSprintId(defaultSprint.id);
-    } else {
-      setSelectedSprintId(undefined);
-    }
+    // v1.13: write the DEFAULT to local state only (never to the shared pick).
+    setLocalSprintId(defaultSprint !== undefined ? defaultSprint.id : undefined);
     // Re-default when board changes (selectedBoardId is the stable dep here)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBoardId, sprintList.loading, sprintList.data]);
@@ -160,9 +174,10 @@ export function Planning() {
   // ── Board change handler ─────────────────────────────────────────────────
 
   const handleBoardChange = (key: BoardKey) => {
-    setSelectedBoardKey(key);
+    if (onBoardChange) onBoardChange(key);
+    else setLocalBoardKey(key);
     // Sprint selection re-defaults via the useEffect above once sprint list reloads
-    setSelectedSprintId(undefined);
+    setLocalSprintId(undefined);
   };
 
   // ── Team change handler (v1.8) ───────────────────────────────────────────
@@ -187,8 +202,8 @@ export function Planning() {
   // ── New Sprint created ────────────────────────────────────────────────────
 
   const handleSprintCreated = (newSprint: SprintRef) => {
-    // Select the new sprint as the planning target and refetch the sprint list
-    setSelectedSprintId(newSprint.id);
+    // Select the new sprint as the planning target (explicit pick) and refetch.
+    setSprintSelection(newSprint.id);
     sprintList.run();
   };
 
@@ -296,7 +311,7 @@ export function Planning() {
                     active={activeSprints}
                     future={futureSprints}
                     value={selectedSprintId}
-                    onChange={setSelectedSprintId}
+                    onChange={setSprintSelection}
                     selectId={`${selectId}-sprint`}
                   />
                 )}
@@ -330,16 +345,13 @@ export function Planning() {
               </div>
             </div>
 
-            {/* Sprint goal (when available) */}
-            {selectedSprint?.goal && (
-              <div className="flex items-start gap-2 rounded-md bg-muted/40 border border-border px-3 py-2">
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mt-0.5 whitespace-nowrap">
-                  Goal
-                </span>
-                <p className="text-sm text-foreground leading-relaxed">
-                  {selectedSprint.goal}
-                </p>
-              </div>
+            {/* Sprint goal — editable (v1.13, ADR-024) */}
+            {selectedSprintId !== undefined && selectedSprint && (
+              <SprintGoalEditor
+                sprintId={selectedSprintId}
+                goal={selectedSprint.goal}
+                onSaved={() => sprintList.run()}
+              />
             )}
           </CardContent>
         </Card>

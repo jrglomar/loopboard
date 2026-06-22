@@ -141,6 +141,20 @@ export async function createLinkedDevTicket(input: {
   });
 }
 
+// ── setSprintGoal (v1.13, ADR-024) ───────────────────────────────────────────
+
+/** Set (or clear) a sprint's goal via set_sprint_goal (a real Jira write). */
+export async function setSprintGoal(
+  sprintId: number,
+  goal: string
+): Promise<{ sprintId: number; goal: string | null }> {
+  return callTool<{ sprintId: number; goal: string | null }>(
+    "jira",
+    "set_sprint_goal",
+    { sprintId, goal }
+  );
+}
+
 // ── enhanceTicket ─────────────────────────────────────────────────────────────
 
 /** Fetches the ticket then updates it with new description notes */

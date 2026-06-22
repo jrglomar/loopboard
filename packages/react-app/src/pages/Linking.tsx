@@ -229,6 +229,35 @@ export function Linking() {
     setPhase("done");
   }
 
+  // v1.13 P0: re-run ONLY the rows that failed (by poKey), leaving successes alone.
+  async function handleRetryFailed() {
+    const failed = new Set(results.filter((r) => r.status === "error").map((r) => r.poKey));
+    if (failed.size === 0) return;
+    setPhase("creating");
+    setResults((prev) => prev.map((r) => failed.has(r.poKey) ? { poKey: r.poKey, status: "pending" } : r));
+    for (const item of plan) {
+      if (!failed.has(item.poKey)) continue;
+      try {
+        const dev = await createLinkedDevTicket({
+          summary: item.devSummary.trim() || item.poKey,
+          description: item.devDescription,
+          linkedPoTicketKey: item.poKey,
+          ...(devSprintId !== undefined ? { sprintId: devSprintId } : {}),
+        });
+        setResults((prev) => prev.map((r) => r.poKey === item.poKey ? {
+          poKey: item.poKey, status: "ok", devKey: dev.key, devUrl: dev.url,
+          linkedTo: dev.linkedTo, linkWarning: dev.linkWarning, sprintWarning: dev.sprintWarning,
+        } : r));
+      } catch (err: unknown) {
+        const e = err as McpError;
+        setResults((prev) => prev.map((r) => r.poKey === item.poKey ? {
+          poKey: item.poKey, status: "error", error: e.message ?? String(err),
+        } : r));
+      }
+    }
+    setPhase("done");
+  }
+
   function reset() {
     setPhase("select");
     setPlan([]);
@@ -460,7 +489,12 @@ export function Linking() {
               ))}
             </ul>
             {phase === "done" && (
-              <div className="mt-4">
+              <div className="mt-4 flex gap-2">
+                {errCount > 0 && (
+                  <Button type="button" onClick={() => void handleRetryFailed()}>
+                    Retry failed ({errCount})
+                  </Button>
+                )}
                 <Button type="button" variant="outline" onClick={reset}>Start over</Button>
               </div>
             )}

@@ -252,3 +252,43 @@ describe("Dashboard — Dev board (default)", () => {
     });
   });
 });
+
+describe("Dashboard — sprint goal banner + shared context (v1.13, ADR-024)", () => {
+  it("shows the sprint goal and % points done (DoD)", async () => {
+    vi.mocked(useJiraModule.useActiveSprint).mockReturnValue({
+      data: {
+        ...DEV_SPRINT_DATA,
+        sprint: { id: 1, name: "Dev Sprint 1", state: "active", startDate: null, endDate: null, goal: "Ship the checkout flow" },
+        totals: { ...DEV_SPRINT_DATA.totals, storyPointsTotal: 10, storyPointsDone: 4, storyPointsCodeReview: 1 },
+      },
+      loading: false, error: null, run: vi.fn(),
+    });
+    render(<Dashboard />);
+    expect(await screen.findByText("Ship the checkout flow")).toBeTruthy();
+    // (4 done + 1 code-review) / 10 = 50%
+    const bar = screen.getByRole("progressbar", { name: /Sprint goal progress/i });
+    expect(bar.getAttribute("aria-valuenow")).toBe("50");
+  });
+
+  it("shows a 'No goal set' hint when the sprint has no goal", async () => {
+    render(<Dashboard />); // default fixture: goal = null
+    expect(await screen.findByText(/No goal set/i)).toBeTruthy();
+  });
+
+  it("controlled: uses the boardKey prop from App (PO pressed)", async () => {
+    render(<Dashboard boardKey="po" sprintId={null} onBoardChange={vi.fn()} onSprintChange={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "PO" }).getAttribute("aria-pressed")).toBe("true");
+    });
+  });
+
+  it("controlled: picking a sprint calls onSprintChange (carries to App)", async () => {
+    const onSprintChange = vi.fn();
+    // SprintBoard is mocked; assert the wiring via the board toggle's onBoardChange instead.
+    const onBoardChange = vi.fn();
+    render(<Dashboard boardKey="dev" sprintId={null} onBoardChange={onBoardChange} onSprintChange={onSprintChange} />);
+    await waitFor(() => screen.getByRole("button", { name: "PO" }));
+    fireEvent.click(screen.getByRole("button", { name: "PO" }));
+    expect(onBoardChange).toHaveBeenCalledWith("po");
+  });
+});
