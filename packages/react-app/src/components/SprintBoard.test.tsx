@@ -657,6 +657,8 @@ describe("SprintBoard", () => {
     );
     // Alice has 3 issues (DEV-10, DEV-14, DEV-13), total is 5
     expect(screen.getByText(/Showing 3 of 5 issues/)).toBeTruthy();
+    // v1.16: filtered points total — Alice's 3 + 2 + 4 = 9 pts
+    expect(screen.getByText("9 pts")).toBeTruthy();
   });
 
   it("does NOT show 'Showing X of Y' when filter is null (All)", () => {

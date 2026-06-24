@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 type Tab = "dashboard" | "planning" | "linking" | "reports";
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: "dashboard", label: "Dashboard" },
+  { id: "dashboard", label: "Huddle" },
   { id: "planning", label: "Planning" },
   { id: "linking", label: "Linking" },
   { id: "reports", label: "Reports" },

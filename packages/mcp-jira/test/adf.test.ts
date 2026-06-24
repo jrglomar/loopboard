@@ -112,4 +112,86 @@ describe("adfToText", () => {
     expect(result).toContain("bullet");
     expect(result).toContain("Some paragraph text.");
   });
+
+  // ── v1.14.1: real Jira ADF shapes (lists / hardBreak / inline nodes) ──────────
+  // Regression for the Linking "draft from PO description" bug: list items were
+  // concatenated into a run-on and hardBreaks were dropped, so descriptions came
+  // out garbled or empty.
+
+  it("renders bullet list items on their own lines with a marker", () => {
+    const adf = {
+      type: "doc", version: 1, content: [
+        { type: "bulletList", content: [
+          { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "alpha" }] }] },
+          { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "beta" }] }] },
+        ] },
+      ],
+    };
+    expect(adfToText(adf)).toBe("- alpha\n- beta");
+  });
+
+  it("numbers ordered list items", () => {
+    const adf = {
+      type: "doc", version: 1, content: [
+        { type: "orderedList", content: [
+          { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "first" }] }] },
+          { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "second" }] }] },
+        ] },
+      ],
+    };
+    expect(adfToText(adf)).toBe("1. first\n2. second");
+  });
+
+  it("does NOT concatenate adjacent list items into a run-on (the original bug)", () => {
+    const adf = {
+      type: "doc", version: 1, content: [
+        { type: "orderedList", content: [
+          { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "/a/pdf" }] }] },
+          { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "/a/bgc" }] }] },
+        ] },
+      ],
+    };
+    const out = adfToText(adf);
+    expect(out).not.toContain("/a/pdf/a/bgc"); // must be separated
+    expect(out).toContain("/a/pdf\n");
+  });
+
+  it("turns hardBreak into a newline", () => {
+    const adf = {
+      type: "doc", version: 1, content: [
+        { type: "paragraph", content: [
+          { type: "text", text: "First name" }, { type: "hardBreak" }, { type: "text", text: "Last name" },
+        ] },
+      ],
+    };
+    expect(adfToText(adf)).toBe("First name\nLast name");
+  });
+
+  it("indents nested lists instead of flattening them", () => {
+    const adf = {
+      type: "doc", version: 1, content: [
+        { type: "orderedList", content: [
+          { type: "listItem", content: [
+            { type: "paragraph", content: [{ type: "text", text: "parent" }] },
+            { type: "bulletList", content: [
+              { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "child" }] }] },
+            ] },
+          ] },
+        ] },
+      ],
+    };
+    expect(adfToText(adf)).toBe("1. parent\n   - child");
+  });
+
+  it("extracts text from inline mention nodes (attrs.text), not just text nodes", () => {
+    const adf = {
+      type: "doc", version: 1, content: [
+        { type: "paragraph", content: [
+          { type: "text", text: "Owner: " },
+          { type: "mention", attrs: { id: "abc", text: "@Jane Doe" } },
+        ] },
+      ],
+    };
+    expect(adfToText(adf)).toBe("Owner: @Jane Doe");
+  });
 });

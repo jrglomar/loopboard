@@ -15,6 +15,11 @@ coverage/
 *.loopboard-leaves.json
 .loopboard-team.json
 *.loopboard-team.json
+# Huddle impediments + pending-PR stores (v1.16 — host-local JSON, never committed)
+.loopboard-impediments.json
+*.loopboard-impediments.json
+.loopboard-prs.json
+*.loopboard-prs.json
 
 # Editor / OS
 .DS_Store

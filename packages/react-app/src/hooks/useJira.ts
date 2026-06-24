@@ -4,6 +4,8 @@ import { callTool } from "../lib/mcpClient";
 import { getLeaves, setLeaves, type LeavesMap } from "../lib/leavesClient";
 import { getAssignableUsers } from "../lib/assignClient";
 import { getTeamMembers, setTeamMembers, getRecentAssignees } from "../lib/teamClient";
+import { getImpediments, setImpediments, type ImpedimentInput } from "../lib/impedimentsClient";
+import { getPullRequests, setPullRequests, type PullRequestInput } from "../lib/prsClient";
 import type { McpError } from "../lib/mcpClient";
 import {
   type GetActiveSprintOutput,
@@ -20,6 +22,8 @@ import {
   type AssignableUser,
   type TeamMember,
   type RecentAssignee,
+  type Impediment,
+  type PullRequest,
 } from "../lib/types";
 import { useMCP, type UseMCPState } from "./useMCP";
 
@@ -94,6 +98,24 @@ export interface CreateTicketPairInput {
 export interface CreateTicketPairResult {
   po: CreatePoTicketOutput;
   dev: CreateDevTicketOutput;
+}
+
+/**
+ * Create ONLY a PO story (no Dev task) — v1.17, ADR-028 (PO-first ticket gen).
+ * Used when the "Also create a linked Dev task" toggle is off.
+ */
+export async function createPoTicket(input: {
+  summary: string;
+  description: string;
+  storyPoints?: number;
+  sprintId?: number;
+}): Promise<CreatePoTicketOutput> {
+  return callTool<CreatePoTicketOutput>("jira", "create_po_ticket", {
+    summary: input.summary,
+    description: input.description,
+    ...(input.storyPoints !== undefined ? { storyPoints: input.storyPoints } : {}),
+    ...(input.sprintId !== undefined ? { sprintId: input.sprintId } : {}),
+  });
 }
 
 /**
@@ -573,4 +595,113 @@ export function useRecentAssignees(
   }, [boardId]);
 
   return { data, loading, error, run };
+}
+
+// ── useImpediments / usePullRequests (v1.16, ADR-027) ─────────────────────────
+
+function toMcpError(err: unknown): McpError {
+  return err && typeof err === "object" && "code" in err && "message" in err
+    ? (err as McpError)
+    : { code: "UNKNOWN", message: String(err) };
+}
+
+export interface UseImpedimentsState {
+  data: Impediment[] | null;
+  loading: boolean;
+  error: McpError | null;
+  run: () => void;
+  /** Full-replace the sprint's impediments (optimistic-ish: replaces with server result). */
+  save: (impediments: ImpedimentInput[]) => Promise<void>;
+}
+
+/**
+ * Per-sprint impediments/blockers (manual store). Loads on mount + when sprintId changes.
+ * Pass null to skip loading. CONTRACTS.md §4.21 v1.16, ADR-027.
+ */
+export function useImpediments(sprintId: number | null): UseImpedimentsState {
+  const [data, setData] = useState<Impediment[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<McpError | null>(null);
+
+  const run = useCallback(() => {
+    if (sprintId === null) return;
+    setLoading(true);
+    setError(null);
+    getImpediments(sprintId)
+      .then((list) => { setData(list); setLoading(false); })
+      .catch((err: unknown) => { setError(toMcpError(err)); setLoading(false); });
+  }, [sprintId]);
+
+  useEffect(() => {
+    if (sprintId !== null) run();
+    else { setData(null); setError(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sprintId]);
+
+  const save = useCallback(
+    async (impediments: ImpedimentInput[]) => {
+      if (sprintId === null) return;
+      const prev = data;
+      try {
+        const updated = await setImpediments(sprintId, impediments);
+        setData(updated);
+      } catch (err: unknown) {
+        setData(prev);
+        throw err;
+      }
+    },
+    [sprintId, data]
+  );
+
+  return { data, loading, error, run, save };
+}
+
+export interface UsePullRequestsState {
+  data: PullRequest[] | null;
+  loading: boolean;
+  error: McpError | null;
+  run: () => void;
+  save: (pullRequests: PullRequestInput[]) => Promise<void>;
+}
+
+/**
+ * Per-sprint pending-PR links (manual store). Loads on mount + when sprintId changes.
+ * Pass null to skip loading. CONTRACTS.md §4.22 v1.16, ADR-027.
+ */
+export function usePullRequests(sprintId: number | null): UsePullRequestsState {
+  const [data, setData] = useState<PullRequest[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<McpError | null>(null);
+
+  const run = useCallback(() => {
+    if (sprintId === null) return;
+    setLoading(true);
+    setError(null);
+    getPullRequests(sprintId)
+      .then((list) => { setData(list); setLoading(false); })
+      .catch((err: unknown) => { setError(toMcpError(err)); setLoading(false); });
+  }, [sprintId]);
+
+  useEffect(() => {
+    if (sprintId !== null) run();
+    else { setData(null); setError(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sprintId]);
+
+  const save = useCallback(
+    async (pullRequests: PullRequestInput[]) => {
+      if (sprintId === null) return;
+      const prev = data;
+      try {
+        const updated = await setPullRequests(sprintId, pullRequests);
+        setData(updated);
+      } catch (err: unknown) {
+        setData(prev);
+        throw err;
+      }
+    },
+    [sprintId, data]
+  );
+
+  return { data, loading, error, run, save };
 }

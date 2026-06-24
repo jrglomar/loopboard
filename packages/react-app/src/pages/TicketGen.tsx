@@ -1,6 +1,6 @@
 import { useState, useEffect, useId, useRef, Fragment } from "react";
 import { buildDraftPair } from "../lib/ticketTemplates";
-import { createTicketPair, useSprintList } from "../hooks/useJira";
+import { createTicketPair, createPoTicket, useSprintList } from "../hooks/useJira";
 import { getAiStatus, aiDraftTickets } from "../lib/aiClient";
 import { RefineDraftControl } from "../components/RefineDraftControl";
 import { useBoards } from "../lib/boards";
@@ -34,7 +34,8 @@ interface DraftState {
 
 interface SuccessState {
   po: TicketRef;
-  dev: TicketRef;
+  /** v1.17 (ADR-028): Dev is optional — only present when "Also create a Dev task" was on. */
+  dev?: TicketRef;
   /** v1.4: sprint name if a sprint was targeted (single sprint — v1.4 fallback) */
   targetSprintName?: string;
   /** v1.6: separate PO sprint name (two-sprint flow) */
@@ -291,12 +292,14 @@ interface DraftPreviewProps {
   draft: DraftState;
   onChangeDraft: (d: DraftState) => void;
   formId: string;
+  /** v1.17 (ADR-028): show the Dev Task pane only when the user opted to also create a Dev task. */
+  showDev: boolean;
 }
 
-function DraftPreview({ draft, onChangeDraft, formId }: DraftPreviewProps) {
+function DraftPreview({ draft, onChangeDraft, formId, showDev }: DraftPreviewProps) {
   return (
     // Migrate from .draft-preview CSS class to Tailwind grid
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+    <div className={cn("grid grid-cols-1 gap-5", showDev && "md:grid-cols-2")}>
       {/* PO Story pane */}
       <Card>
         <CardHeader className="pb-3">
@@ -329,7 +332,8 @@ function DraftPreview({ draft, onChangeDraft, formId }: DraftPreviewProps) {
         </CardContent>
       </Card>
 
-      {/* Dev Task pane */}
+      {/* Dev Task pane — v1.17 (ADR-028): only when "Also create a Dev task" is on */}
+      {showDev && (
       <Card>
         <CardHeader className="pb-3">
           <Badge className="w-fit text-[0.6875rem] font-extrabold uppercase tracking-wide bg-green-100 text-green-700 border-green-200 hover:bg-green-100">
@@ -359,6 +363,7 @@ function DraftPreview({ draft, onChangeDraft, formId }: DraftPreviewProps) {
           </div>
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }
@@ -395,6 +400,10 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
    */
   const [forceFallback, setForceFallback] = useState(false);
   const [fallbackBannerVisible, setFallbackBannerVisible] = useState(true);
+
+  // v1.17 (ADR-028): PO-first — create only the PO story unless the user opts in to a
+  // linked Dev task (bulk PO→Dev lives on the Linking page).
+  const [createDev, setCreateDev] = useState(false);
 
   // AI chat state
   const [bubbles, setBubbles] = useState<BubbleMessage[]>([]);
@@ -619,28 +628,26 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
           ? allDevSprints.find((s) => s.id === devTargetSprintId)
           : undefined;
 
-        const result = await createTicketPair({
-          po: {
-            summary: draft.poSummary,
-            description: draft.poDescription,
-            storyPoints: sp,
-            sprintId: poTargetSprintId,
-          },
-          dev: {
-            summary: draft.devSummary,
-            description: draft.devDescription,
-            sprintId: devTargetSprintId,
-          },
-        });
-
-        setSuccess({
-          po: result.po,
-          dev: result.dev,
-          poSprintName: poSprint?.name,
-          devSprintName: devSprint?.name,
-          poSprintWarning: result.po.sprintWarning,
-          devSprintWarning: result.dev.sprintWarning,
-        });
+        if (createDev) {
+          const result = await createTicketPair({
+            po: { summary: draft.poSummary, description: draft.poDescription, storyPoints: sp, sprintId: poTargetSprintId },
+            dev: { summary: draft.devSummary, description: draft.devDescription, sprintId: devTargetSprintId },
+          });
+          setSuccess({
+            po: result.po,
+            dev: result.dev,
+            poSprintName: poSprint?.name,
+            devSprintName: devSprint?.name,
+            poSprintWarning: result.po.sprintWarning,
+            devSprintWarning: result.dev.sprintWarning,
+          });
+        } else {
+          // v1.17 (ADR-028): PO-only (default)
+          const po = await createPoTicket({
+            summary: draft.poSummary, description: draft.poDescription, storyPoints: sp, sprintId: poTargetSprintId,
+          });
+          setSuccess({ po, poSprintName: poSprint?.name, poSprintWarning: po.sprintWarning });
+        }
         setPhase("success");
         return;
       }
@@ -653,29 +660,25 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
         ? allSprints.find((s) => s.id === targetSprintId)
         : undefined;
 
-      const result = await createTicketPair({
-        po: {
-          summary: draft.poSummary,
-          description: draft.poDescription,
-          storyPoints: sp,
-          sprintId: targetSprintId,
-        },
-        dev: {
-          summary: draft.devSummary,
-          description: draft.devDescription,
-          sprintId: targetSprintId,
-        },
-      });
-
-      // Collect any sprint warning from dev (most likely board; po is secondary)
-      const sprintWarning = result.dev.sprintWarning ?? result.po.sprintWarning;
-
-      setSuccess({
-        po: result.po,
-        dev: result.dev,
-        targetSprintName: targetSprint?.name,
-        sprintWarning,
-      });
+      if (createDev) {
+        const result = await createTicketPair({
+          po: { summary: draft.poSummary, description: draft.poDescription, storyPoints: sp, sprintId: targetSprintId },
+          dev: { summary: draft.devSummary, description: draft.devDescription, sprintId: targetSprintId },
+        });
+        // Collect any sprint warning from dev (most likely board; po is secondary)
+        const sprintWarning = result.dev.sprintWarning ?? result.po.sprintWarning;
+        setSuccess({
+          po: result.po,
+          dev: result.dev,
+          targetSprintName: targetSprint?.name,
+          sprintWarning,
+        });
+      } else {
+        const po = await createPoTicket({
+          summary: draft.poSummary, description: draft.poDescription, storyPoints: sp, sprintId: targetSprintId,
+        });
+        setSuccess({ po, targetSprintName: targetSprint?.name, sprintWarning: po.sprintWarning });
+      }
       setPhase("success");
     } catch (err: unknown) {
       const mcpErr = err as McpError;
@@ -700,6 +703,7 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
     setTargetSprintId(undefined);
     setPoTargetSprintId(undefined);
     setDevTargetSprintId(undefined);
+    setCreateDev(false);
   };
 
   // ── Render: Success ───────────────────────────────────────────────────────
@@ -718,7 +722,7 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
           <CardContent className="p-8 text-center">
             <div className="text-5xl mb-3" aria-hidden="true">✓</div>
             <h3 className="text-lg font-bold text-success mb-4">
-              Tickets created in Jira!
+              {success.dev ? "Tickets" : "Ticket"} created in Jira!
             </h3>
             <div className="flex justify-center gap-4 flex-wrap mb-4">
               <TicketLink
@@ -727,12 +731,14 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
               >
                 PO: {success.po.key}
               </TicketLink>
-              <TicketLink
-                href={success.dev.url}
-                ariaLabel={`Open Dev ticket ${success.dev.key} in Jira`}
-              >
-                DEV: {success.dev.key}
-              </TicketLink>
+              {success.dev && (
+                <TicketLink
+                  href={success.dev.url}
+                  ariaLabel={`Open Dev ticket ${success.dev.key} in Jira`}
+                >
+                  DEV: {success.dev.key}
+                </TicketLink>
+              )}
             </div>
             {/* v1.6: two-sprint success notes (PO + Dev) */}
             {(success.poSprintName || success.devSprintName) && (
@@ -873,7 +879,8 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
                       ariaLabel="PO story sprint"
                     />
                   </div>
-                  {/* Dev sprint — for the Dev task */}
+                  {/* Dev sprint — for the Dev task (v1.17: only when Dev creation is on) */}
+                  {createDev && (
                   <div className="flex-1 min-w-[120px]">
                     <TargetSprintSelect
                       sprintListData={devSprintList.data}
@@ -885,6 +892,7 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
                       ariaLabel="Dev task sprint"
                     />
                   </div>
+                  )}
                 </div>
               ) : (
                 /* v1.4 fallback: single Dev sprint select (older bridge) */
@@ -899,6 +907,11 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
                   />
                 </div>
               )}
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground self-end pb-2 whitespace-nowrap cursor-pointer">
+                <input type="checkbox" checked={createDev} onChange={(e) => setCreateDev(e.target.checked)}
+                  className="h-3.5 w-3.5 cursor-pointer accent-[hsl(var(--primary))]" aria-label="Also create a linked Dev task" />
+                Also create a Dev task
+              </label>
               <Button
                 type="button"
                 onClick={() => void handleAiSend()}
@@ -946,7 +959,7 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
               <Separator className="flex-1" />
             </div>
 
-            <DraftPreview draft={draft} onChangeDraft={setDraft} formId={formId} />
+            <DraftPreview draft={draft} onChangeDraft={setDraft} formId={formId} showDev={createDev} />
 
             {/* v1.12 (ADR-023): comment + regenerate the PO+Dev pair via the conversation */}
             <div className="mt-3">
@@ -1091,6 +1104,7 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
                       ariaLabel="PO story sprint"
                     />
                   </div>
+                  {createDev && (
                   <div className="flex-1">
                     <TargetSprintSelect
                       sprintListData={devSprintList.data}
@@ -1102,6 +1116,7 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
                       ariaLabel="Dev task sprint"
                     />
                   </div>
+                  )}
                 </div>
               ) : (
                 /* v1.4 fallback: single Dev sprint select (older bridge) */
@@ -1114,6 +1129,14 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
                   ariaLabel="Add to sprint"
                 />
               )}
+
+              {/* v1.17 (ADR-028): optional Dev task — PO-only by default */}
+              <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer w-fit">
+                <input type="checkbox" checked={createDev} onChange={(e) => setCreateDev(e.target.checked)}
+                  className="h-4 w-4 cursor-pointer accent-[hsl(var(--primary))]" aria-label="Also create a linked Dev task" />
+                Also create a linked Dev task
+                <span className="text-xs text-muted-foreground">(optional)</span>
+              </label>
 
               <div className="flex gap-3">
                 <Button type="submit">
@@ -1144,7 +1167,7 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
             </Alert>
           )}
 
-          <DraftPreview draft={draft} onChangeDraft={setDraft} formId={formId} />
+          <DraftPreview draft={draft} onChangeDraft={setDraft} formId={formId} showDev={createDev} />
 
           <div className="flex gap-3 mt-5">
             <Button

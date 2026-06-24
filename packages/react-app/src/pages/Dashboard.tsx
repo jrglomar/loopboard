@@ -4,6 +4,8 @@ import { SprintBoard } from "../components/SprintBoard";
 import { HuddleDigest } from "../components/HuddleDigest";
 import { ChatPanel } from "../components/ChatPanel";
 import { BoardToggle } from "../components/BoardToggle";
+import { ImpedimentsCard } from "../components/ImpedimentsCard";
+import { PullRequestsCard } from "../components/PullRequestsCard";
 import { useActiveSprint, useDailyHuddle } from "../hooks/useJira";
 import { getAiStatus } from "../lib/aiClient";
 import { useBoards } from "../lib/boards";
@@ -95,6 +97,10 @@ export function Dashboard({
 
   const boardLabel = selectedBoardKey === "po" ? "PO" : "Dev";
 
+  // v1.16: the impediments + PR cards key off a concrete sprint id. When no explicit
+  // pick, fall back to the loaded active sprint's id (null until data arrives).
+  const effectiveSprintId = selectedSprintId ?? sprint.data?.sprint.id ?? null;
+
   return (
     // Two-column layout: board (flex-1) | sidebar (360px) at lg+; stacked below
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5 items-start">
@@ -176,6 +182,15 @@ export function Dashboard({
 
       {/* Sidebar: Sprint command chat on top, then Huddle Digest */}
       <div className="flex flex-col gap-4 min-w-0">
+        
+        {/* v1.16 (ADR-027): impediments log + pending-PR list for daily visibility */}
+        <section aria-label="Impediments">
+          <ImpedimentsCard sprintId={effectiveSprintId} />
+        </section>
+        <section aria-label="Code review pull requests">
+          <PullRequestsCard sprintId={effectiveSprintId} />
+        </section>
+
         {/* Huddle Digest — NOT filtered (ADR-008) */}
         <section aria-label="Daily huddle">
           <HuddleDigest
@@ -194,6 +209,7 @@ export function Dashboard({
             assigneeFilter={assigneeFilter}
           />
         </section>
+
       </div>
     </div>
   );

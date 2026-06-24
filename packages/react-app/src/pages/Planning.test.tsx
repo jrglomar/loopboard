@@ -384,6 +384,8 @@ describe("Planning — New Sprint dialog (v1.7, ADR-018)", () => {
 describe("Planning — TicketGen embedded (v1.7, ADR-018)", () => {
   it("renders TicketGen inside the Planning page", async () => {
     render(<Planning />);
+    // v1.17 (ADR-028): TicketGen is behind the "New ticket" drawer.
+    fireEvent.click(screen.getByRole("button", { name: /New ticket/i }));
     await waitFor(() => {
       expect(screen.getByTestId("ticket-gen")).toBeTruthy();
     });
@@ -391,6 +393,7 @@ describe("Planning — TicketGen embedded (v1.7, ADR-018)", () => {
 
   it("pre-seeds TicketGen with the Dev sprint id when Dev board is selected", async () => {
     render(<Planning />);
+    fireEvent.click(screen.getByRole("button", { name: /New ticket/i }));
     await waitFor(() => {
       const ticketGen = screen.getByTestId("ticket-gen");
       // Dev board is default; planned sprint = FUTURE_SPRINT_ID = 100
@@ -431,6 +434,7 @@ describe("Planning — TicketGen embedded (v1.7, ADR-018)", () => {
     await waitFor(() => screen.getByRole("button", { name: "PO" }));
 
     fireEvent.click(screen.getByRole("button", { name: "PO" }));
+    fireEvent.click(screen.getByRole("button", { name: /New ticket/i }));
 
     await waitFor(() => {
       const ticketGen = screen.getByTestId("ticket-gen");

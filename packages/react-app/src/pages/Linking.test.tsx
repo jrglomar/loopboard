@@ -14,7 +14,7 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
   };
 });
 vi.mock("../lib/boards", () => ({ useBoards: vi.fn() }));
-vi.mock("../lib/linkClient", () => ({ getLinkedIssues: vi.fn() }));
+vi.mock("../lib/linkClient", () => ({ getLinkedIssues: vi.fn(), getIssueDescriptions: vi.fn() }));
 vi.mock("../lib/aiClient", () => ({ getAiStatus: vi.fn(), aiPlanDevTickets: vi.fn() }));
 
 import * as useJiraModule from "../hooks/useJira";
@@ -47,6 +47,10 @@ function setMocks() {
   // PO-1 already has DEV-5; PO-2 has none
   vi.mocked(linkClientModule.getLinkedIssues).mockResolvedValue({
     links: { "PO-1": [{ key: "DEV-5", summary: "x", status: "Done", url: "u" }], "PO-2": [] },
+  });
+  // v1.14: PO descriptions fed into the plan (PO-2 is the auto-selected, link-less one).
+  vi.mocked(linkClientModule.getIssueDescriptions).mockResolvedValue({
+    descriptions: { "PO-1": "PO-1 details", "PO-2": "As a user I want password reset\n\nAC: link expires in 1h" },
   });
   vi.mocked(aiClientModule.getAiStatus).mockResolvedValue({ enabled: false, provider: null, model: null });
 }
@@ -131,6 +135,50 @@ describe("Linking page (v1.11)", () => {
       expect(last.instructions).toContain("focus on the API layer");
     });
     expect(await screen.findByDisplayValue("v2 dev refined")).toBeTruthy();
+  });
+
+  it("v1.14: Generate fetches the PO description and passes it to the AI plan", async () => {
+    vi.mocked(aiClientModule.getAiStatus).mockResolvedValue({ enabled: true, provider: "github", model: "m" });
+    vi.mocked(aiClientModule.aiPlanDevTickets).mockResolvedValue({
+      assistantMessage: "planned", items: [{ poKey: "PO-2", devSummary: "dev", devDescription: "d" }],
+      provider: "github", model: "m",
+    });
+
+    render(<Linking />);
+    fireEvent.change(screen.getByRole("combobox", { name: /PO board sprint/i }), { target: { value: "200" } });
+    await screen.findByText(/→ DEV-5/);
+    await waitFor(() => expect((screen.getByRole("checkbox", { name: /Select PO-2/i }) as HTMLInputElement).checked).toBe(true));
+
+    fireEvent.click(screen.getByRole("button", { name: /Generate plan with AI/i }));
+
+    await waitFor(() => {
+      // descriptions were requested for the selected PO(s)
+      expect(vi.mocked(linkClientModule.getIssueDescriptions)).toHaveBeenCalledWith(["PO-2"]);
+      // and the PO description flowed into the AI plan's poStories
+      const calls = vi.mocked(aiClientModule.aiPlanDevTickets).mock.calls;
+      const sent = calls[calls.length - 1]![0].poStories;
+      expect(sent).toEqual([
+        expect.objectContaining({ key: "PO-2", summary: "Needs a dev task", description: expect.stringContaining("password reset") }),
+      ]);
+    });
+  });
+
+  it("v1.14.1: flags a PO that has no description in Jira (drafted from title only)", async () => {
+    // PO-2 (the auto-selected, link-less one) comes back with an empty description.
+    vi.mocked(linkClientModule.getIssueDescriptions).mockResolvedValue({
+      descriptions: { "PO-1": "PO-1 details", "PO-2": "" },
+    });
+
+    render(<Linking />);
+    fireEvent.change(screen.getByRole("combobox", { name: /PO board sprint/i }), { target: { value: "200" } });
+    await screen.findByText(/→ DEV-5/);
+    await waitFor(() => expect((screen.getByRole("checkbox", { name: /Select PO-2/i }) as HTMLInputElement).checked).toBe(true));
+
+    fireEvent.click(screen.getByRole("button", { name: /Build plan/i }));
+    await screen.findByText(/Plan — 1 Dev task/i);
+
+    // The plan surfaces that this PO has no description (so the user isn't confused).
+    expect(await screen.findByText(/PO has no description/i)).toBeTruthy();
   });
 
   it("v1.13 P0: 'Retry failed' re-runs only the failed rows", async () => {

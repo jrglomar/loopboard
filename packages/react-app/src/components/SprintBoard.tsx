@@ -27,6 +27,7 @@ import {
   type PaceStatus,
 } from "../lib/sprintMetrics";
 import { deriveInitials } from "../lib/huddleRegroup";
+import { formatPoints } from "../lib/format";
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -567,6 +568,8 @@ interface SprintHeaderProps {
   onAssigneeFilterChange: (assignee: string | null) => void;
   filteredTotal: number;
   unfilteredTotal: number;
+  /** v1.16: sum of story points across the filtered issues */
+  filteredPoints: number;
   /** v1.4: "New Sprint" button rendered by Dashboard into the controls zone */
   createSprintButton?: React.ReactNode;
 }
@@ -580,6 +583,7 @@ function SprintHeader({
   onAssigneeFilterChange,
   filteredTotal,
   unfilteredTotal,
+  filteredPoints,
   createSprintButton,
 }: SprintHeaderProps) {
   const { sprint, activeSprints, futureSprints } = data;
@@ -666,7 +670,8 @@ function SprintHeader({
             // a11y: aria-live="polite" so screen readers announce the filter result
             aria-live="polite"
           >
-            Showing {filteredTotal} of {unfilteredTotal} issues
+            Showing {filteredTotal} of {unfilteredTotal} issues ·{" "}
+            <span className="font-semibold text-foreground tabular-nums">{formatPoints(filteredPoints)} pts</span>
           </span>
         )}
       </div>
@@ -806,6 +811,7 @@ export function SprintBoard({
           onAssigneeFilterChange={onAssigneeFilterChange ?? (() => undefined)}
           filteredTotal={0}
           unfilteredTotal={0}
+          filteredPoints={0}
           createSprintButton={createSprintButton}
         />
         <div className="py-10 text-center text-muted-foreground">
@@ -851,6 +857,10 @@ export function SprintBoard({
   const filteredDone       = filterIssues(issuesByStatus.done);
 
   const filteredTotal    = filteredTodo.length + filteredInProgress.length + filteredCodeReview.length + filteredDone.length;
+  // v1.16: sum story points across the filtered issues (points "by filter")
+  const filteredPoints   = [filteredTodo, filteredInProgress, filteredCodeReview, filteredDone]
+    .flat()
+    .reduce((sum, i) => sum + (i.storyPoints ?? 0), 0);
   const unfilteredTotal  = issuesByStatus.todo.length + issuesByStatus.inprogress.length + issuesByStatus.codereview.length + issuesByStatus.done.length;
 
   // When showBlockedOnly is active, the "showing X of Y" line should appear
@@ -873,6 +883,7 @@ export function SprintBoard({
         }}
         filteredTotal={isAnyFilterActive ? showingTotal : unfilteredTotal}
         unfilteredTotal={unfilteredTotal}
+        filteredPoints={filteredPoints}
         createSprintButton={createSprintButton}
       />
 

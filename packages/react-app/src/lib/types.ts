@@ -328,6 +328,11 @@ export interface GetLinkedIssuesResponse {
   links: Record<string, LinkedIssue[]>;
 }
 
+/** get_issue_descriptions output (v1.14) — plain-text description keyed by the input key. */
+export interface GetIssueDescriptionsResponse {
+  descriptions: Record<string, string>;
+}
+
 /** POST /api/ai/plan-dev-tickets input. */
 export interface PlanDevTicketsRequest {
   poStories: Array<{ key: string; summary: string; description?: string }>;
@@ -347,6 +352,27 @@ export interface PlanDevTicketsResponse {
   items: PlanDevTicketItem[];
   provider: "anthropic" | "github";
   model: string;
+}
+
+// ── Huddle stores (CONTRACTS.md §4.21/§4.22 v1.16, ADR-027) ──────────────────
+
+/** A sprint impediment/blocker (manual store). */
+export interface Impediment {
+  id: string;
+  text: string;
+  ticketKey?: string;
+  createdAt: string;
+  resolved?: boolean;
+}
+
+/** A pending pull-request link (manual store). */
+export interface PullRequest {
+  id: string;
+  url: string;
+  title?: string;
+  ticketKey?: string;
+  status?: string;
+  addedAt: string;
 }
 
 // ── Assignment types (CONTRACTS.md §4.15 v1.7, ADR-018) ─────────────────────

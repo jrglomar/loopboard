@@ -682,6 +682,68 @@ export async function getIssue(ticketKey: string): Promise<{
   }
 }
 
+/** A workflow transition available from an issue's current status (v1.15, ADR-026). */
+export interface IssueTransition {
+  id: string;
+  name: string;
+  to: { name: string; category: "todo" | "inprogress" | "done" };
+}
+
+/**
+ * Fetch the transitions available from an issue's CURRENT status (v1.15, ADR-026).
+ * GET /rest/api/3/issue/{key}/transitions. 404 → UpstreamError.
+ */
+export async function getTransitions(ticketKey: string): Promise<IssueTransition[]> {
+  const client = getClient();
+  try {
+    const res = await client.get<{
+      transitions?: Array<{
+        id: string;
+        name: string;
+        to?: { name?: string; statusCategory?: { key?: string } };
+      }>;
+    }>(`/rest/api/3/issue/${ticketKey}/transitions`);
+    return (res.data.transitions ?? []).map((t) => ({
+      id: t.id,
+      name: t.name,
+      to: {
+        name: t.to?.name ?? "",
+        category: mapStatusCategory(t.to?.statusCategory?.key ?? ""),
+      },
+    }));
+  } catch (err) {
+    if (isAxiosError(err) && err.response?.status === 404) {
+      throw new UpstreamError(`Ticket ${ticketKey} not found`, 404);
+    }
+    throw mapAxiosError(err);
+  }
+}
+
+/**
+ * Apply a transition to an issue, then re-read its new status (v1.15, ADR-026).
+ * POST /rest/api/3/issue/{key}/transitions { transition: { id } }. 404 → UpstreamError.
+ */
+export async function transitionIssue(
+  ticketKey: string,
+  transitionId: string
+): Promise<{ ticketKey: string; status: string; statusCategory: "todo" | "inprogress" | "done" }> {
+  const client = getClient();
+  try {
+    await client.post(`/rest/api/3/issue/${ticketKey}/transitions`, {
+      transition: { id: transitionId },
+    });
+  } catch (err) {
+    if (isAxiosError(err) && err.response?.status === 404) {
+      throw new UpstreamError(`Ticket ${ticketKey} not found`, 404);
+    }
+    throw mapAxiosError(err);
+  }
+  // Re-read the issue to report the resulting status (a separate call so a read-back
+  // failure is distinct from the transition write itself).
+  const issue = await getIssue(ticketKey);
+  return { ticketKey, status: issue.status, statusCategory: issue.statusCategory };
+}
+
 export interface LinkedIssueRef {
   key: string;
   summary: string;

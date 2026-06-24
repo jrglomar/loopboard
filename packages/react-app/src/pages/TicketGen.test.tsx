@@ -31,6 +31,9 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
       po: { key: "PO-42", url: "https://jira.example.com/browse/PO-42", board: "PO" as const },
       dev: { key: "DEV-99", url: "https://jira.example.com/browse/DEV-99", board: "DEV" as const },
     }),
+    createPoTicket: vi.fn().mockResolvedValue({
+      key: "PO-42", url: "https://jira.example.com/browse/PO-42", board: "PO" as const,
+    }),
     useSprintList: vi.fn().mockReturnValue({
       // v1.4: 1 active + 1 future sprint for target sprint selector tests
       data: {
@@ -52,6 +55,12 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
 
 // ── Import boards module for mock reset ───────────────────────────────────────
 import * as boardsModule from "../lib/boards";
+
+// v1.17 (ADR-028): TicketGen is PO-first by default. Pair tests opt in to the Dev task
+// via the "Also create a linked Dev task" checkbox (present in form + AI modes).
+function enableDevTask() {
+  fireEvent.click(screen.getByRole("checkbox", { name: /Also create a linked Dev task/i }));
+}
 
 describe("TicketGen", () => {
   beforeEach(() => {
@@ -83,6 +92,31 @@ describe("TicketGen", () => {
     });
   });
 
+  it("v1.17 (ADR-028): PO-first by default — creates only the PO story (no Dev pane/task)", async () => {
+    const { createPoTicket, createTicketPair } = await import("../hooks/useJira");
+    const user = userEvent.setup();
+    render(<TicketGen />);
+
+    await waitFor(() => screen.getByLabelText(/feature description/i));
+    await user.type(screen.getByLabelText(/feature description/i), "PO only feature");
+    // NOTE: do NOT enable "Also create a linked Dev task"
+    await user.click(screen.getByRole("button", { name: /generate drafts/i }));
+
+    // Only the PO Story pane shows
+    await waitFor(() => expect(screen.getByText("PO Story")).toBeTruthy());
+    expect(screen.queryByText("Dev Task")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /create in jira/i }));
+
+    await waitFor(() => {
+      expect(vi.mocked(createPoTicket)).toHaveBeenCalledOnce();
+      expect(vi.mocked(createTicketPair)).not.toHaveBeenCalled();
+      expect(screen.getByText(/PO: PO-42/)).toBeTruthy();
+    });
+    // The success heading is singular and there is no Dev link
+    expect(screen.queryByText(/DEV:/)).toBeNull();
+  });
+
   it("shows draft previews after entering description and clicking generate", async () => {
     const user = userEvent.setup();
     render(<TicketGen />);
@@ -90,6 +124,7 @@ describe("TicketGen", () => {
     await waitFor(() => screen.getByLabelText(/feature description/i));
     const textarea = screen.getByLabelText(/feature description/i);
     await user.type(textarea, "Password reset via email");
+    enableDevTask();
 
     const generateBtn = screen.getByRole("button", { name: /generate drafts/i });
     await user.click(generateBtn);
@@ -108,6 +143,7 @@ describe("TicketGen", () => {
     await waitFor(() => screen.getByLabelText(/feature description/i));
     const textarea = screen.getByLabelText(/feature description/i);
     await user.type(textarea, "Single sign-on via GitHub");
+    enableDevTask();
 
     await user.click(screen.getByRole("button", { name: /generate drafts/i }));
 
@@ -127,6 +163,7 @@ describe("TicketGen", () => {
 
     await waitFor(() => screen.getByLabelText(/feature description/i));
     await user.type(screen.getByLabelText(/feature description/i), "Feature X");
+    enableDevTask();
     await user.click(screen.getByRole("button", { name: /generate drafts/i }));
 
     await waitFor(() => {
@@ -140,6 +177,7 @@ describe("TicketGen", () => {
 
     await waitFor(() => screen.getByLabelText(/feature description/i));
     await user.type(screen.getByLabelText(/feature description/i), "Feature X");
+    enableDevTask();
     await user.click(screen.getByRole("button", { name: /generate drafts/i }));
 
     // Find the "Back" button specifically (not the dismiss banner button)
@@ -158,6 +196,7 @@ describe("TicketGen", () => {
 
     await waitFor(() => screen.getByLabelText(/feature description/i));
     await user.type(screen.getByLabelText(/feature description/i), "Feature Z");
+    enableDevTask();
     await user.click(screen.getByRole("button", { name: /generate drafts/i }));
 
     await waitFor(() => screen.getByRole("button", { name: /create in jira/i }));
@@ -175,6 +214,7 @@ describe("TicketGen", () => {
 
     await waitFor(() => screen.getByLabelText(/feature description/i));
     await user.type(screen.getByLabelText(/feature description/i), "Feature Z");
+    enableDevTask();
     await user.click(screen.getByRole("button", { name: /generate drafts/i }));
     await waitFor(() => screen.getByRole("button", { name: /create in jira/i }));
     await user.click(screen.getByRole("button", { name: /create in jira/i }));
@@ -191,6 +231,7 @@ describe("TicketGen", () => {
 
     await waitFor(() => screen.getByLabelText(/feature description/i));
     await user.type(screen.getByLabelText(/feature description/i), "Feature Z");
+    enableDevTask();
     await user.click(screen.getByRole("button", { name: /generate drafts/i }));
     await waitFor(() => screen.getByRole("button", { name: /create in jira/i }));
     await user.click(screen.getByRole("button", { name: /create in jira/i }));
@@ -232,6 +273,7 @@ describe("TicketGen", () => {
     // Type and send a message
     const aiInput = screen.getByLabelText(/describe the feature/i);
     await user.type(aiInput, "Add dark mode");
+    enableDevTask();
     await user.click(screen.getByRole("button", { name: /send/i }));
 
     // Should show assistant bubble + draft cards
@@ -449,6 +491,7 @@ describe("TicketGen", () => {
 
     // Fill and generate
     await user.type(screen.getByLabelText(/feature description/i), "Feature X");
+    enableDevTask();
     await user.click(screen.getByRole("button", { name: /generate drafts/i }));
 
     await waitFor(() => screen.getByRole("button", { name: /create in jira/i }));
@@ -478,6 +521,7 @@ describe("TicketGen", () => {
     fireEvent.change(screen.getByRole("combobox", { name: /add to sprint/i }), { target: { value: "100" } });
 
     await user.type(screen.getByLabelText(/feature description/i), "Feature Z");
+    enableDevTask();
     await user.click(screen.getByRole("button", { name: /generate drafts/i }));
     await waitFor(() => screen.getByRole("button", { name: /create in jira/i }));
     await user.click(screen.getByRole("button", { name: /create in jira/i }));
@@ -510,6 +554,7 @@ describe("TicketGen", () => {
     fireEvent.change(screen.getByRole("combobox", { name: /add to sprint/i }), { target: { value: "55" } });
 
     await user.type(screen.getByLabelText(/feature description/i), "Feature with warning");
+    enableDevTask();
     await user.click(screen.getByRole("button", { name: /generate drafts/i }));
     await waitFor(() => screen.getByRole("button", { name: /create in jira/i }));
     await user.click(screen.getByRole("button", { name: /create in jira/i }));
@@ -531,6 +576,7 @@ describe("TicketGen", () => {
     // Default: "Backlog / no sprint" — no change to select
 
     await user.type(screen.getByLabelText(/feature description/i), "Feature Y");
+    enableDevTask();
     await user.click(screen.getByRole("button", { name: /generate drafts/i }));
     await waitFor(() => screen.getByRole("button", { name: /create in jira/i }));
     await user.click(screen.getByRole("button", { name: /create in jira/i }));
@@ -554,6 +600,7 @@ describe("TicketGen", () => {
 
     render(<TicketGen />);
     await waitFor(() => screen.getByRole("button", { name: /generate drafts/i }));
+    enableDevTask();
 
     // Two separate selects for PO and Dev
     const poSelect = screen.getByRole("combobox", { name: /po story sprint/i });
@@ -577,6 +624,7 @@ describe("TicketGen", () => {
     render(<TicketGen />);
 
     await waitFor(() => screen.getByLabelText(/feature description/i));
+    enableDevTask();
 
     // Select PO sprint (Sprint 7 = id 55)
     const poSelect = screen.getByRole("combobox", { name: /po story sprint/i });
@@ -612,6 +660,7 @@ describe("TicketGen", () => {
     render(<TicketGen />);
 
     await waitFor(() => screen.getByLabelText(/feature description/i));
+    enableDevTask();
 
     const poSelect = screen.getByRole("combobox", { name: /po story sprint/i });
     fireEvent.change(poSelect, { target: { value: "55" } });

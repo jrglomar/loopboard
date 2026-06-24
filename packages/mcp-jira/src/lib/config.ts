@@ -16,6 +16,12 @@ export const DEFAULT_LEAVES_FILE = path.join(_packageDir, ".loopboard-leaves.jso
 /** Default path for the team roster JSON file — inside the mcp-jira package dir. */
 export const DEFAULT_TEAM_FILE = path.join(_packageDir, ".loopboard-team.json");
 
+/** Default path for the impediments JSON file — inside the mcp-jira package dir (v1.16). */
+export const DEFAULT_IMPEDIMENTS_FILE = path.join(_packageDir, ".loopboard-impediments.json");
+
+/** Default path for the pull-requests JSON file — inside the mcp-jira package dir (v1.16). */
+export const DEFAULT_PRS_FILE = path.join(_packageDir, ".loopboard-prs.json");
+
 // Config schema — validated lazily on first call to getConfig().
 // All env reads happen inside getConfig(), never at module-import time,
 // so tool modules can be imported in tests without a .env file.
@@ -38,6 +44,9 @@ const configSchema = z.object({
   JIRA_LEAVES_FILE: z.string().default(""),
   // v1.8: optional team roster file path; default resolved from package dir above.
   JIRA_TEAM_FILE: z.string().default(""),
+  // v1.16: optional impediments + pull-requests store paths (Huddle daily visibility).
+  JIRA_IMPEDIMENTS_FILE: z.string().default(""),
+  JIRA_PRS_FILE: z.string().default(""),
   MCP_JIRA_HTTP_PORT: z.coerce.number().default(4001),
   // AI drafting — all optional; startup does NOT fail when these are absent.
   AI_PROVIDER: z.string().default(""),
@@ -108,6 +117,18 @@ export function getLeavesFilePath(): string {
 export function getTeamFilePath(): string {
   const cfg = getConfig();
   return cfg.JIRA_TEAM_FILE || DEFAULT_TEAM_FILE;
+}
+
+/** Resolved impediments file path (v1.16) — JIRA_IMPEDIMENTS_FILE or the default. */
+export function getImpedimentsFilePath(): string {
+  const cfg = getConfig();
+  return cfg.JIRA_IMPEDIMENTS_FILE || DEFAULT_IMPEDIMENTS_FILE;
+}
+
+/** Resolved pull-requests file path (v1.16) — JIRA_PRS_FILE or the default. */
+export function getPrsFilePath(): string {
+  const cfg = getConfig();
+  return cfg.JIRA_PRS_FILE || DEFAULT_PRS_FILE;
 }
 
 /**

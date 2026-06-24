@@ -12,7 +12,11 @@
 //         → leaves slot → assignment slot
 
 import { useState, useEffect, useId, useCallback } from "react";
-import { LayoutGrid, CalendarDays } from "lucide-react";
+import { LayoutGrid, CalendarDays, Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle, SheetDescription,
+} from "@/components/ui/sheet";
 import { BoardToggle } from "../components/BoardToggle";
 import { CreateSprintDialog } from "../components/CreateSprintDialog";
 import { LeavesPlotterCard } from "../components/LeavesPlotterCard";
@@ -199,6 +203,9 @@ export function Planning({
     setTeamRevision((r) => r + 1);
   }, []);
 
+  // v1.17 (ADR-028): the ticket generator now lives in a drawer (PO-first).
+  const [ticketDrawerOpen, setTicketDrawerOpen] = useState(false);
+
   // ── New Sprint created ────────────────────────────────────────────────────
 
   const handleSprintCreated = (newSprint: SprintRef) => {
@@ -366,16 +373,26 @@ export function Planning({
         TicketGen also works standalone.
       */}
       <section aria-label="Ticket generation" className="min-w-0">
-        <div className="flex items-center gap-2 mb-3">
-          <h3 className="text-base font-semibold text-foreground">Draft Tickets</h3>
-          <span className="text-xs text-muted-foreground">
-            — creates a linked PO story + Dev task
-          </span>
-        </div>
-        <TicketGen
-          initialPoSprintId={ticketGenInitialPoSprintId}
-          initialDevSprintId={ticketGenInitialDevSprintId}
-        />
+        {/* v1.17 (ADR-028): PO-first ticket generator in a drawer */}
+        <Sheet open={ticketDrawerOpen} onOpenChange={setTicketDrawerOpen}>
+          <SheetTrigger asChild>
+            <Button type="button" variant="outline">
+              <Plus className="h-4 w-4 mr-1.5" aria-hidden="true" /> New ticket
+            </Button>
+          </SheetTrigger>
+          <SheetContent>
+            <SheetHeader>
+              <SheetTitle>New ticket</SheetTitle>
+              <SheetDescription>
+                Create a PO story (optionally with a linked Dev task). Bulk PO→Dev lives on the Linking tab.
+              </SheetDescription>
+            </SheetHeader>
+            <TicketGen
+              initialPoSprintId={ticketGenInitialPoSprintId}
+              initialDevSprintId={ticketGenInitialDevSprintId}
+            />
+          </SheetContent>
+        </Sheet>
       </section>
 
       {/* (v1.11, ADR-022) — "Dev ticket for an existing PO story" moved to the
@@ -409,6 +426,7 @@ export function Planning({
           sprintId={selectedSprintId}
           projectKey={selectedProjectKey}
           teamRevision={teamRevision}
+          sprints={[...activeSprints, ...futureSprints]}
         />
       </section>
     </div>

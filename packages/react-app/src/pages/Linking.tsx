@@ -22,7 +22,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBoards } from "../lib/boards";
 import { useActiveSprint, useSprintList, createLinkedDevTicket } from "../hooks/useJira";
-import { getLinkedIssues } from "../lib/linkClient";
+import { getLinkedIssues, getIssueDescriptions } from "../lib/linkClient";
 import { getAiStatus, aiPlanDevTickets } from "../lib/aiClient";
 import { RefineDraftControl } from "../components/RefineDraftControl";
 import { buildDraftPair } from "../lib/ticketTemplates";
@@ -54,6 +54,13 @@ function flattenIssues(data: ReturnType<typeof useActiveSprint>["data"]): IssueS
 const selectCls =
   "h-9 w-full max-w-xs text-xs px-2 border border-border rounded-md bg-background text-foreground font-[inherit] cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 transition-colors hover:border-ring disabled:opacity-50 disabled:cursor-not-allowed";
 
+// v1.14 (ADR-025): cap each PO description fed to the AI so the prompt stays bounded.
+const PO_DESC_CAP = 4000;
+function capDesc(text: string): string {
+  const t = (text ?? "").trim();
+  return t.length <= PO_DESC_CAP ? t : t.slice(0, PO_DESC_CAP) + "\n… (truncated)";
+}
+
 export function Linking() {
   const formId = useId();
   const { boards, loading: boardsLoading } = useBoards();
@@ -74,6 +81,8 @@ export function Linking() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [phase, setPhase] = useState<Phase>("select");
   const [plan, setPlan] = useState<PlanDevTicketItem[]>([]);
+  // v1.14: fetched PO descriptions (by key), reused by Generate + per-draft Regenerate.
+  const [descMap, setDescMap] = useState<Record<string, string>>({});
   const [aiNote, setAiNote] = useState<string | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -131,16 +140,37 @@ export function Linking() {
     setPlanError(null);
     setAiNote(null);
 
+    // v1.14 (ADR-025): pull each selected PO's own description so the Dev task is drafted
+    // from real acceptance criteria/scope, not just the one-line summary. Non-fatal.
+    let descByKey: Record<string, string> = {};
+    try {
+      const res = await getIssueDescriptions(chosen.map((t) => t.key));
+      descByKey = res.descriptions;
+    } catch {
+      descByKey = {};
+    }
+    setDescMap(descByKey);
+    const descOf = (key: string) => capDesc(descByKey[key] ?? "");
+
     const fallback = (): PlanDevTicketItem[] =>
       chosen.map((t) => {
         const d = buildDraftPair(t.summary).dev;
-        return { poKey: t.key, devSummary: d.summary, devDescription: d.description };
+        const src = descOf(t.key);
+        const devDescription = src
+          ? `## Source PO story (${t.key})\n\n${src}\n\n${d.description}`
+          : d.description;
+        return { poKey: t.key, devSummary: d.summary, devDescription };
       });
 
     try {
       if (aiStatus.enabled) {
         const res = await aiPlanDevTickets({
-          poStories: chosen.map((t) => ({ key: t.key, summary: t.summary })),
+          poStories: chosen.map((t) => {
+            const description = descOf(t.key);
+            return description
+              ? { key: t.key, summary: t.summary, description }
+              : { key: t.key, summary: t.summary };
+          }),
         });
         // Reconcile to the selection by poKey; fall back per-PO for any omission.
         const byKey = new Map(res.items.map((i) => [i.poKey, i]));
@@ -189,8 +219,13 @@ export function Linking() {
         `Current draft summary: "${current.devSummary}". ` +
         `Current draft description:\n${current.devDescription}\n\n` +
         `Rewrite the Dev task to address the comment, keeping what still applies.`;
+      const description = capDesc(descMap[po.key] ?? "");
       const res = await aiPlanDevTickets({
-        poStories: [{ key: po.key, summary: po.summary }],
+        poStories: [
+          description
+            ? { key: po.key, summary: po.summary, description }
+            : { key: po.key, summary: po.summary },
+        ],
         instructions,
       });
       const item = res.items.find((i) => i.poKey === poKey) ?? res.items[0];
@@ -261,6 +296,7 @@ export function Linking() {
   function reset() {
     setPhase("select");
     setPlan([]);
+    setDescMap({});
     setResults([]);
     setAiNote(null);
     setPlanError(null);
@@ -424,7 +460,18 @@ export function Linking() {
           <CardContent className="space-y-4">
             {plan.map((item) => (
               <div key={item.poKey} className="rounded-md border border-border bg-muted/20 p-3 space-y-2">
-                <p className="text-xs text-muted-foreground">New Dev task → linked to <span className="font-mono font-semibold text-foreground">{item.poKey}</span></p>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <p className="text-xs text-muted-foreground">New Dev task → linked to <span className="font-mono font-semibold text-foreground">{item.poKey}</span></p>
+                  {(descMap[item.poKey] ?? "").trim().length > 0 ? (
+                    <Badge variant="outline" className="text-[0.625rem] border-success-border text-success bg-success-bg">
+                      drafted from PO description
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[0.625rem] text-warning-foreground border-warning-border gap-1">
+                      <AlertCircle className="h-3 w-3" aria-hidden="true" /> PO has no description — drafted from title
+                    </Badge>
+                  )}
+                </div>
                 <div>
                   <Label htmlFor={`${formId}-ps-${item.poKey}`} className="text-xs font-semibold mb-1 block">Summary</Label>
                   <Input id={`${formId}-ps-${item.poKey}`} value={item.devSummary} maxLength={255}

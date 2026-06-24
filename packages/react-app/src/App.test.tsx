@@ -36,7 +36,7 @@ afterEach(() => {
 describe("App — tab nav (v1.7, ADR-018)", () => {
   it("renders Dashboard, Planning, and Reports tabs", () => {
     render(<App />);
-    expect(screen.getByRole("tab", { name: "Dashboard" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Huddle" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Planning" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Reports" })).toBeTruthy();
   });
@@ -55,7 +55,7 @@ describe("App — tab nav (v1.7, ADR-018)", () => {
 
   it("Dashboard tab has aria-pressed=true and aria-selected=true by default", () => {
     render(<App />);
-    const dashTab = screen.getByRole("tab", { name: "Dashboard" });
+    const dashTab = screen.getByRole("tab", { name: "Huddle" });
     expect(dashTab.getAttribute("aria-pressed")).toBe("true");
     expect(dashTab.getAttribute("aria-selected")).toBe("true");
     expect(dashTab.getAttribute("aria-current")).toBe("page");
@@ -95,7 +95,7 @@ describe("App — tab nav (v1.7, ADR-018)", () => {
     await waitFor(() => {
       expect(screen.getByRole("tab", { name: "Planning" }).getAttribute("aria-pressed")).toBe("true");
     });
-    expect(screen.getByRole("tab", { name: "Dashboard" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("tab", { name: "Huddle" }).getAttribute("aria-pressed")).toBe("false");
     expect(screen.getByRole("tab", { name: "Reports" }).getAttribute("aria-pressed")).toBe("false");
   });
 

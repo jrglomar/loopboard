@@ -17,7 +17,15 @@ import { getRecentAssigneesTool } from "./getRecentAssignees.js";
 import { getTeamMembersTool } from "./getTeamMembers.js";
 import { setTeamMembersTool } from "./setTeamMembers.js";
 import { getLinkedIssuesTool } from "./getLinkedIssues.js";
+import { getIssueDescriptionsTool } from "./getIssueDescriptions.js";
 import { setSprintGoalTool } from "./setSprintGoal.js";
+import { getTransitionsTool } from "./getTransitions.js";
+import { transitionIssueTool } from "./transitionIssue.js";
+import { moveIssueToSprintTool } from "./moveIssueToSprint.js";
+import { getImpedimentsTool } from "./getImpediments.js";
+import { setImpedimentsTool } from "./setImpediments.js";
+import { getPullRequestsTool } from "./getPullRequests.js";
+import { setPullRequestsTool } from "./setPullRequests.js";
 
 export const tools: ToolDef[] = [
   createPoTicket,
@@ -38,5 +46,13 @@ export const tools: ToolDef[] = [
   getTeamMembersTool,
   setTeamMembersTool,
   getLinkedIssuesTool,
+  getIssueDescriptionsTool,
   setSprintGoalTool,
+  getTransitionsTool,
+  transitionIssueTool,
+  moveIssueToSprintTool,
+  getImpedimentsTool,
+  setImpedimentsTool,
+  getPullRequestsTool,
+  setPullRequestsTool,
 ];

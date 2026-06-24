@@ -93,8 +93,19 @@ const EXPECTED_JIRA_TOOLS = [
   "set_team_members",
   // v1.11 — existing PO→Dev links (Linking page)
   "get_linked_issues",
+  // v1.14 — PO descriptions for Dev drafting (Linking page)
+  "get_issue_descriptions",
   // v1.13 — sprint goal write (Scrum-Master review)
   "set_sprint_goal",
+  // v1.15 — Planning ticket actions (status transition + move sprint)
+  "get_transitions",
+  "transition_issue",
+  "move_issue_to_sprint",
+  // v1.16 — Huddle stores (impediments + pending PRs)
+  "get_impediments",
+  "set_impediments",
+  "get_pull_requests",
+  "set_pull_requests",
 ];
 
 const EXPECTED_GITHUB_TOOLS = [
@@ -418,6 +429,36 @@ if (!jiraReady) {
     }
   } catch (e) {
     fail("[JIRA] POST set_sprint_goal {} → 400 VALIDATION", String(e));
+  }
+
+  // JIRA v1.14: get_issue_descriptions {} → 400 VALIDATION (keys required) — never reaches Jira (no real read)
+  try {
+    const { status, body } = await httpPost(`http://127.0.0.1:${JIRA_PORT}/api/tools/get_issue_descriptions`, {});
+    if (status === 400 && body.ok === false && body.error?.code === "VALIDATION") {
+      pass("[JIRA] POST get_issue_descriptions {} → 400 VALIDATION (keys required)");
+    } else {
+      fail("[JIRA] POST get_issue_descriptions {} → 400 VALIDATION", `status=${status} code=${body.error?.code}`);
+    }
+  } catch (e) {
+    fail("[JIRA] POST get_issue_descriptions {} → 400 VALIDATION", String(e));
+  }
+
+  // JIRA v1.15: ticket-action tools reject empty input (no real Jira writes)
+  // JIRA v1.16: Huddle store tools reject empty input (validation precedes any file write)
+  for (const tool of [
+    "get_transitions", "transition_issue", "move_issue_to_sprint",
+    "get_impediments", "set_impediments", "get_pull_requests", "set_pull_requests",
+  ]) {
+    try {
+      const { status, body } = await httpPost(`http://127.0.0.1:${JIRA_PORT}/api/tools/${tool}`, {});
+      if (status === 400 && body.ok === false && body.error?.code === "VALIDATION") {
+        pass(`[JIRA] POST ${tool} {} → 400 VALIDATION (no real write)`);
+      } else {
+        fail(`[JIRA] POST ${tool} {} → 400 VALIDATION`, `status=${status} code=${body.error?.code}`);
+      }
+    } catch (e) {
+      fail(`[JIRA] POST ${tool} {} → 400 VALIDATION`, String(e));
+    }
   }
 
   // JIRA v1.8: team roster store round-trip (temp file; no Jira call) + clear

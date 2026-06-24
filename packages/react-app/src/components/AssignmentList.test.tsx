@@ -22,8 +22,20 @@ vi.mock("../lib/assignClient", () => ({
   assignIssue: vi.fn(),
 }));
 
+vi.mock("../lib/ticketActionsClient", () => ({
+  getTransitions: vi.fn(),
+  transitionIssue: vi.fn(),
+  moveIssueToSprint: vi.fn(),
+}));
+
 import * as useJiraModule from "../hooks/useJira";
 import * as assignClientModule from "../lib/assignClient";
+import * as ticketActionsModule from "../lib/ticketActionsClient";
+
+const mkSprint = (id: number, name: string) => ({
+  id, name, state: "future" as const,
+  startDate: null, endDate: null, completeDate: null, goal: null, boardId: 10,
+});
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -106,6 +118,18 @@ function setDefaultMocks() {
     ticketKey: "DEV-10",
     accountId: "acc-1",
     assigned: true,
+  });
+
+  // v1.15 ticket-action defaults
+  vi.mocked(ticketActionsModule.getTransitions).mockResolvedValue({
+    ticketKey: "DEV-10",
+    transitions: [{ id: "21", name: "Start Progress", to: { name: "In Progress", category: "inprogress" } }],
+  });
+  vi.mocked(ticketActionsModule.transitionIssue).mockResolvedValue({
+    ticketKey: "DEV-10", status: "In Progress", statusCategory: "inprogress",
+  });
+  vi.mocked(ticketActionsModule.moveIssueToSprint).mockResolvedValue({
+    ticketKey: "DEV-10", sprintId: 200,
   });
 }
 
@@ -465,5 +489,84 @@ describe("AssignmentList — bridge-down error (v1.8)", () => {
     expect(screen.getByText(/Jira bridge is offline/i)).toBeTruthy();
     expect(screen.getByText(/dev:jira:http/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: /Retry/i })).toBeTruthy();
+  });
+});
+
+// ── Tests: v1.15 (ADR-026) — assignee filter + points, status, move ────────────
+
+describe("AssignmentList — v1.15 assignee filter + points summary", () => {
+  it("filters the ticket list by assignee and updates the points total", async () => {
+    render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" />);
+    await waitFor(() => screen.getByText("Implement feature X"));
+
+    // Unfiltered: 2 tickets, 5 + 3 = 8 pts
+    expect(screen.getByText(/8 pts/i)).toBeTruthy();
+
+    // Filter to Alice (only DEV-11, 3 pts)
+    fireEvent.change(screen.getByRole("combobox", { name: /Filter tickets by assignee/i }), {
+      target: { value: "Alice" },
+    });
+
+    expect(screen.queryByText("Implement feature X")).toBeNull(); // DEV-10 hidden
+    expect(screen.getByText("Fix bug Y")).toBeTruthy(); // DEV-11 shown
+    expect(screen.getByText(/1 of 2 tickets/i)).toBeTruthy();
+    expect(screen.getByText(/3 pts/i)).toBeTruthy();
+  });
+});
+
+describe("AssignmentList — v1.15 status change", () => {
+  it("lazy-loads transitions on 'Change' and applies the chosen one", async () => {
+    const runSpy = vi.fn();
+    vi.mocked(useJiraModule.useActiveSprint).mockReturnValue({
+      data: DEFAULT_SPRINT_DATA, loading: false, error: null, run: runSpy,
+    });
+
+    render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" />);
+    await waitFor(() => screen.getByText("Implement feature X"));
+
+    fireEvent.click(screen.getByRole("button", { name: /Change status for DEV-10/i }));
+
+    // Transitions fetched + the target status offered
+    await waitFor(() => expect(vi.mocked(ticketActionsModule.getTransitions)).toHaveBeenCalledWith("DEV-10"));
+    const statusSelect = await screen.findByRole("combobox", { name: /New status for DEV-10/i });
+    await waitFor(() =>
+      expect(Array.from((statusSelect as HTMLSelectElement).options).some((o) => o.text === "In Progress")).toBe(true)
+    );
+
+    fireEvent.change(statusSelect, { target: { value: "21" } });
+
+    await waitFor(() =>
+      expect(vi.mocked(ticketActionsModule.transitionIssue)).toHaveBeenCalledWith("DEV-10", "21")
+    );
+    // Refetches the sprint after the change
+    await waitFor(() => expect(runSpy).toHaveBeenCalled());
+  });
+});
+
+describe("AssignmentList — v1.15 move to sprint", () => {
+  it("calls move_issue_to_sprint with the chosen sprint", async () => {
+    const runSpy = vi.fn();
+    vi.mocked(useJiraModule.useActiveSprint).mockReturnValue({
+      data: DEFAULT_SPRINT_DATA, loading: false, error: null, run: runSpy,
+    });
+
+    render(
+      <AssignmentList
+        boardId={10}
+        sprintId={100}
+        projectKey="DEV"
+        sprints={[mkSprint(200, "Sprint 9"), mkSprint(201, "Sprint 10")]}
+      />
+    );
+    await waitFor(() => screen.getByText("Implement feature X"));
+
+    fireEvent.change(screen.getByRole("combobox", { name: /Move DEV-10 to a sprint/i }), {
+      target: { value: "200" },
+    });
+
+    await waitFor(() =>
+      expect(vi.mocked(ticketActionsModule.moveIssueToSprint)).toHaveBeenCalledWith("DEV-10", 200)
+    );
+    await waitFor(() => expect(runSpy).toHaveBeenCalled());
   });
 });

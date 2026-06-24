@@ -1,6 +1,6 @@
 # Integration Contracts
 
-**Status: FINAL — AUTHORITATIVE (v1.13.1)**  
+**Status: FINAL — AUTHORITATIVE (v1.17)**  
 Builder agents implement exactly what this document says. If something here is
 ambiguous, file a note to the Architect agent; do NOT invent new surface area or
 prefer the spec over this document — this document supersedes the spec on all
@@ -739,6 +739,82 @@ Used by the Linking page to show whether a PO story already has a linked Dev tic
 - New jiraClient helper `getLinkedIssues(key)` → all linked issues of one key (the tool filters).
 - Registered MCP tool (stdio + `/api/tools` + bridge). Tests mock the Jira client; keyless.
 
+### 4.18 `get_issue_descriptions` (v1.14 — PO description context for Dev drafting; ADR-025)
+
+Used by the Linking page so the AI plan (and the deterministic fallback) drafts each Dev task
+from the **PO story's own description**, not just its one-line summary.
+
+- **Input:** `{ keys: string[] (1..50) }` — the PO story keys to fetch descriptions for.
+- **Behavior:** for each key, fetch the issue and flatten its description to plain text
+  (reuses `getIssue` → `adfToText(fields.description)`). Fetches run in parallel. A missing/
+  unreadable key contributes `""` (non-fatal — never throws for one bad key), so a bulk caller
+  stays resilient. Read-only; no Jira writes.
+- **Output:** `{ descriptions: Record<string, string> }` keyed by the input key (every input
+  key present; `""` when the issue has no description or could not be read).
+- Reuses jiraClient `getIssue` (already `adfToText`-flattens the description); no new client surface.
+- Registered MCP tool (stdio + `/api/tools` + bridge). Tests mock the Jira client; keyless.
+- The Linking page caps each description it sends to the AI (`plan-dev-tickets`) at ~4000 chars
+  to bound prompt size; `plan-dev-tickets` already accepts `poStories[].description?` (v1.11).
+- **`adfToText` fidelity (v1.14.1):** the flattener preserves block structure — bullet/ordered
+  list items each on their own line with a `- `/`N. ` marker (nested lists indented), `hardBreak`
+  → newline, and inline `mention`/`emoji`/`inlineCard` text included (was: list items concatenated
+  into a run-on, hardBreaks dropped — which garbled or emptied real PO descriptions). Many PO
+  stories have a genuinely empty `description` (Jira returns `null`); those return `""` and the
+  Linking plan flags the row as "PO has no description — drafted from title".
+
+### 4.19 `get_transitions` / `transition_issue` (v1.15 — change a ticket's status; ADR-026)
+
+Used by the Planning ticket list to move a story through its workflow (e.g. To Do → In Progress).
+Jira status changes go through **transitions** (not a direct field write), and the available
+transitions depend on the issue's current status + workflow, so they are fetched per issue.
+
+- **`get_transitions`** — **Input:** `{ ticketKey: string }`. **Behavior:**
+  `GET /rest/api/3/issue/{key}/transitions` → the transitions available from the issue's current
+  status. **Output:** `{ ticketKey, transitions: Array<{ id: string; name: string; to: { name: string; category: "todo"|"inprogress"|"done" } }> }`. 404 → UPSTREAM. Read-only.
+- **`transition_issue`** (WRITE) — **Input:** `{ ticketKey: string, transitionId: string }`.
+  **Behavior:** `POST /rest/api/3/issue/{key}/transitions` with `{ transition: { id } }`; on success
+  re-reads the issue and returns its new status. **Output:** `{ ticketKey, status: string, statusCategory: "todo"|"inprogress"|"done" }`. 404 → UPSTREAM; an invalid transition id → VALIDATION/UPSTREAM.
+- New jiraClient helpers `getTransitions(ticketKey)` + `transitionIssue(ticketKey, transitionId)`.
+- Registered MCP tools (stdio + `/api/tools` + bridge). Tests mock the Jira client; keyless.
+
+### 4.20 `move_issue_to_sprint` (v1.15 — move a ticket to another sprint; ADR-026)
+
+Used by the Planning ticket list to move a ticket from its current sprint to a chosen active/future
+sprint on the same board.
+
+- **Input:** `{ ticketKey: string, sprintId: number }`.
+- **Behavior:** reuses `addIssuesToSprint(sprintId, [ticketKey])`
+  (`POST /rest/agile/1.0/sprint/{id}/issue { issues: [key] }`) — adding an issue to a sprint moves
+  it out of any prior sprint. 404 → UPSTREAM. Real write.
+- **Output:** `{ ticketKey, sprintId }`.
+- Registered MCP tool (stdio + `/api/tools` + bridge). Tests mock the Jira client; keyless.
+
+### 4.21 `get_impediments` / `set_impediments` (v1.16 — Huddle blockers store; ADR-027)
+
+A manual, per-sprint list of impediments/blockers for daily Huddle visibility. Persisted to a
+bridge-side JSON store (mirrors the leaves/team stores) — NOT a Jira object.
+
+- **`get_impediments`** — **Input:** `{ sprintId: number }`. **Output:**
+  `{ sprintId, impediments: Impediment[] }` (`[]` when none).
+- **`set_impediments`** (full-replace) — **Input:** `{ sprintId: number, impediments: Array<{ id?: string; text: string; ticketKey?: string; createdAt?: string; resolved?: boolean }> }` (max 200).
+  The tool fills `id` (uuid) and `createdAt` (now) when omitted. **Output:** `{ sprintId, impediments: Impediment[] }`.
+- `Impediment = { id: string; text: string; ticketKey?: string; createdAt: string; resolved?: boolean }`.
+- Store path from `JIRA_IMPEDIMENTS_FILE` (default `<mcp-jira>/.loopboard-impediments.json`, git-ignored).
+- Registered MCP tools. Tests use a temp file; keyless/offline.
+
+### 4.22 `get_pull_requests` / `set_pull_requests` (v1.16 — Huddle code-review store; ADR-027)
+
+A manual, per-sprint list of pending PR links for daily Huddle code-review visibility. Same
+bridge-side JSON store pattern.
+
+- **`get_pull_requests`** — **Input:** `{ sprintId: number }`. **Output:**
+  `{ sprintId, pullRequests: PullRequest[] }` (`[]` when none).
+- **`set_pull_requests`** (full-replace) — **Input:** `{ sprintId: number, pullRequests: Array<{ id?: string; url: string; title?: string; ticketKey?: string; status?: string; addedAt?: string }> }` (max 200).
+  The tool fills `id` (uuid) and `addedAt` (now) when omitted. **Output:** `{ sprintId, pullRequests: PullRequest[] }`.
+- `PullRequest = { id: string; url: string; title?: string; ticketKey?: string; status?: string; addedAt: string }`.
+- Store path from `JIRA_PRS_FILE` (default `<mcp-jira>/.loopboard-prs.json`, git-ignored).
+- Registered MCP tools. Tests use a temp file; keyless/offline.
+
 ## 5. mcp-github tools (Phase 2) — exact IO
 
 ```ts
@@ -956,10 +1032,15 @@ Dedupe, preserve first-seen order. Pure function, unit-tested. No side effects.
        ticket(s)** (`get_linked_issues(keys, projectKey=dev)` — "one or none"): a row that
        already has a Dev link is badged (e.g. "→ DEV-123") and **deselected by default** (to
        avoid duplicates), but can still be selected. "Select all without a Dev link" helper.
-    3. **Generate the plan with AI** — `POST /api/ai/plan-dev-tickets` with the selected PO
-       stories → one proposed Dev draft (`devSummary` + `devDescription`) per PO. The **plan is
-       an editable list** (per-PO summary/description). When AI is off, each item is seeded from
-       the deterministic template (`buildDraftPair(po.summary).dev`); a banner explains.
+    3. **Generate the plan with AI** — on Generate, first fetch the selected PO stories' **own
+       descriptions** (`get_issue_descriptions(keys)`, v1.14/ADR-025), then `POST
+       /api/ai/plan-dev-tickets` with `poStories: [{ key, summary, description? }]` (each
+       description capped at ~4000 chars) → one proposed Dev draft (`devSummary` +
+       `devDescription`) per PO **derived from the PO's real description**, not just its title.
+       The **plan is an editable list** (per-PO summary/description). When AI is off, each item is
+       seeded from the deterministic template and, when a PO description was fetched, prepends a
+       "## Source PO story" context block so the description still informs the Dev task; a banner
+       explains.
     4. **Comment & regenerate per draft (v1.12, ADR-023)** — each plan item has a **comment box
        + "Regenerate"** button (shown only when AI is enabled). It re-calls
        `POST /api/ai/plan-dev-tickets` for **that single PO**, passing the reviewer comment + the
@@ -970,9 +1051,10 @@ Dedupe, preserve first-seen order. Pure function, unit-tested. No side effects.
        log**: per item ⏳→✓ `DEV-xxx` (link → `<PO>`) or ✗ with the error; a final "N created,
        M failed" summary. Created links open in Jira. Non-fatal `linkWarning`/`sprintWarning`
        are surfaced per row. (No new bulk MCP tool — the client loops `create_dev_ticket`.)
-    New `src/lib`: `linkClient.ts` (`getLinkedIssues`, `planDevTickets`), reuse
-    `createLinkedDevTicket` (v1.10), `useActiveSprint`, `useSprintList`, `useBoards`,
-    `buildDraftPair`. a11y: labeled checkboxes, `role="status"`/`aria-live` log, keyboard-OK.
+    New `src/lib`: `linkClient.ts` (`getLinkedIssues`, `getIssueDescriptions` [v1.14],
+    `planDevTickets`), reuse `createLinkedDevTicket` (v1.10), `useActiveSprint`, `useSprintList`,
+    `useBoards`, `buildDraftPair`. a11y: labeled checkboxes, `role="status"`/`aria-live` log,
+    keyboard-OK.
   - **Dashboard sprint-goal banner (v1.13, ADR-024):** above the board, show the active
     sprint's **goal** with a compact progress read — `% of points done (DoD = done OR code
     review)` and **days left** (from the sprint end date) — so the goal is the visible north
@@ -1648,3 +1730,74 @@ Changes made by the Architect agent during finalization:
     button whenever `errCount > 0`. It re-runs `create_dev_ticket` for the error rows **only**
     (matched by `poKey`), leaving successful rows untouched, then returns to the done phase with
     updated counts. Addresses the review's "a single failed row forces a full restart" gap.
+
+## Changelog v1.14 (2026-06-24 — Linking: draft the Dev task from the PO's description; ADR-025)
+
+86. **§4.18 (new) — `get_issue_descriptions`** `{ keys: string[] (1..50) }` → `{ descriptions:
+    Record<string, string> }`. For each key, returns the issue description flattened to plain text
+    (reuses `getIssue` → `adfToText`); parallel; a missing/unreadable key contributes `""`
+    (non-fatal). Read-only, no new jiraClient surface. Registered MCP tool. jira tools 19→20.
+87. **§6 — Linking "Generate plan" now drafts from the PO description.** Previously the AI plan
+    saw only each PO's one-line `summary`. On Generate, the page now fetches the selected POs'
+    descriptions (`get_issue_descriptions`) and passes them as `poStories[].description` (capped
+    ~4000 chars) to `plan-dev-tickets` — which already accepted the field since v1.11 — so each
+    Dev draft is derived from the PO's real acceptance criteria/scope. Per-draft **Regenerate**
+    (v1.12) reuses the same fetched description. With AI off, the deterministic fallback prepends a
+    "## Source PO story" block from the description. No change to `create_dev_ticket` or the
+    `plan-dev-tickets` contract surface (frontend-only wiring + one read tool).
+
+## Changelog v1.14.1 (2026-06-24 — bugfix: PO descriptions came back garbled/blank)
+
+88. **§4.7/§4.18 — `adfToText` now preserves block structure.** Live testing showed Dev drafts
+    ignored the PO description. Root cause (NOT the endpoint): `adfToText` was a text-only walk that
+    concatenated bullet/ordered list items into a single run-on with no separators and dropped
+    `hardBreak`s — so list-heavy PO descriptions (the common shape) flattened into garbage, and
+    descriptions made entirely of inline nodes vanished. Rewrote it to emit `- `/`N. ` list markers
+    (one item per line, nested lists indented), turn `hardBreak` into a newline, and pull text from
+    inline `mention`/`emoji`/`inlineCard` nodes. Verified live against the user's Jira (e.g.
+    VBPO-379 went from a garbled run-on to a clean numbered list). Existing `get_issue_descriptions`
+    IO is unchanged.
+89. **§6 — Linking flags description-less POs.** Separately, many PO stories simply have **no
+    description** in Jira (`description: null` — e.g. 14 of 18 in the live PO sprint). The plan now
+    badges each row "drafted from PO description" vs. "PO has no description — drafted from title",
+    so an empty draft source is transparent instead of looking like a bug.
+
+## Changelog v1.15 (2026-06-24 — Planning ticket actions: status change + move sprint + filter; ADR-026)
+
+90. **§6 (bugfix) — PO sprint select showed Dev sprints.** Root cause was a frontend race, NOT the
+    endpoint: while `useBoards()` loads, `useSprintList("all", boards?.po.id)` fires with no
+    `boardId` → server default (Dev), and `useMCP.run()` had no out-of-order guard, so the stale Dev
+    response could land after the correct PO fetch and clobber it. Added a monotonic request-id guard
+    to `useMCP` (only the latest run's resolution is applied) — fixes it for every `useMCP` caller.
+91. **§4.19 (new) — `get_transitions` / `transition_issue` (WRITE).** `get_transitions {ticketKey}`
+    → available workflow transitions; `transition_issue {ticketKey, transitionId}` →
+    `POST /rest/api/3/issue/{key}/transitions`, re-reads + returns the new status. New jiraClient
+    `getTransitions` + `transitionIssue`. Registered MCP tools.
+92. **§4.20 (new) — `move_issue_to_sprint` (WRITE).** `{ ticketKey, sprintId }` → reuses
+    `addIssuesToSprint` (adding to a sprint moves it out of the prior one). Registered MCP tool.
+    jira tools 20→23.
+93. **§6 — Planning ticket list gains actions + filter.** `AssignmentList` adds an assignee filter
+    with a "N of M · P pts" summary, a per-row **Status** dropdown (lazy-loads `get_transitions`,
+    applies `transition_issue`), and a per-row **move-to-sprint** dropdown (`move_issue_to_sprint`).
+
+## Changelog v1.16 (2026-06-24 — Huddle: rename + points-by-filter + impediments + PR store; ADR-027)
+
+94. **§4.21/§4.22 (new) — `get/set_impediments` + `get/set_pull_requests`.** Two manual, per-sprint
+    bridge-side JSON stores (mirroring leaves/team) for daily Huddle visibility: a blockers log and a
+    pending-PR list. Full-replace `set_*` tools fill `id`/timestamps when omitted. New
+    `impedimentsStore.ts` + `prsStore.ts`; `JIRA_IMPEDIMENTS_FILE`/`JIRA_PRS_FILE` config. jira tools
+    23→27.
+95. **§6 — "Dashboard" tab renamed to "Huddle".** The board tab/page is now **Huddle** (it is the
+    daily-standup surface). The board's filter line now also shows the **filtered points total**
+    ("Showing X of Y issues · P pts"). New sidebar cards: an **Impediments** log and a **Code review**
+    pending-PR list, both keyed to the selected sprint.
+
+## Changelog v1.17 (2026-06-24 — Planning: PO-first ticket generator in a drawer; ADR-028)
+
+96. **§6 — ticket generator is PO-first, in a drawer.** On Planning, "Draft Tickets" is now a **New
+    ticket** button that opens a **Sheet** (side drawer) containing `TicketGen`. `TicketGen` defaults
+    to creating **only the PO story** (PO board) via `create_po_ticket`; an **"Also create a linked
+    Dev task"** checkbox (default off) reveals the Dev pane + Dev sprint select and, when on, creates
+    the linked Dev task too (`createTicketPair`, unchanged). The AI chat / fallback / Regenerate are
+    preserved. Rationale: bulk PO→Dev already lives on the Linking page. New `createPoTicket` hook
+    wrapper; new shadcn `sheet.tsx`. No MCP/tool surface change (frontend-only composition).
