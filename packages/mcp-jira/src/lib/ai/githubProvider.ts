@@ -11,7 +11,9 @@
  */
 
 import * as z from "zod/v4";
-import type { AiProvider, AiCompletion } from "./provider.js";
+import type {
+  AiProvider, AiCompletion, AiToolSpec, AiToolMessage, ChatWithToolsResult,
+} from "./provider.js";
 import { UpstreamError } from "../errors.js";
 
 const RE_ASK_MESSAGE =
@@ -66,6 +68,70 @@ export class GithubProvider implements AiProvider {
     if (second !== null) return second;
 
     throw new UpstreamError("AI returned an unparseable response", 502);
+  }
+
+  /**
+   * One tool-calling turn (v1.18, ADR-029). OpenAI-style `tools` + `tool_calls`.
+   */
+  async chatWithTools(
+    system: string,
+    messages: AiToolMessage[],
+    tools: AiToolSpec[]
+  ): Promise<ChatWithToolsResult> {
+    const body: Record<string, unknown> = {
+      model: this.model,
+      messages: [{ role: "system", content: system }, ...toOpenAiMessages(messages)],
+      max_tokens: 2048,
+    };
+    if (tools.length > 0) {
+      body.tools = tools.map((t) => ({
+        type: "function",
+        function: { name: t.name, description: t.description, parameters: t.parameters },
+      }));
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new UpstreamError(`GitHub Models request failed: ${msg}`, 502);
+    }
+    if (!response.ok) throw await mapGithubHttpError(response);
+
+    let data: unknown;
+    try {
+      data = await response.json();
+    } catch {
+      throw new UpstreamError("GitHub Models returned non-JSON response", 502);
+    }
+
+    const message = (data as { choices?: Array<{ message?: GithubChatMessage }> })
+      ?.choices?.[0]?.message;
+    if (!message) {
+      throw new UpstreamError("GitHub Models returned unexpected response shape", 502);
+    }
+
+    if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+      return {
+        type: "tool_calls",
+        calls: message.tool_calls.map((tc) => ({
+          id: tc.id,
+          name: tc.function.name,
+          args: safeJsonParse(tc.function.arguments),
+        })),
+      };
+    }
+    return { type: "final", text: typeof message.content === "string" ? message.content : "" };
   }
 
   private async fetchCompletion(
@@ -177,4 +243,70 @@ function extractChoiceText(data: unknown): string {
     }
   }
   throw new UpstreamError("GitHub Models returned unexpected response shape", 502);
+}
+
+// ── Tool-calling helpers (v1.18, ADR-029) ──────────────────────────────────────
+
+interface GithubChatMessage {
+  content?: string | null;
+  tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
+}
+
+type OpenAiMessage =
+  | { role: "user" | "system"; content: string }
+  | {
+      role: "assistant";
+      content: string | null;
+      tool_calls?: Array<{
+        id: string;
+        type: "function";
+        function: { name: string; arguments: string };
+      }>;
+    }
+  | { role: "tool"; tool_call_id: string; content: string };
+
+function toOpenAiMessages(messages: AiToolMessage[]): OpenAiMessage[] {
+  return messages.map((m): OpenAiMessage => {
+    if (m.role === "user") return { role: "user", content: m.content };
+    if (m.role === "assistant_tool_calls") {
+      return {
+        role: "assistant",
+        content: null,
+        tool_calls: m.calls.map((c) => ({
+          id: c.id,
+          type: "function" as const,
+          function: { name: c.name, arguments: JSON.stringify(c.args ?? {}) },
+        })),
+      };
+    }
+    return { role: "tool", tool_call_id: m.id, content: m.content };
+  });
+}
+
+function safeJsonParse(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+}
+
+async function mapGithubHttpError(response: Response): Promise<UpstreamError> {
+  const status = response.status;
+  if (status === 401 || status === 403) {
+    return new UpstreamError(
+      "GitHub Models authentication failed — check GITHUB_MODELS_TOKEN / GITHUB_TOKEN (PAT needs models:read)",
+      status
+    );
+  }
+  if (status === 404) {
+    return new UpstreamError("GitHub Models endpoint not found — check GITHUB_MODELS_BASE_URL", 404);
+  }
+  let detail = "";
+  try {
+    detail = await response.text();
+  } catch {
+    /* ignore */
+  }
+  return new UpstreamError(`GitHub Models error (${status}): ${detail}`, status);
 }

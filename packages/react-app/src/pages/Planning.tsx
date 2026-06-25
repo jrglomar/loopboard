@@ -236,7 +236,7 @@ export function Planning({
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
 
       {/* ── Section 1: Sprint context header ───────────────────────────────── */}
       <section aria-label="Planning context" className="min-w-0">

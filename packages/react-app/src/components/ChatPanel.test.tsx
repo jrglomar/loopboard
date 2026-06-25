@@ -45,6 +45,12 @@ vi.mock("../lib/aiClient", async (importOriginal) => {
       provider: "anthropic",
       model: "claude-opus-4-8",
     }),
+    aiAsk: vi.fn().mockResolvedValue({
+      answer: "You have 1 impediment: infra is down.",
+      toolsUsed: ["get_impediments"],
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+    }),
   };
 });
 
@@ -150,6 +156,60 @@ describe("ChatPanel", () => {
     await waitFor(() => {
       expect(screen.getAllByText(/Sprint Commands/).length).toBeGreaterThan(0);
     });
+  });
+
+  it("v1.18: a free-form question routes to the AI assistant when AI is on", async () => {
+    const user = userEvent.setup();
+    const { aiAsk } = await import("../lib/aiClient");
+
+    render(<ChatPanel selectedSprintId={50} aiStatus={AI_ON} boardId={10} contextSprintId={50} />);
+
+    const input = screen.getByRole("textbox", { name: /sprint command/i });
+    await user.type(input, "any impediments today?");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(aiAsk).toHaveBeenCalledWith({ question: "any impediments today?", boardId: 10, sprintId: 50 });
+    });
+    expect(await screen.findByText(/infra is down/)).toBeTruthy();
+  });
+
+  it("v1.19: a proposed write surfaces the confirm modal (does not auto-execute)", async () => {
+    const user = userEvent.setup();
+    const { aiAsk } = await import("../lib/aiClient");
+    vi.mocked(aiAsk).mockResolvedValueOnce({
+      answer: "",
+      toolsUsed: ["update_ticket"],
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      proposedAction: { tool: "update_ticket", args: { ticketKey: "VRDB-2700", storyPoints: 2 } },
+    });
+
+    render(<ChatPanel selectedSprintId={50} aiStatus={AI_ON} boardId={10} contextSprintId={50} />);
+
+    const input = screen.getByRole("textbox", { name: /sprint command/i });
+    await user.type(input, "update points of VRDB-2700 to 2");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    // The action-confirm modal opens; nothing is written until the user confirms.
+    expect(await screen.findByText(/Update ticket\?/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^confirm$/i })).toBeTruthy();
+  });
+
+  it("v1.18: a free-form question does NOT call the assistant when AI is off (help fallback)", async () => {
+    const user = userEvent.setup();
+    const { aiAsk } = await import("../lib/aiClient");
+
+    render(<ChatPanel selectedSprintId={null} aiStatus={AI_OFF} />);
+
+    const input = screen.getByRole("textbox", { name: /sprint command/i });
+    await user.type(input, "any impediments today?");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/Unknown command/i).length).toBeGreaterThan(0);
+    });
+    expect(aiAsk).not.toHaveBeenCalled();
   });
 
   it("Enter key sends the message (Shift+Enter does not)", async () => {

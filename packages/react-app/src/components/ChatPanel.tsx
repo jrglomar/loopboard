@@ -4,7 +4,9 @@ import { callTool, type McpError } from "../lib/mcpClient";
 import { createTicketPair, enhanceTicket } from "../hooks/useJira";
 import { linkPr } from "../hooks/useGithub";
 import { buildDraftPair } from "../lib/ticketTemplates";
-import { aiDraftTickets, aiEnhanceTicket } from "../lib/aiClient";
+import { aiDraftTickets, aiEnhanceTicket, aiAsk } from "../lib/aiClient";
+import { ConfirmActionDialog } from "./ConfirmActionDialog";
+import type { ProposedAction } from "../lib/types";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
@@ -29,6 +31,10 @@ interface ChatPanelProps {
   aiStatus: AiStatus;
   /** v1.2: active assignee filter from Dashboard; applied to sprint command card */
   assigneeFilter?: string | null;
+  /** v1.18: current board id, for the AI Q&A assistant context */
+  boardId?: number;
+  /** v1.18: effective (active) sprint id, for the AI Q&A assistant context */
+  contextSprintId?: number | null;
 }
 
 // ── Message types ─────────────────────────────────────────────────────────────
@@ -408,16 +414,21 @@ async function createWithLocalTemplates(
 let msgIdCounter = 0;
 function nextId() { return ++msgIdCounter; }
 
-export function ChatPanel({ className, selectedSprintId, aiStatus, assigneeFilter = null }: ChatPanelProps) {
+export function ChatPanel({ className, selectedSprintId, aiStatus, assigneeFilter = null, boardId, contextSprintId }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: nextId(),
       role: "assistant",
-      text: "Sprint commands panel — type help to see available commands, or use GitHub Copilot Chat in VS Code for free-form AI questions.",
+      text: aiStatus.enabled
+        ? "Ask anything about the sprint — \"any impediments today?\", \"who's on leave?\", \"what's in code review?\" — or type a command like huddle, sprint, or help."
+        : "Sprint commands panel — type help to see available commands, or use GitHub Copilot Chat in VS Code for free-form AI questions.",
     },
   ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  // v1.19 (ADR-030): a write the assistant proposed, awaiting modal confirmation.
+  const [pendingAction, setPendingAction] = useState<ProposedAction | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
 
   // perf: autoscroll only when new messages arrive
@@ -448,7 +459,32 @@ export function ChatPanel({ className, selectedSprintId, aiStatus, assigneeFilte
 
     try {
       const action = router(text);
-      const { text: responseText, result } = await executeAction(action, aiStatus, selectedSprintId, assigneeFilter);
+      // v1.18 (ADR-029): when AI is on, input the command router doesn't recognize becomes
+      // a free-form question for the AI assistant. Known commands stay deterministic (fast).
+      const isUnknownCommand = action.kind === "help" && text.trim().toLowerCase() !== "help";
+
+      let responseText: string;
+      let result: ToolResult | undefined;
+      if (isUnknownCommand && aiStatus.enabled) {
+        const res = await aiAsk({
+          question: text,
+          ...(boardId !== undefined ? { boardId } : {}),
+          ...(contextSprintId != null ? { sprintId: contextSprintId } : {}),
+        });
+        if (res.proposedAction) {
+          // v1.19 (ADR-030): the assistant wants to make a change — confirm in a modal.
+          responseText = res.answer || "I can do that — please review and confirm.";
+          setPendingAction(res.proposedAction);
+          setConfirmOpen(true);
+        } else {
+          responseText = res.answer;
+        }
+      } else {
+        const out = await executeAction(action, aiStatus, selectedSprintId, assigneeFilter);
+        responseText = out.text;
+        result = out.result;
+      }
+
       // Replace loading message
       setMessages((prev) =>
         prev.map((m) =>
@@ -473,7 +509,7 @@ export function ChatPanel({ className, selectedSprintId, aiStatus, assigneeFilte
     } finally {
       setBusy(false);
     }
-  }, [input, busy, appendMsg, aiStatus, selectedSprintId, assigneeFilter]);
+  }, [input, busy, appendMsg, aiStatus, selectedSprintId, assigneeFilter, boardId, contextSprintId]);
 
   const handleKeyDown = (e: import("react").KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -491,12 +527,16 @@ export function ChatPanel({ className, selectedSprintId, aiStatus, assigneeFilte
     >
       {/* Header */}
       <div className="px-4 py-2.5 bg-muted/40 border-b border-border flex items-center justify-between flex-shrink-0">
-        <span className="text-sm font-semibold text-foreground">Sprint Commands</span>
+        <span className="text-sm font-semibold text-foreground">
+          {aiStatus.enabled ? "Sprint Assistant" : "Sprint Commands"}
+        </span>
         <span className="text-xs text-muted-foreground">
-          type{" "}
-          <code className="bg-background text-foreground border border-border px-1 py-0.5 rounded text-[0.6875rem]">
-            help
-          </code>
+          {aiStatus.enabled ? "ask or type a command" : "type "}
+          {!aiStatus.enabled && (
+            <code className="bg-background text-foreground border border-border px-1 py-0.5 rounded text-[0.6875rem]">
+              help
+            </code>
+          )}
         </span>
       </div>
 
@@ -552,7 +592,7 @@ export function ChatPanel({ className, selectedSprintId, aiStatus, assigneeFilte
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="sprint · huddle · ticket DEV-42 · help"
+          placeholder={aiStatus.enabled ? "Ask anything, or type a command…" : "sprint · huddle · ticket DEV-42 · help"}
           rows={1}
           disabled={busy}
           aria-label="Sprint command"
@@ -568,6 +608,14 @@ export function ChatPanel({ className, selectedSprintId, aiStatus, assigneeFilte
           Send
         </Button>
       </form>
+
+      {/* v1.19 (ADR-030): modal confirmation for an assistant-proposed write */}
+      <ConfirmActionDialog
+        action={pendingAction}
+        open={confirmOpen}
+        onOpenChange={(o) => { setConfirmOpen(o); if (!o) setPendingAction(null); }}
+        onResult={(msg) => appendMsg({ role: "assistant", text: msg })}
+      />
     </div>
   );
 }

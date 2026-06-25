@@ -106,11 +106,19 @@ const EXPECTED_JIRA_TOOLS = [
   "set_impediments",
   "get_pull_requests",
   "set_pull_requests",
+  // v1.20 — Huddle daily sections (post-scrum + meeting goal)
+  "get_post_scrum",
+  "set_post_scrum",
+  "get_meeting_goal",
+  "set_meeting_goal",
+  // v1.22 — multi-repo linked PRs from Jira Development Information
+  "get_issue_pull_requests",
 ];
 
 const EXPECTED_GITHUB_TOOLS = [
   "list_prs",
   "get_pr",
+  "get_pr_reviews",
   "link_pr_to_ticket",
   "sync_pr_links",
 ];
@@ -448,6 +456,10 @@ if (!jiraReady) {
   for (const tool of [
     "get_transitions", "transition_issue", "move_issue_to_sprint",
     "get_impediments", "set_impediments", "get_pull_requests", "set_pull_requests",
+    // v1.20 — post-scrum + meeting-goal stores (validation precedes any file write)
+    "get_post_scrum", "set_post_scrum", "get_meeting_goal", "set_meeting_goal",
+    // v1.22 — linked PRs (validation precedes any Jira read)
+    "get_issue_pull_requests",
   ]) {
     try {
       const { status, body } = await httpPost(`http://127.0.0.1:${JIRA_PORT}/api/tools/${tool}`, {});
@@ -542,6 +554,34 @@ if (!jiraReady) {
   } catch (e) {
     fail("[JIRA] POST /api/ai/plan-dev-tickets → 503 AI_UNAVAILABLE", String(e));
   }
+
+  // JIRA v1.18: AI Q&A assistant /api/ai/ask → 503 AI_UNAVAILABLE when AI disabled
+  try {
+    const { status, body } = await httpPost(
+      `http://127.0.0.1:${JIRA_PORT}/api/ai/ask`,
+      { question: "any impediments today?" }
+    );
+    if (status === 503 && body.ok === false && body.error?.code === "AI_UNAVAILABLE") {
+      pass("[JIRA] POST /api/ai/ask → 503 AI_UNAVAILABLE when AI disabled");
+    } else {
+      fail("[JIRA] POST /api/ai/ask → 503 AI_UNAVAILABLE",
+        `status=${status} code=${body.error?.code} body=${JSON.stringify(body).slice(0, 200)}`);
+    }
+  } catch (e) {
+    fail("[JIRA] POST /api/ai/ask → 503 AI_UNAVAILABLE", String(e));
+  }
+
+  // JIRA v1.18: /api/ai/ask {} → 400 VALIDATION (question required)
+  try {
+    const { status, body } = await httpPost(`http://127.0.0.1:${JIRA_PORT}/api/ai/ask`, {});
+    if (status === 400 && body.ok === false && body.error?.code === "VALIDATION") {
+      pass("[JIRA] POST /api/ai/ask {} → 400 VALIDATION (question required)");
+    } else {
+      fail("[JIRA] POST /api/ai/ask {} → 400 VALIDATION", `status=${status} code=${body.error?.code}`);
+    }
+  } catch (e) {
+    fail("[JIRA] POST /api/ai/ask {} → 400 VALIDATION", String(e));
+  }
 }
 
 if (!githubReady) {
@@ -570,6 +610,22 @@ if (!githubReady) {
     }
   } catch (e) {
     fail("[GITHUB] POST link_pr_to_ticket {} → 400 VALIDATION", String(e));
+  }
+
+  // GITHUB v1.21: get_pr_reviews {} → 400 VALIDATION (numbers required; no real GitHub read)
+  try {
+    const { status, body } = await httpPost(
+      `http://127.0.0.1:${GITHUB_PORT}/api/tools/get_pr_reviews`,
+      {}
+    );
+    if (status === 400 && body.ok === false && body.error?.code === "VALIDATION") {
+      pass("[GITHUB] POST get_pr_reviews {} → 400 VALIDATION (numbers required)");
+    } else {
+      fail("[GITHUB] POST get_pr_reviews {} → 400 VALIDATION",
+        `status=${status} code=${body.error?.code}`);
+    }
+  } catch (e) {
+    fail("[GITHUB] POST get_pr_reviews {} → 400 VALIDATION", String(e));
   }
 }
 

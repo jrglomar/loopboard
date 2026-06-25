@@ -26,6 +26,11 @@ import { getImpedimentsTool } from "./getImpediments.js";
 import { setImpedimentsTool } from "./setImpediments.js";
 import { getPullRequestsTool } from "./getPullRequests.js";
 import { setPullRequestsTool } from "./setPullRequests.js";
+import { getPostScrumTool } from "./getPostScrum.js";
+import { setPostScrumTool } from "./setPostScrum.js";
+import { getMeetingGoalTool } from "./getMeetingGoal.js";
+import { setMeetingGoalTool } from "./setMeetingGoal.js";
+import { getIssuePullRequestsTool } from "./getIssuePullRequests.js";
 
 export const tools: ToolDef[] = [
   createPoTicket,
@@ -55,4 +60,9 @@ export const tools: ToolDef[] = [
   setImpedimentsTool,
   getPullRequestsTool,
   setPullRequestsTool,
+  getPostScrumTool,
+  setPostScrumTool,
+  getMeetingGoalTool,
+  setMeetingGoalTool,
+  getIssuePullRequestsTool,
 ];

@@ -22,6 +22,12 @@ export const DEFAULT_IMPEDIMENTS_FILE = path.join(_packageDir, ".loopboard-imped
 /** Default path for the pull-requests JSON file — inside the mcp-jira package dir (v1.16). */
 export const DEFAULT_PRS_FILE = path.join(_packageDir, ".loopboard-prs.json");
 
+/** Default path for the post-scrum notes JSON file — inside the mcp-jira package dir (v1.20). */
+export const DEFAULT_POST_SCRUM_FILE = path.join(_packageDir, ".loopboard-post-scrum.json");
+
+/** Default path for the meeting-goal JSON file — inside the mcp-jira package dir (v1.20). */
+export const DEFAULT_MEETING_GOAL_FILE = path.join(_packageDir, ".loopboard-meeting-goal.json");
+
 // Config schema — validated lazily on first call to getConfig().
 // All env reads happen inside getConfig(), never at module-import time,
 // so tool modules can be imported in tests without a .env file.
@@ -47,6 +53,11 @@ const configSchema = z.object({
   // v1.16: optional impediments + pull-requests store paths (Huddle daily visibility).
   JIRA_IMPEDIMENTS_FILE: z.string().default(""),
   JIRA_PRS_FILE: z.string().default(""),
+  // v1.20: optional post-scrum + meeting-goal store paths (Huddle daily sections).
+  JIRA_POST_SCRUM_FILE: z.string().default(""),
+  JIRA_MEETING_GOAL_FILE: z.string().default(""),
+  // v1.22: dev-status applicationType for linked-PR reads (GitHub | GitHubEnterprise | bitbucket).
+  JIRA_DEV_STATUS_APP_TYPE: z.string().default("GitHub"),
   MCP_JIRA_HTTP_PORT: z.coerce.number().default(4001),
   // AI drafting — all optional; startup does NOT fail when these are absent.
   AI_PROVIDER: z.string().default(""),
@@ -129,6 +140,18 @@ export function getImpedimentsFilePath(): string {
 export function getPrsFilePath(): string {
   const cfg = getConfig();
   return cfg.JIRA_PRS_FILE || DEFAULT_PRS_FILE;
+}
+
+/** Resolved post-scrum file path (v1.20) — JIRA_POST_SCRUM_FILE or the default. */
+export function getPostScrumFilePath(): string {
+  const cfg = getConfig();
+  return cfg.JIRA_POST_SCRUM_FILE || DEFAULT_POST_SCRUM_FILE;
+}
+
+/** Resolved meeting-goal file path (v1.20) — JIRA_MEETING_GOAL_FILE or the default. */
+export function getMeetingGoalFilePath(): string {
+  const cfg = getConfig();
+  return cfg.JIRA_MEETING_GOAL_FILE || DEFAULT_MEETING_GOAL_FILE;
 }
 
 /**

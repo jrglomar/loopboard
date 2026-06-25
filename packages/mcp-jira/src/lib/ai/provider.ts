@@ -14,6 +14,36 @@ export interface AiCompletion {
   text: string; // raw JSON text from the model
 }
 
+// ── Tool-calling (v1.18, ADR-029) — normalized across providers ────────────────
+
+/** A function/tool the model may call (zod schema already converted to JSON Schema). */
+export interface AiToolSpec {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>; // JSON Schema object
+}
+
+/** A single tool invocation the model requested. */
+export interface AiToolCall {
+  id: string;
+  name: string;
+  args: unknown;
+}
+
+/**
+ * Normalized turns for the tool-calling loop, provider-agnostic. The askService
+ * drives the loop in these terms; each adapter translates to/from its API shape.
+ */
+export type AiToolMessage =
+  | { role: "user"; content: string }
+  | { role: "assistant_tool_calls"; calls: AiToolCall[] }
+  | { role: "tool_result"; id: string; name: string; content: string };
+
+/** One turn's outcome: either the model answered, or it wants to call tools. */
+export type ChatWithToolsResult =
+  | { type: "final"; text: string }
+  | { type: "tool_calls"; calls: AiToolCall[] };
+
 export interface AiProvider {
   readonly name: "anthropic" | "github";
   readonly model: string;
@@ -27,6 +57,17 @@ export interface AiProvider {
     messages: Array<{ role: "user" | "assistant"; content: string }>,
     options: { maxTokens: number }
   ): Promise<AiCompletion>;
+
+  /**
+   * One tool-calling turn (v1.18, ADR-029). Given the conversation so far and the
+   * available tools, returns either a final answer or a set of tool calls to run.
+   * Pass `tools: []` to force a final answer. Throws UpstreamError on API failure.
+   */
+  chatWithTools(
+    system: string,
+    messages: AiToolMessage[],
+    tools: AiToolSpec[]
+  ): Promise<ChatWithToolsResult>;
 }
 
 /**

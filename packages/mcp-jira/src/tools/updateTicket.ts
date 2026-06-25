@@ -13,12 +13,15 @@ const baseSchema = z.object({
     ),
   summary: z.string().min(1).max(255).optional(),
   description: z.string().optional(),
+  // v1.19 (ADR-030): set story points (written to JIRA_STORY_POINTS_FIELD).
+  storyPoints: z.number().nonnegative().optional(),
 });
 
 // Full schema with .refine — used inside the handler for actual validation.
 const fullSchema = baseSchema.refine(
-  (data) => data.summary !== undefined || data.description !== undefined,
-  { message: "At least one of summary or description must be provided" }
+  (data) =>
+    data.summary !== undefined || data.description !== undefined || data.storyPoints !== undefined,
+  { message: "At least one of summary, description, or storyPoints must be provided" }
 );
 
 interface UpdateOutput {
@@ -35,11 +38,13 @@ async function handler(input: unknown): Promise<UpdateOutput> {
   await updateIssue(args.ticketKey, {
     summary: args.summary,
     description: args.description,
+    storyPoints: args.storyPoints,
   });
 
   const updatedFields: string[] = [];
   if (args.summary !== undefined) updatedFields.push("summary");
   if (args.description !== undefined) updatedFields.push("description");
+  if (args.storyPoints !== undefined) updatedFields.push("storyPoints");
 
   return {
     key: args.ticketKey,
@@ -51,8 +56,9 @@ async function handler(input: unknown): Promise<UpdateOutput> {
 export const updateTicket: ToolDef = {
   name: "update_ticket",
   description:
-    "Update a Jira ticket's summary and/or description. At least one field must be provided. " +
-    "Description is converted to ADF before saving. Returns which fields were updated.",
+    "Update a Jira ticket's summary, description, and/or story points. At least one must be " +
+    "provided. Description is converted to ADF; storyPoints writes the configured points field. " +
+    "Returns which fields were updated.",
   // Use baseSchema (ZodObject) for the ToolDef.schema — the refine runs inside handler.
   schema: baseSchema,
   handler,

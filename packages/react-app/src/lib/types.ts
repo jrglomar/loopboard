@@ -354,6 +354,28 @@ export interface PlanDevTicketsResponse {
   model: string;
 }
 
+/** POST /api/ai/ask input (v1.18, ADR-029) — free-form Q&A over read tools. */
+export interface AskRequest {
+  question: string;
+  boardId?: number;
+  sprintId?: number;
+}
+
+/** A write the assistant proposes (v1.19, ADR-030) — confirmed in a modal, not auto-run. */
+export interface ProposedAction {
+  tool: string;
+  args: Record<string, unknown>;
+}
+
+/** POST /api/ai/ask output. */
+export interface AskResponse {
+  answer: string;
+  toolsUsed: string[];
+  provider: "anthropic" | "github";
+  model: string;
+  proposedAction?: ProposedAction;
+}
+
 // ── Huddle stores (CONTRACTS.md §4.21/§4.22 v1.16, ADR-027) ──────────────────
 
 /** A sprint impediment/blocker (manual store). */
@@ -373,6 +395,22 @@ export interface PullRequest {
   ticketKey?: string;
   status?: string;
   addedAt: string;
+}
+
+/** A post-scrum note — per-person standup follow-up (manual store, v1.20, ADR-031). */
+export interface PostScrumNote {
+  id: string;
+  person: string;
+  note: string;
+  createdAt: string;
+  resolved?: boolean;
+}
+
+/** The per-sprint meeting goal (standup focus, v1.20, ADR-031). */
+export interface MeetingGoal {
+  sprintId: number;
+  goal: string;
+  updatedAt: string | null;
 }
 
 // ── Assignment types (CONTRACTS.md §4.15 v1.7, ADR-018) ─────────────────────
@@ -424,6 +462,40 @@ export interface PrSummary {
 export interface ListPrsOutput {
   repo: string;
   prs: PrSummary[];
+}
+
+/** Overall review/approval decision for a PR (v1.21, §5.6). */
+export type ReviewDecision = "approved" | "changes_requested" | "review_required";
+
+/** Aggregated reviewer/approval status for a PR (v1.21, §5.6, ADR-033). */
+export interface PrReviewStatus {
+  decision: ReviewDecision;
+  approvals: number;
+  changesRequested: number;
+  reviewers: string[];
+}
+
+/** get_pr_reviews output — review status keyed by PR number. */
+export interface GetPrReviewsOutput {
+  repo: string;
+  reviews: Record<number, PrReviewStatus>;
+}
+
+/** A PR linked to a Jira issue via its Development panel (multi-repo; v1.22, ADR-034). */
+export interface LinkedPr {
+  url: string;
+  title: string;
+  repo: string;
+  status: "open" | "merged" | "declined" | "unknown";
+  decision: ReviewDecision;
+  approvals: number;
+  reviewers: string[];
+  lastUpdate?: string;
+}
+
+/** get_issue_pull_requests output — linked PRs keyed by issue key. */
+export interface GetIssuePullRequestsOutput {
+  pullRequests: Record<string, LinkedPr[]>;
 }
 
 /** get_pr output */

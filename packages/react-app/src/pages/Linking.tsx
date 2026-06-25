@@ -313,7 +313,7 @@ export function Linking() {
   const errCount = results.filter((r) => r.status === "error").length;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div className="flex items-center gap-2">
         <Link2 className="h-5 w-5 text-primary" aria-hidden="true" />
         <h2 className="text-lg font-semibold">Linking — bulk Dev tickets from PO stories</h2>

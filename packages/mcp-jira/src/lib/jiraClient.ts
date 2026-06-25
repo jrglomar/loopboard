@@ -793,6 +793,69 @@ export async function getLinkedIssues(key: string): Promise<LinkedIssueRef[]> {
   }
 }
 
+// ---- Development Information (linked PRs from the issue's Development panel; v1.22, ADR-034) ----
+
+/** One reviewer entry inside a dev-status pull request (undocumented shape; all optional). */
+export interface DevStatusReviewer {
+  name?: string;
+  approvalStatus?: string; // e.g. "APPROVED" | "UNAPPROVED" | "NEEDS_WORK"
+}
+
+/** One pull request inside the dev-status detail payload (undocumented shape; all optional). */
+export interface DevStatusPr {
+  id?: string;
+  name?: string; // PR title
+  url?: string;
+  status?: string; // "OPEN" | "MERGED" | "DECLINED"
+  lastUpdate?: string;
+  reviewers?: DevStatusReviewer[];
+  repositoryName?: string;
+  repositoryUrl?: string;
+}
+
+/** dev-status detail response (undocumented). `detail[].pullRequests[]` is what we read. */
+export interface DevStatusDetailRaw {
+  detail?: Array<{ pullRequests?: DevStatusPr[] }>;
+}
+
+/**
+ * Resolve a Jira issue key to its numeric id (needed by the dev-status endpoint).
+ * GET /rest/api/3/issue/{key}?fields=*none. 404 → null (resilient for bulk callers).
+ */
+export async function getIssueNumericId(key: string): Promise<string | null> {
+  const client = getClient();
+  try {
+    const res = await client.get<{ id?: string }>(`/rest/api/3/issue/${key}?fields=*none`);
+    return res.data.id ?? null;
+  } catch (err) {
+    if (isAxiosError(err) && err.response?.status === 404) return null;
+    throw mapAxiosError(err);
+  }
+}
+
+/**
+ * Read an issue's linked pull requests from Jira's Development panel (v1.22, ADR-034).
+ * GET /rest/dev-status/1.0/issue/detail?issueId={id}&applicationType={appType}&dataType=pullrequest.
+ * This is an UNDOCUMENTED endpoint (the one powering the Development panel); parsed defensively.
+ * 404 / no dev data → {} (resilient). The pure reducer lives in tools/getIssuePullRequests.ts.
+ */
+export async function getDevStatusPullRequestsRaw(
+  issueId: string,
+  appType: string
+): Promise<DevStatusDetailRaw> {
+  const client = getClient();
+  const url =
+    `/rest/dev-status/1.0/issue/detail?issueId=${encodeURIComponent(issueId)}` +
+    `&applicationType=${encodeURIComponent(appType)}&dataType=pullrequest`;
+  try {
+    const res = await client.get<DevStatusDetailRaw>(url);
+    return res.data ?? {};
+  } catch (err) {
+    if (isAxiosError(err) && err.response?.status === 404) return {};
+    throw mapAxiosError(err);
+  }
+}
+
 /**
  * Fetch users assignable to a Jira project (v1.7 — get_assignable_users).
  * GET /rest/api/3/user/assignable/search?project={projectKey}&maxResults={maxResults}
@@ -843,9 +906,10 @@ export async function assignIssue(
 /** Update a Jira issue's fields. Returns 204 on success. */
 export async function updateIssue(
   ticketKey: string,
-  fields: { summary?: string; description?: string }
+  fields: { summary?: string; description?: string; storyPoints?: number }
 ): Promise<void> {
   const client = getClient();
+  const cfg = getConfig();
   const payload: Record<string, unknown> = {};
 
   if (fields.summary !== undefined) {
@@ -853,6 +917,11 @@ export async function updateIssue(
   }
   if (fields.description !== undefined) {
     payload["description"] = textToAdf(fields.description);
+  }
+  // v1.19 (ADR-030): write story points to the configured custom field (same field the
+  // create path uses), so the assistant can "update points of X to N".
+  if (fields.storyPoints !== undefined) {
+    payload[cfg.JIRA_STORY_POINTS_FIELD] = fields.storyPoints;
   }
 
   try {

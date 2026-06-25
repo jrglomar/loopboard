@@ -15,7 +15,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import * as z from "zod/v4";
-import type { AiProvider, AiCompletion } from "./provider.js";
+import type {
+  AiProvider, AiCompletion, AiToolSpec, AiToolMessage, ChatWithToolsResult,
+} from "./provider.js";
 import { UpstreamError } from "../errors.js";
 
 export class AnthropicProvider implements AiProvider {
@@ -85,6 +87,89 @@ export class AnthropicProvider implements AiProvider {
       throw mapAnthropicError(err);
     }
   }
+
+  /**
+   * One tool-calling turn (v1.18, ADR-029). Uses messages.create with `tools`.
+   */
+  async chatWithTools(
+    system: string,
+    messages: AiToolMessage[],
+    tools: AiToolSpec[]
+  ): Promise<ChatWithToolsResult> {
+    try {
+      const res = await this.client.messages.create({
+        model: this.model,
+        max_tokens: 2048,
+        system,
+        messages: toAnthropicMessages(messages),
+        ...(tools.length > 0
+          ? {
+              tools: tools.map((t) => ({
+                name: t.name,
+                description: t.description,
+                input_schema: t.parameters as Anthropic.Tool.InputSchema,
+              })),
+            }
+          : {}),
+      });
+
+      const toolUses = res.content.filter(
+        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+      );
+      if (res.stop_reason === "tool_use" && toolUses.length > 0) {
+        return {
+          type: "tool_calls",
+          calls: toolUses.map((b) => ({ id: b.id, name: b.name, args: b.input })),
+        };
+      }
+
+      const text = res.content
+        .filter((b): b is Anthropic.TextBlock => b.type === "text")
+        .map((b) => b.text)
+        .join("\n")
+        .trim();
+      return { type: "final", text };
+    } catch (err) {
+      throw mapAnthropicError(err);
+    }
+  }
+}
+
+/**
+ * Translate the normalized loop messages → Anthropic MessageParam[]. Consecutive
+ * tool results are coalesced into a single user turn (the API requires all results
+ * for one assistant tool_use turn to arrive together).
+ */
+function toAnthropicMessages(messages: AiToolMessage[]): Anthropic.MessageParam[] {
+  const out: Anthropic.MessageParam[] = [];
+  for (const m of messages) {
+    if (m.role === "user") {
+      out.push({ role: "user", content: m.content });
+    } else if (m.role === "assistant_tool_calls") {
+      out.push({
+        role: "assistant",
+        content: m.calls.map((c) => ({
+          type: "tool_use" as const,
+          id: c.id,
+          name: c.name,
+          input: c.args,
+        })),
+      });
+    } else {
+      const block = {
+        type: "tool_result" as const,
+        tool_use_id: m.id,
+        content: m.content,
+      };
+      const last = out[out.length - 1];
+      if (last && last.role === "user" && Array.isArray(last.content)) {
+        (last.content as Anthropic.ToolResultBlockParam[]).push(block);
+      } else {
+        out.push({ role: "user", content: [block] });
+      }
+    }
+  }
+  return out;
 }
 
 function mapAnthropicError(err: unknown): UpstreamError {

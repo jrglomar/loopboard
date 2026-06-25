@@ -65,6 +65,14 @@ export interface GithubComment {
   body: string;
 }
 
+/** A single PR review from GET /pulls/{n}/reviews (chronological order). */
+export interface GithubReview {
+  id: number;
+  user: { login: string } | null;
+  state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "PENDING";
+  submitted_at: string | null;
+}
+
 export const githubClient = {
   listPrs(
     owner: string,
@@ -94,6 +102,18 @@ export const githubClient = {
         }
         throw err;
       });
+  },
+
+  listReviews(
+    owner: string,
+    repo: string,
+    number: number,
+  ): Promise<GithubReview[]> {
+    return getInstance()
+      .get<GithubReview[]>(`/repos/${owner}/${repo}/pulls/${number}/reviews`, {
+        params: { per_page: 100 },
+      })
+      .then((r) => r.data);
   },
 
   listComments(

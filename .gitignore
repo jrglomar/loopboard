@@ -20,6 +20,11 @@ coverage/
 *.loopboard-impediments.json
 .loopboard-prs.json
 *.loopboard-prs.json
+# Huddle post-scrum + meeting-goal stores (v1.20 — host-local JSON, never committed)
+.loopboard-post-scrum.json
+*.loopboard-post-scrum.json
+.loopboard-meeting-goal.json
+*.loopboard-meeting-goal.json
 
 # Editor / OS
 .DS_Store

@@ -3,6 +3,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { Planning } from "./pages/Planning";
 import { Linking } from "./pages/Linking";
 import { Reports } from "./pages/Reports";
+import { AssistantWidget } from "./components/AssistantWidget";
 import type { BoardKey } from "./lib/types";
 import { cn } from "@/lib/utils";
 
@@ -104,6 +105,9 @@ export function App() {
         {activeTab === "linking" && <Linking />}
         {activeTab === "reports" && <Reports {...shared} />}
       </main>
+
+      {/* v1.19 (ADR-030): global floating AI assistant (FAB lower-right) */}
+      <AssistantWidget />
     </div>
   );
 }

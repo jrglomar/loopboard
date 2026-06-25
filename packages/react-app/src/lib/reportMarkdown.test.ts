@@ -2,7 +2,7 @@
 // Pure function; no mocks needed. Keyless/offline.
 
 import { describe, it, expect } from "vitest";
-import { buildReportMarkdown } from "./reportMarkdown";
+import { buildReportMarkdown, buildReportCsv } from "./reportMarkdown";
 import type { SprintReport, VelocityData } from "./types";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -362,5 +362,44 @@ describe("buildReportMarkdown — leaves & capacity section (v1.5)", () => {
     const md = buildReportMarkdown(BASE_REPORT);
     expect(md).toContain("| Assignee | Done pts | Total pts |");
     expect(md).not.toContain("| Leaves |");
+  });
+});
+
+// ── CSV export (v1.20) ────────────────────────────────────────────────────────
+
+describe("buildReportCsv", () => {
+  it("emits a header row + a per-assignee row with points + a TOTAL row", () => {
+    const csv = buildReportCsv(BASE_REPORT);
+    const lines = csv.split("\r\n");
+    expect(lines[0]).toBe("Assignee,Done Points,Total Points,Done Count,Total Count");
+    expect(lines).toContain("Alice,8,13,1,2");
+    expect(lines).toContain("Bob,5,10,1,2");
+    // TOTAL uses report-level points (completed=32 / committed=40) + summed counts.
+    expect(lines).toContain("TOTAL,32,40,2,4");
+  });
+
+  it("appends a Leave Days column when leavesCapacity is provided", () => {
+    const csv = buildReportCsv(BASE_REPORT, BASE_LEAVES_CAPACITY);
+    const lines = csv.split("\r\n");
+    expect(lines[0]).toBe("Assignee,Done Points,Total Points,Done Count,Total Count,Leave Days");
+    expect(lines).toContain("Alice,8,13,1,2,2"); // Alice has 2 leave days
+    expect(lines).toContain("Bob,5,10,1,2,0");
+  });
+
+  it("quotes/escapes fields containing commas or quotes", () => {
+    const tricky: SprintReport = {
+      ...BASE_REPORT,
+      byAssignee: [{ name: 'Doe, John "JD"', donePoints: 3, totalPoints: 3, doneCount: 1, totalCount: 1 }],
+    };
+    const csv = buildReportCsv(tricky);
+    expect(csv).toContain('"Doe, John ""JD""",3,3,1,1');
+  });
+
+  it("emits only header + TOTAL when there are no assignees", () => {
+    const noAssignee: SprintReport = { ...BASE_REPORT, byAssignee: [] };
+    const lines = buildReportCsv(noAssignee).split("\r\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("Assignee");
+    expect(lines[1]!.startsWith("TOTAL,")).toBe(true);
   });
 });

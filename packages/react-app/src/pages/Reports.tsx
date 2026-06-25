@@ -46,7 +46,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useSprintList, useSprintReport, useVelocity } from "../hooks/useJira";
 import { getAiStatus, aiSprintSummary } from "../lib/aiClient";
 import { useBoards } from "../lib/boards";
-import { buildReportMarkdown } from "../lib/reportMarkdown";
+import { buildReportMarkdown, buildReportCsv } from "../lib/reportMarkdown";
 import { formatPoints } from "../lib/format";
 import { computeCapacity, possibleCommittedVelocity, sprintWorkingDays } from "../lib/capacity";
 import { LeavesCalendarCard } from "../components/LeavesCalendarCard";
@@ -939,17 +939,24 @@ function ExportBar({ report, velocity, aiSummary, leavesCapacity }: ExportBarPro
     setTimeout(() => setCopied(false), 2000);
   }
 
-  function handleDownload() {
-    const md = getMarkdown();
-    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+  function downloadBlob(content: string, mime: string, ext: string) {
+    const blob = new Blob([content], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `sprint-report-${slugify(report.sprint.name)}.md`;
+    a.download = `sprint-report-${slugify(report.sprint.name)}.${ext}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  function handleDownload() {
+    downloadBlob(getMarkdown(), "text/markdown;charset=utf-8", "md");
+  }
+
+  function handleDownloadCsv() {
+    downloadBlob(buildReportCsv(report, leavesCapacity), "text/csv;charset=utf-8", "csv");
   }
 
   function handlePrint() {
@@ -987,6 +994,17 @@ function ExportBar({ report, velocity, aiSummary, leavesCapacity }: ExportBarPro
       >
         <Download className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
         Download .md
+      </Button>
+
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={handleDownloadCsv}
+        type="button"
+        aria-label="Download report as CSV file"
+      >
+        <Download className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+        Download .csv
       </Button>
 
       <Button
@@ -1088,14 +1106,14 @@ function SprintReportView({
   const possibleVelocity = possibleCommittedVelocity(avgCompleted, capacityFactor);
   return (
     // a11y: main report region, labeled for screen readers
-    <article aria-label={`Sprint report: ${report.sprint.name}`} className="space-y-6">
+    <article aria-label={`Sprint report: ${report.sprint.name}`} className="space-y-4">
 
       {/* ── Sprint header (full-width) ─────────────────────────────────── */}
       <div className="flex flex-col gap-3 print-report-header">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <div className="flex items-center gap-3 flex-wrap mb-1">
-              <h2 className="text-2xl font-semibold text-foreground">{report.sprint.name}</h2>
+              <h2 className="text-xl font-semibold text-foreground">{report.sprint.name}</h2>
               <StateBadge state={report.sprint.state} />
             </div>
             <p className="text-sm text-muted-foreground">
@@ -1434,11 +1452,11 @@ export function Reports({
   // The sprint picker card is full-width at the top (always visible).
   // Report body uses a dashboard grid below it.
   return (
-    <div className="w-full space-y-6">
+    <div className="w-full space-y-4">
       {/* Page title — v1.3 typographic scale */}
       <div className="flex items-center gap-3 print-report-header flex-wrap">
         <FileText className="h-6 w-6 text-primary" aria-hidden="true" />
-        <h1 className="text-2xl font-semibold text-foreground">Reports</h1>
+        <h1 className="text-xl font-semibold text-foreground">Reports</h1>
         {/* v1.6 (ADR-017): Board toggle — only shown when boards is loaded */}
         {!boardsLoading && boards !== null && (
           <ReportsBoardToggle

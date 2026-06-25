@@ -51,10 +51,6 @@ vi.mock("../components/HuddleDigest", () => ({
   HuddleDigest: () => <div data-testid="huddle-digest">Huddle Digest</div>,
 }));
 
-vi.mock("../components/ChatPanel", () => ({
-  ChatPanel: () => <div data-testid="chat-panel">Chat Panel</div>,
-}));
-
 vi.mock("../components/CreateSprintDialog", () => ({
   CreateSprintDialog: ({ boardId }: { boardId?: number }) => (
     <div data-testid="create-sprint-dialog" data-board-id={boardId}>Create Sprint</div>

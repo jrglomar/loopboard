@@ -1,6 +1,6 @@
-// Pure markdown builder for sprint reports — CONTRACTS.md §6, ADR-012, ADR-013
+// Pure markdown + CSV builders for sprint reports — CONTRACTS.md §6, ADR-012, ADR-013
 // No side effects; deterministic output; fully unit-tested.
-// Used by the export bar (Copy, Download .md, Print).
+// Used by the export bar (Copy, Download .md, Download .csv, Print).
 //
 // v1.4.1 (ADR-013): story-points focused — no issue-count metrics in summary or
 // by-assignee table; carryover shown as points; formatPoints for all values.
@@ -221,4 +221,53 @@ export function buildReportMarkdown(
   }
 
   return lines.join("\n");
+}
+
+// ── CSV builder (v1.20, Reports CSV export) ───────────────────────────────────
+
+/** Quote a CSV field when it contains a comma, quote, or newline; escape inner quotes. */
+function csvCell(value: string | number): string {
+  const s = String(value);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function csvRow(cells: Array<string | number>): string {
+  return cells.map(csvCell).join(",");
+}
+
+/**
+ * Build a spreadsheet-friendly CSV of a sprint report's per-assignee breakdown.
+ *
+ * One header row + one row per assignee (raw numeric points/counts for spreadsheet math),
+ * then a TOTAL row. When `leavesCapacity` is provided, a "Leave Days" column is appended.
+ * Pure + deterministic — mirrors the by-assignee section of the Markdown export.
+ */
+export function buildReportCsv(
+  report: SprintReport,
+  leavesCapacity?: LeavesCapacityData | null
+): string {
+  const withLeaves = !!leavesCapacity;
+  const header = ["Assignee", "Done Points", "Total Points", "Done Count", "Total Count"];
+  if (withLeaves) header.push("Leave Days");
+
+  const rows: string[] = [csvRow(header)];
+
+  for (const row of report.byAssignee) {
+    const cells: Array<string | number> = [
+      row.name, row.donePoints, row.totalPoints, row.doneCount, row.totalCount,
+    ];
+    if (withLeaves) cells.push(leavesCapacity!.byAssigneeLeaveDays[row.name] ?? 0);
+    rows.push(csvRow(cells));
+  }
+
+  // TOTAL row (sums across assignees — uses report totals for points so it matches the summary).
+  const totalDoneCount = report.byAssignee.reduce((n, r) => n + r.doneCount, 0);
+  const totalCount = report.byAssignee.reduce((n, r) => n + r.totalCount, 0);
+  const totalCells: Array<string | number> = [
+    "TOTAL", report.completedPoints, report.committedPoints, totalDoneCount, totalCount,
+  ];
+  if (withLeaves) totalCells.push(leavesCapacity!.leavePersonDays);
+  rows.push(csvRow(totalCells));
+
+  return rows.join("\r\n");
 }

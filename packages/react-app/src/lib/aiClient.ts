@@ -14,6 +14,8 @@ import type {
   SprintSummaryResponse,
   PlanDevTicketsRequest,
   PlanDevTicketsResponse,
+  AskRequest,
+  AskResponse,
 } from "./types";
 
 /** HTTP bridge base URL — same as mcpClient jira base */
@@ -164,4 +166,13 @@ export async function aiPlanDevTickets(
   body: PlanDevTicketsRequest
 ): Promise<PlanDevTicketsResponse> {
   return postAi<PlanDevTicketsResponse>("/api/ai/plan-dev-tickets", body);
+}
+
+/**
+ * POST /api/ai/ask — in-app AI Q&A assistant (v1.18, ADR-029).
+ * Free-form question answered by an agentic loop over read-only tools.
+ * Throws McpError. AI_UNAVAILABLE (503) throws McpError{ code: "AI_UNAVAILABLE" }.
+ */
+export async function aiAsk(body: AskRequest): Promise<AskResponse> {
+  return postAi<AskResponse>("/api/ai/ask", body);
 }

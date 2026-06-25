@@ -40,9 +40,9 @@ export function ImpedimentsCard({ sprintId }: { sprintId: number | null }) {
 
   return (
     <Card className="shadow-sm">
-      <CardHeader className="pb-2">
-        <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 text-warning" aria-hidden="true" />
+      <CardHeader className="px-3 pt-3 pb-1.5">
+        <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+          <AlertTriangle className="h-3.5 w-3.5 text-warning" aria-hidden="true" />
           Impediments
           {items.length > 0 && (
             <span className="text-xs font-normal text-muted-foreground">
@@ -51,14 +51,14 @@ export function ImpedimentsCard({ sprintId }: { sprintId: number | null }) {
           )}
         </h3>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="px-3 pb-3 space-y-2">
         {sprintId === null ? (
           <p className="text-sm text-muted-foreground">Select a sprint to track impediments.</p>
         ) : (
           <>
             {/* Add form */}
-            <div className="flex items-end gap-2 flex-wrap">
-              <div className="flex-1 min-w-[140px]">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <div className="flex-1 min-w-[120px]">
                 <label htmlFor="imp-text" className="sr-only">New impediment</label>
                 <Input
                   id="imp-text"
@@ -66,10 +66,11 @@ export function ImpedimentsCard({ sprintId }: { sprintId: number | null }) {
                   onChange={(e) => setText(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") void add(); }}
                   placeholder="Describe a blocker…"
+                  className="h-8"
                   aria-label="New impediment text"
                 />
               </div>
-              <div className="w-24">
+              <div className="w-20">
                 <label htmlFor="imp-key" className="sr-only">Related ticket key</label>
                 <Input
                   id="imp-key"
@@ -77,11 +78,13 @@ export function ImpedimentsCard({ sprintId }: { sprintId: number | null }) {
                   onChange={(e) => setTicketKey(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") void add(); }}
                   placeholder="KEY?"
+                  className="h-8"
                   aria-label="Related ticket key (optional)"
                 />
               </div>
-              <Button type="button" size="sm" onClick={() => void add()} disabled={busy || !text.trim()}>
-                <Plus className="h-4 w-4 mr-1" aria-hidden="true" /> Add
+              <Button type="button" size="sm" className="h-8" onClick={() => void add()} disabled={busy || !text.trim()}>
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                <span className="sr-only">Add impediment</span>
               </Button>
             </div>
 
@@ -92,7 +95,7 @@ export function ImpedimentsCard({ sprintId }: { sprintId: number | null }) {
             {items.length === 0 && !loading ? (
               <p className="text-sm text-muted-foreground">No impediments logged for this sprint.</p>
             ) : (
-              <ul className="space-y-1.5" role="list">
+              <ul className="space-y-1" role="list">
                 {items.map((imp) => (
                   <li key={imp.id} className="flex items-start gap-2 text-sm">
                     <input

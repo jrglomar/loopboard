@@ -1,15 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Target } from "lucide-react";
 import { SprintBoard } from "../components/SprintBoard";
 import { HuddleDigest } from "../components/HuddleDigest";
-import { ChatPanel } from "../components/ChatPanel";
 import { BoardToggle } from "../components/BoardToggle";
 import { ImpedimentsCard } from "../components/ImpedimentsCard";
 import { PullRequestsCard } from "../components/PullRequestsCard";
+import { PostScrumCard } from "../components/PostScrumCard";
+import { MeetingGoalCard } from "../components/MeetingGoalCard";
 import { useActiveSprint, useDailyHuddle } from "../hooks/useJira";
-import { getAiStatus } from "../lib/aiClient";
 import { useBoards } from "../lib/boards";
-import type { AiStatus, BoardKey, SharedSprintProps } from "../lib/types";
+import type { BoardKey, SharedSprintProps } from "../lib/types";
 
 // a11y: main landmark is provided by the App shell; Dashboard uses the slot.
 // v1.13 (ADR-024): controlled by App's shared board+sprint when props are present;
@@ -44,15 +44,6 @@ export function Dashboard({
 
   // v1.2: Dashboard owns assigneeFilter (ADR-008); null = All
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null);
-  const [aiStatus, setAiStatus] = useState<AiStatus>({ enabled: false, provider: null, model: null });
-
-  // Fetch AI status once on mount — shared with ChatPanel to avoid duplicate calls
-  useEffect(() => {
-    getAiStatus().then(setAiStatus).catch(() => {
-      // getAiStatus never throws, but be safe
-      setAiStatus({ enabled: false, provider: null, model: null });
-    });
-  }, []);
 
   const sprint = useActiveSprint(selectedBoardId, selectedSprintId);
   const huddle = useDailyHuddle(selectedBoardId, selectedSprintId);
@@ -100,6 +91,13 @@ export function Dashboard({
   // v1.16: the impediments + PR cards key off a concrete sprint id. When no explicit
   // pick, fall back to the loaded active sprint's id (null until data arrives).
   const effectiveSprintId = selectedSprintId ?? sprint.data?.sprint.id ?? null;
+
+  // v1.20 (ADR-031): the current sprint's ticket keys — auto-PRs are filtered to these.
+  const sprintKeys = useMemo(() => {
+    if (!sprint.data) return [];
+    const b = sprint.data.issuesByStatus;
+    return [...b.todo, ...b.inprogress, ...b.codereview, ...b.done].map((i) => i.key);
+  }, [sprint.data]);
 
   return (
     // Two-column layout: board (flex-1) | sidebar (360px) at lg+; stacked below
@@ -180,15 +178,27 @@ export function Dashboard({
         )}
       </section>
 
-      {/* Sidebar: Sprint command chat on top, then Huddle Digest */}
-      <div className="flex flex-col gap-4 min-w-0">
-        
-        {/* v1.16 (ADR-027): impediments log + pending-PR list for daily visibility */}
+      {/* Sidebar: compact daily-standup widgets + Huddle Digest.
+          The AI assistant is now a global floating widget (AssistantWidget). */}
+      <div className="flex flex-col gap-3 min-w-0">
+
+        {/* v1.20 (ADR-031): today's meeting focus, above the daily widgets */}
+        <section aria-label="Meeting goal">
+          <MeetingGoalCard sprintId={effectiveSprintId} />
+        </section>
+
+        {/* v1.16 (ADR-027): impediments log + pending-PR list for daily visibility.
+            v1.20: code review auto-lists PRs linked to the current sprint. */}
         <section aria-label="Impediments">
           <ImpedimentsCard sprintId={effectiveSprintId} />
         </section>
         <section aria-label="Code review pull requests">
-          <PullRequestsCard sprintId={effectiveSprintId} />
+          <PullRequestsCard sprintId={effectiveSprintId} sprintKeys={sprintKeys} />
+        </section>
+
+        {/* v1.20 (ADR-031): per-person post-scrum tracking */}
+        <section aria-label="Post-scrum notes">
+          <PostScrumCard sprintId={effectiveSprintId} boardId={selectedBoardId} />
         </section>
 
         {/* Huddle Digest — NOT filtered (ADR-008) */}
@@ -201,14 +211,6 @@ export function Dashboard({
           />
         </section>
 
-        {/* Chat Panel — sprint commands on top */}
-        <section aria-label="Sprint command chat">
-          <ChatPanel
-            selectedSprintId={selectedSprintId}
-            aiStatus={aiStatus}
-            assigneeFilter={assigneeFilter}
-          />
-        </section>
 
       </div>
     </div>

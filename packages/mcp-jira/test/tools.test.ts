@@ -28,6 +28,8 @@ vi.mock("../src/lib/jiraClient.js", () => ({
   createSprint: vi.fn(),
   getIssue: vi.fn(),
   updateIssue: vi.fn(),
+  getIssueNumericId: vi.fn(),
+  getDevStatusPullRequestsRaw: vi.fn(),
   isBlocked: vi.fn(),
   mapIssue: vi.fn(),
   resetClientCache: vi.fn(),
@@ -40,6 +42,10 @@ import { getSprint } from "../src/tools/getSprint.js";
 import { getTicket } from "../src/tools/getTicket.js";
 import { updateTicket } from "../src/tools/updateTicket.js";
 import { getDailyHuddle } from "../src/tools/getDailyHuddle.js";
+import {
+  getIssuePullRequestsTool,
+  parseDevStatusPullRequests,
+} from "../src/tools/getIssuePullRequests.js";
 import type { IssueSummary } from "../src/lib/types.js";
 
 const client = jiraClient as MockedObject<typeof jiraClient>;
@@ -495,10 +501,22 @@ describe("update_ticket", () => {
     expect(result.updatedFields).toContain("description");
   });
 
-  it("rejects when neither summary nor description is provided", async () => {
+  it("rejects when none of summary/description/storyPoints is provided", async () => {
     await expect(
       updateTicket.handler({ ticketKey: "DEV-42" })
-    ).rejects.toThrow("At least one of summary or description must be provided");
+    ).rejects.toThrow("At least one of summary, description, or storyPoints must be provided");
+  });
+
+  it("v1.19: updates story points (passes storyPoints to updateIssue)", async () => {
+    client.updateIssue.mockResolvedValueOnce(undefined);
+
+    const result = await updateTicket.handler({
+      ticketKey: "VRDB-2700",
+      storyPoints: 2,
+    }) as { updatedFields: string[] };
+
+    expect(result.updatedFields).toEqual(["storyPoints"]);
+    expect(client.updateIssue).toHaveBeenCalledWith("VRDB-2700", expect.objectContaining({ storyPoints: 2 }));
   });
 
   it("returns correct key and url", async () => {
@@ -756,5 +774,105 @@ describe("blocked detection in get_active_sprint", () => {
 
     const result = await getSprint.handler({}) as { totals: { blocked: number } };
     expect(result.totals.blocked).toBe(1);
+  });
+});
+
+// ==================================================================
+// v1.22 (ADR-034) — linked PRs from Jira Development Information
+// ==================================================================
+describe("parseDevStatusPullRequests (v1.22, pure)", () => {
+  it("maps PRs with approvals + derives repo/status/decision", () => {
+    const prs = parseDevStatusPullRequests({
+      detail: [
+        {
+          pullRequests: [
+            {
+              id: "#10", name: "VRDB-1: add login", url: "https://github.com/org/web/pull/10",
+              status: "OPEN", lastUpdate: "t",
+              reviewers: [
+                { name: "Alice", approvalStatus: "APPROVED" },
+                { name: "Bob", approvalStatus: "UNAPPROVED" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(prs).toHaveLength(1);
+    expect(prs[0]).toMatchObject({
+      url: "https://github.com/org/web/pull/10",
+      title: "VRDB-1: add login",
+      repo: "org/web",
+      status: "open",
+      decision: "approved",
+      approvals: 1,
+      reviewers: ["Alice"],
+    });
+  });
+
+  it("changes_requested wins; uses repositoryName when present", () => {
+    const prs = parseDevStatusPullRequests({
+      detail: [{ pullRequests: [{
+        url: "https://github.com/org/api/pull/5", name: "fix", status: "OPEN",
+        repositoryName: "org/api",
+        reviewers: [{ name: "A", approvalStatus: "APPROVED" }, { name: "B", approvalStatus: "CHANGES_REQUESTED" }],
+      }] }],
+    });
+    expect(prs[0]!.decision).toBe("changes_requested");
+    expect(prs[0]!.repo).toBe("org/api");
+  });
+
+  it("no reviewers → review_required; MERGED/DECLINED status mapped", () => {
+    const prs = parseDevStatusPullRequests({
+      detail: [{ pullRequests: [
+        { url: "https://x/y/pull/1", status: "MERGED" },
+        { url: "https://x/y/pull/2", status: "DECLINED" },
+      ] }],
+    });
+    expect(prs[0]!.decision).toBe("review_required");
+    expect(prs[0]!.status).toBe("merged");
+    expect(prs[1]!.status).toBe("declined");
+  });
+
+  it("tolerates empty / missing detail", () => {
+    expect(parseDevStatusPullRequests({})).toEqual([]);
+    expect(parseDevStatusPullRequests({ detail: [] })).toEqual([]);
+    expect(parseDevStatusPullRequests({ detail: [{}] })).toEqual([]);
+  });
+
+  it("skips PRs with no url", () => {
+    const prs = parseDevStatusPullRequests({ detail: [{ pullRequests: [{ name: "no url" }] }] });
+    expect(prs).toEqual([]);
+  });
+});
+
+describe("get_issue_pull_requests (v1.22)", () => {
+  it("resolves id then dev-status per key, keyed by issue key", async () => {
+    client.getIssueNumericId.mockImplementation(async (k: string) => (k === "VRDB-1" ? "1001" : null));
+    client.getDevStatusPullRequestsRaw.mockResolvedValue({
+      detail: [{ pullRequests: [{ url: "https://github.com/o/r/pull/3", name: "PR", status: "OPEN",
+        reviewers: [{ name: "Z", approvalStatus: "APPROVED" }] }] }],
+    });
+
+    const out = (await getIssuePullRequestsTool.handler({ keys: ["VRDB-1", "VRDB-9"] })) as {
+      pullRequests: Record<string, Array<{ decision: string }>>;
+    };
+    expect(out.pullRequests["VRDB-1"]).toHaveLength(1);
+    expect(out.pullRequests["VRDB-1"]![0]!.decision).toBe("approved");
+    // Unknown key (id null) → empty list, never throws.
+    expect(out.pullRequests["VRDB-9"]).toEqual([]);
+  });
+
+  it("is resilient — a per-key error yields [] for that key", async () => {
+    client.getIssueNumericId.mockResolvedValue("1001");
+    client.getDevStatusPullRequestsRaw.mockRejectedValue(new Error("dev-status 500"));
+    const out = (await getIssuePullRequestsTool.handler({ keys: ["VRDB-1"] })) as {
+      pullRequests: Record<string, unknown[]>;
+    };
+    expect(out.pullRequests["VRDB-1"]).toEqual([]);
+  });
+
+  it("rejects empty keys (validation)", async () => {
+    await expect(getIssuePullRequestsTool.handler({ keys: [] })).rejects.toThrow();
   });
 });

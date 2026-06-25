@@ -6,6 +6,7 @@ vi.mock("../src/lib/githubClient.js", () => ({
   githubClient: {
     listPrs: vi.fn(),
     getPr: vi.fn(),
+    listReviews: vi.fn(),
     listComments: vi.fn(),
     postComment: vi.fn(),
   },
@@ -21,6 +22,7 @@ import { githubClient } from "../src/lib/githubClient.js";
 import { createRemoteLink } from "../src/lib/jiraClient.js";
 import { listPrsTool } from "../src/tools/listPrs.js";
 import { getPrTool } from "../src/tools/getPr.js";
+import { getPrReviewsTool, summarizeReviews } from "../src/tools/getPrReviews.js";
 import { linkPrToTicketTool } from "../src/tools/linkPrToTicket.js";
 import { syncPrLinksTool } from "../src/tools/syncPrLinks.js";
 import { UpstreamError, ValidationError } from "../src/lib/errors.js";
@@ -375,5 +377,105 @@ describe("state derivation", () => {
   it("merged_at null + state closed -> closed", async () => {
     const { derivePrState } = await import("../src/tools/listPrs.js");
     expect(derivePrState({ state: "closed", merged_at: null })).toBe("closed");
+  });
+});
+
+describe("summarizeReviews (v1.21, pure)", () => {
+  const rv = (login: string, state: string) => ({ user: { login }, state: state as never });
+
+  it("latest meaningful vote per reviewer wins; COMMENTED ignored", () => {
+    const out = summarizeReviews([
+      rv("alice", "COMMENTED"),
+      rv("alice", "APPROVED"),
+      rv("bob", "COMMENTED"),
+    ]);
+    expect(out.decision).toBe("approved");
+    expect(out.approvals).toBe(1);
+    expect(out.reviewers).toEqual(["alice"]);
+  });
+
+  it("any active CHANGES_REQUESTED makes the decision changes_requested", () => {
+    const out = summarizeReviews([
+      rv("alice", "APPROVED"),
+      rv("bob", "CHANGES_REQUESTED"),
+    ]);
+    expect(out.decision).toBe("changes_requested");
+    expect(out.approvals).toBe(1);
+    expect(out.changesRequested).toBe(1);
+  });
+
+  it("a later APPROVED overrides an earlier CHANGES_REQUESTED by the same reviewer", () => {
+    const out = summarizeReviews([
+      rv("alice", "CHANGES_REQUESTED"),
+      rv("alice", "APPROVED"),
+    ]);
+    expect(out.decision).toBe("approved");
+    expect(out.changesRequested).toBe(0);
+    expect(out.approvals).toBe(1);
+  });
+
+  it("DISMISSED clears a prior approval", () => {
+    const out = summarizeReviews([
+      rv("alice", "APPROVED"),
+      rv("alice", "DISMISSED"),
+    ]);
+    expect(out.decision).toBe("review_required");
+    expect(out.approvals).toBe(0);
+  });
+
+  it("no reviews -> review_required", () => {
+    expect(summarizeReviews([]).decision).toBe("review_required");
+  });
+});
+
+describe("get_pr_reviews (v1.21)", () => {
+  beforeEach(() => {
+    setRequiredEnv();
+    resetConfigCache();
+    vi.clearAllMocks();
+  });
+  afterEach(() => {
+    clearEnv();
+    resetConfigCache();
+  });
+
+  it("returns a per-number review-status map", async () => {
+    vi.mocked(githubClient.listReviews).mockImplementation(async (_o, _r, n) =>
+      n === 42
+        ? [{ id: 1, user: { login: "alice" }, state: "APPROVED", submitted_at: "t" }]
+        : [{ id: 2, user: { login: "bob" }, state: "CHANGES_REQUESTED", submitted_at: "t" }],
+    );
+
+    const out = (await getPrReviewsTool.handler({ numbers: [42, 7] })) as {
+      repo: string;
+      reviews: Record<number, { decision: string; approvals: number }>;
+    };
+    expect(out.repo).toBe("owner/repo");
+    expect(out.reviews[42]!.decision).toBe("approved");
+    expect(out.reviews[42]!.approvals).toBe(1);
+    expect(out.reviews[7]!.decision).toBe("changes_requested");
+  });
+
+  it("omits a PR that 404s (resilient), keeps the rest", async () => {
+    vi.mocked(githubClient.listReviews).mockImplementation(async (_o, _r, n) => {
+      if (n === 999) throw new UpstreamError("PR/repo not found", 404);
+      return [{ id: 1, user: { login: "alice" }, state: "APPROVED", submitted_at: "t" }];
+    });
+
+    const out = (await getPrReviewsTool.handler({ numbers: [42, 999] })) as {
+      reviews: Record<number, unknown>;
+    };
+    expect(out.reviews[42]).toBeDefined();
+    expect(out.reviews[999]).toBeUndefined();
+  });
+
+  it("rejects empty numbers (validation)", async () => {
+    await expect(getPrReviewsTool.handler({ numbers: [] })).rejects.toThrow(ValidationError);
+  });
+
+  it("repo missing -> ValidationError", async () => {
+    delete process.env["GITHUB_REPO"];
+    resetConfigCache();
+    await expect(getPrReviewsTool.handler({ numbers: [1] })).rejects.toThrow(ValidationError);
   });
 });

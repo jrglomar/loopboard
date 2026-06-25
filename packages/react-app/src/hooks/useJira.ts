@@ -1,11 +1,14 @@
 // Typed Jira hooks — CONTRACTS.md §6
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { callTool } from "../lib/mcpClient";
+import { getIssuePullRequests } from "../lib/issuePrsClient";
 import { getLeaves, setLeaves, type LeavesMap } from "../lib/leavesClient";
 import { getAssignableUsers } from "../lib/assignClient";
 import { getTeamMembers, setTeamMembers, getRecentAssignees } from "../lib/teamClient";
 import { getImpediments, setImpediments, type ImpedimentInput } from "../lib/impedimentsClient";
 import { getPullRequests, setPullRequests, type PullRequestInput } from "../lib/prsClient";
+import { getPostScrum, setPostScrum, type PostScrumInput } from "../lib/postScrumClient";
+import { getMeetingGoal, setMeetingGoal } from "../lib/meetingGoalClient";
 import type { McpError } from "../lib/mcpClient";
 import {
   type GetActiveSprintOutput,
@@ -24,6 +27,9 @@ import {
   type RecentAssignee,
   type Impediment,
   type PullRequest,
+  type PostScrumNote,
+  type MeetingGoal,
+  type LinkedPr,
 } from "../lib/types";
 import { useMCP, type UseMCPState } from "./useMCP";
 
@@ -704,4 +710,137 @@ export function usePullRequests(sprintId: number | null): UsePullRequestsState {
   );
 
   return { data, loading, error, run, save };
+}
+
+// ── usePostScrum / useMeetingGoal (v1.20, ADR-031) ────────────────────────────
+
+export interface UsePostScrumState {
+  data: PostScrumNote[] | null;
+  loading: boolean;
+  error: McpError | null;
+  run: () => void;
+  /** Full-replace the sprint's post-scrum notes (replaces with the server result). */
+  save: (notes: PostScrumInput[]) => Promise<void>;
+}
+
+/**
+ * Per-sprint post-scrum notes (manual store). Loads on mount + when sprintId changes.
+ * Pass null to skip loading. CONTRACTS.md §4.23 v1.20, ADR-031.
+ */
+export function usePostScrum(sprintId: number | null): UsePostScrumState {
+  const [data, setData] = useState<PostScrumNote[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<McpError | null>(null);
+
+  const run = useCallback(() => {
+    if (sprintId === null) return;
+    setLoading(true);
+    setError(null);
+    getPostScrum(sprintId)
+      .then((list) => { setData(list); setLoading(false); })
+      .catch((err: unknown) => { setError(toMcpError(err)); setLoading(false); });
+  }, [sprintId]);
+
+  useEffect(() => {
+    if (sprintId !== null) run();
+    else { setData(null); setError(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sprintId]);
+
+  const save = useCallback(
+    async (notes: PostScrumInput[]) => {
+      if (sprintId === null) return;
+      const prev = data;
+      try {
+        const updated = await setPostScrum(sprintId, notes);
+        setData(updated);
+      } catch (err: unknown) {
+        setData(prev);
+        throw err;
+      }
+    },
+    [sprintId, data]
+  );
+
+  return { data, loading, error, run, save };
+}
+
+export interface UseMeetingGoalState {
+  data: MeetingGoal | null;
+  loading: boolean;
+  error: McpError | null;
+  run: () => void;
+  /** Set (or clear, when empty) the meeting goal; updates local state with the server result. */
+  save: (goal: string) => Promise<void>;
+}
+
+/**
+ * Per-sprint meeting goal (standup focus; manual store). Loads on mount + when sprintId changes.
+ * Pass null to skip loading. CONTRACTS.md §4.24 v1.20, ADR-031.
+ */
+export function useMeetingGoal(sprintId: number | null): UseMeetingGoalState {
+  const [data, setData] = useState<MeetingGoal | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<McpError | null>(null);
+
+  const run = useCallback(() => {
+    if (sprintId === null) return;
+    setLoading(true);
+    setError(null);
+    getMeetingGoal(sprintId)
+      .then((mg) => { setData(mg); setLoading(false); })
+      .catch((err: unknown) => { setError(toMcpError(err)); setLoading(false); });
+  }, [sprintId]);
+
+  useEffect(() => {
+    if (sprintId !== null) run();
+    else { setData(null); setError(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sprintId]);
+
+  const save = useCallback(
+    async (goal: string) => {
+      if (sprintId === null) return;
+      const prev = data;
+      try {
+        const updated = await setMeetingGoal(sprintId, goal);
+        setData(updated);
+      } catch (err: unknown) {
+        setData(prev);
+        throw err;
+      }
+    },
+    [sprintId, data]
+  );
+
+  return { data, loading, error, run, save };
+}
+
+// ── useIssuePullRequests (v1.22, ADR-034) ─────────────────────────────────────
+
+/**
+ * Linked PRs (across all repos) for a set of issue keys, from Jira's Development panel.
+ * Refetches when the SET of keys changes (order-independent), request-guarded. Failures
+ * resolve to {} so the caller renders nothing. CONTRACTS.md §4.25.
+ */
+export function useIssuePullRequests(keys: string[]): {
+  data: Record<string, LinkedPr[]>;
+  loading: boolean;
+} {
+  const [data, setData] = useState<Record<string, LinkedPr[]>>({});
+  const [loading, setLoading] = useState(false);
+  const key = [...keys].sort().join(",");
+  const reqId = useRef(0);
+
+  useEffect(() => {
+    if (keys.length === 0) { setData({}); return; }
+    const myReq = ++reqId.current;
+    setLoading(true);
+    getIssuePullRequests(keys)
+      .then((prs) => { if (myReq === reqId.current) { setData(prs); setLoading(false); } })
+      .catch(() => { if (myReq === reqId.current) { setData({}); setLoading(false); } });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return { data, loading };
 }

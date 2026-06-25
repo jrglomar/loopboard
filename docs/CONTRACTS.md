@@ -1,6 +1,6 @@
 # Integration Contracts
 
-**Status: FINAL — AUTHORITATIVE (v1.17)**  
+**Status: FINAL — AUTHORITATIVE (v1.22)**  
 Builder agents implement exactly what this document says. If something here is
 ambiguous, file a note to the Architect agent; do NOT invent new surface area or
 prefer the spec over this document — this document supersedes the spec on all
@@ -309,21 +309,22 @@ export interface ActiveSprintRef {
 ```
 
 ### 4.5 `update_ticket`
-- **Input:** `{ ticketKey: string, summary?: string, description?: string }` — zod
-  `.refine` that at least one of `summary`/`description` is present, with message
-  `"At least one of summary or description must be provided"`.
+- **Input:** `{ ticketKey: string, summary?: string, description?: string, storyPoints?: number }`
+  (v1.19: `storyPoints` added) — zod `.refine` that **at least one** of
+  `summary`/`description`/`storyPoints` is present, with message
+  `"At least one of summary, description, or storyPoints must be provided"`.
 - **Behavior:** `PUT /rest/api/3/issue/{ticketKey}` with body:
   ```json
   { "fields": { ...only fields provided... } }
   ```
   When `description` is provided, convert to ADF via `textToAdf()` before placing in
   `fields.description`. When `summary` is provided, place directly in `fields.summary`.
-  Jira returns `204 No Content` on success. A 404 returns `UPSTREAM` error
-  `"Ticket <ticketKey> not found"`.
+  When `storyPoints` is provided (v1.19), write it to the configured `JIRA_STORY_POINTS_FIELD`
+  (the same field the create path uses). Jira returns `204 No Content` on success. A 404 returns
+  `UPSTREAM` error `"Ticket <ticketKey> not found"`.
 - **Output:** `{ key: string; url: string; updatedFields: string[] }`
-  `updatedFields` contains the names of the fields that were included in the PUT body:
-  `"summary"` if summary was provided, `"description"` if description was provided.
-  Both may appear. Never empty (the zod refine prevents it).
+  `updatedFields` lists the fields included in the PUT body (`"summary"`, `"description"`,
+  and/or `"storyPoints"`). Never empty (the zod refine prevents it).
 
 ### 4.6 `get_daily_huddle`
 - **Input:** `{ boardId?: number, sprintId?: number }` — `boardId` defaults to
@@ -494,6 +495,30 @@ export interface AiProvider {
   devDescription: string }>; provider: "anthropic" | "github"; model: string }`. The UI matches
   `items` to the selected POs by `poKey`; any PO the model omits falls back to a deterministic
   template client-side. The UI reviews/edits the plan before bulk-creating via `create_dev_ticket`.
+
+`POST /api/ai/ask` (v1.18 — in-app AI Q&A assistant; ADR-029)
+- **Input (zod):** `{ question: string (1..2000), boardId?: number, sprintId?: number }` — a
+  free-form question plus the Huddle's current context for the model to resolve ids.
+- **Behavior:** an **agentic tool-calling loop** (the first multi-step/tool use of the `AiProvider`
+  port — prior endpoints do single calls). The system prompt states the assistant's role + the
+  current context (boardId, active sprintId, **today's date**). The model is offered a **read-only
+  allowlist** of mcp-jira tools (`get_active_sprint`, `get_daily_huddle`, `get_impediments`,
+  `get_pull_requests`, `get_post_scrum`, `get_meeting_goal`, `get_leaves`, `get_sprint_report`,
+  `get_velocity`, `get_team_members`,
+  `get_ticket`, `list_sprints`, `get_linked_issues`) as function specs (each tool's zod schema →
+  JSON Schema). On each turn the model may request tool calls; the loop runs the matching
+  `ToolDef.handler` **in-process** and feeds results back, **capped at ~5 turns**, until the model
+  returns a final answer. **No write tools are ever exposed** — the assistant cannot mutate Jira.
+  Bridge-only REST, NEVER an MCP tool (circular for Copilot). Lives in `lib/ai/askService.ts`; adds
+  `chatWithTools` to the `AiProvider` port + both adapters.
+- **Write-actions (v1.19, ADR-030):** the loop ALSO offers a curated **WRITE_TOOLS** set
+  (`update_ticket, transition_issue, move_issue_to_sprint, create_sprint, set_sprint_goal,
+  assign_issue`). Read calls run in-process as above, but a **write call is NEVER executed** — the
+  loop stops and returns the requested call as `proposedAction: { tool, args }`. The UI confirms it
+  in a modal and only then executes the write (via the existing tool). The AI never mutates Jira.
+- **Output:** `{ answer: string; toolsUsed: string[]; provider: "anthropic" | "github"; model: string;
+  proposedAction?: { tool: string; args: Record<string, unknown> } }`. When `proposedAction` is
+  present, `answer` is a short lead-in (may be empty) and the UI shows the confirmation modal.
 
 **Errors (all AI endpoints):**
 | Case | Status | `code` |
@@ -814,6 +839,71 @@ bridge-side JSON store pattern.
 - `PullRequest = { id: string; url: string; title?: string; ticketKey?: string; status?: string; addedAt: string }`.
 - Store path from `JIRA_PRS_FILE` (default `<mcp-jira>/.loopboard-prs.json`, git-ignored).
 - Registered MCP tools. Tests use a temp file; keyless/offline.
+- **Auto-PRs (v1.20, frontend-only — no tool change):** the Huddle code-review card ALSO shows
+  open GitHub PRs whose detected `jiraKeys` intersect the **current sprint's** ticket keys —
+  fetched via the existing `list_prs` (mcp-github) and filtered client-side against the loaded
+  sprint board. The manual `get/set_pull_requests` store remains as a supplement; when github is
+  unavailable the card degrades to manual-only. ADR-031.
+
+### 4.23 `get_post_scrum` / `set_post_scrum` (v1.20 — Huddle post-scrum tracking store; ADR-031)
+
+A manual, per-sprint, per-person log of post-scrum notes ("parking-lot" follow-ups captured after
+the daily standup, so they are tracked). Same bridge-side JSON store pattern as §4.21/§4.22 — NOT a
+Jira object.
+
+- **`get_post_scrum`** — **Input:** `{ sprintId: number }`. **Output:**
+  `{ sprintId, notes: PostScrumNote[] }` (`[]` when none).
+- **`set_post_scrum`** (full-replace) — **Input:** `{ sprintId: number, notes: Array<{ id?: string; person: string; note: string; createdAt?: string; resolved?: boolean }> }` (max 200).
+  The tool fills `id` (uuid) and `createdAt` (now) when omitted. **Output:** `{ sprintId, notes: PostScrumNote[] }`.
+- `PostScrumNote = { id: string; person: string; note: string; createdAt: string; resolved?: boolean }`.
+- Store path from `JIRA_POST_SCRUM_FILE` (default `<mcp-jira>/.loopboard-post-scrum.json`, git-ignored).
+- Registered MCP tools (and exposed to the AI Q&A read-allowlist, §4.9). Tests use a temp file; keyless/offline.
+
+### 4.24 `get_meeting_goal` / `set_meeting_goal` (v1.20 — Huddle meeting-goal store; ADR-031)
+
+A single editable "goal for today's meeting" per sprint (the standup's focus), distinct from the
+Jira **sprint** goal (§4.10b). Same bridge-side JSON store pattern.
+
+- **`get_meeting_goal`** — **Input:** `{ sprintId: number }`. **Output:**
+  `{ sprintId, goal: string, updatedAt: string | null }` (`goal: ""`, `updatedAt: null` when unset).
+- **`set_meeting_goal`** — **Input:** `{ sprintId: number, goal: string }` (`goal` may be empty to clear).
+  The tool stamps `updatedAt` (now). **Output:** `{ sprintId, goal: string, updatedAt: string | null }`.
+- Store shape: `{ [sprintId]: { goal: string; updatedAt: string } }`.
+- Store path from `JIRA_MEETING_GOAL_FILE` (default `<mcp-jira>/.loopboard-meeting-goal.json`, git-ignored).
+- Registered MCP tools (and exposed to the AI Q&A read-allowlist, §4.9). Tests use a temp file; keyless/offline.
+
+### 4.25 `get_issue_pull_requests` (v1.22, ADR-034 — multi-repo PRs from Jira Development Information)
+
+The team links PRs to Jira **automatically** by putting the uppercase issue key (e.g. `VRDB-123`) in
+the branch name / commit message / PR title — the *GitHub for Jira* app then attaches the PR to that
+issue's **Development** panel. This tool reads those linked PRs **per issue, across all repos** —
+unlike `list_prs` (§5.1), which enumerates a single `GITHUB_REPO`. It also carries reviewer/approval
+data, so the Huddle's code-review card uses it for both the PR list and the approval badge.
+
+- **Input:** `{ keys: string[] (1–50 issue keys) }`.
+- **Behavior:** for each key, resolve the numeric issue id (`GET /rest/api/3/issue/{key}?fields=*none`)
+  then read `GET /rest/dev-status/1.0/issue/detail?issueId={id}&applicationType={JIRA_DEV_STATUS_APP_TYPE}&dataType=pullrequest`
+  and reduce its `detail[].pullRequests[]` with a pure parser. Per-key failures (404, no dev data) →
+  `[]` (resilient, like `get_linked_issues`); fetched in parallel. **Read-only.**
+  > ⚠️ `/rest/dev-status/…` is an **undocumented** Jira endpoint (the one powering the Development
+  > panel). Parsed defensively; the exact shape is confirmed against a live Jira before release.
+- **Per-PR mapping → `LinkedPr`:**
+  ```ts
+  type ReviewDecision = "approved" | "changes_requested" | "review_required";
+  interface LinkedPr {
+    url: string; title: string; repo: string;        // repo "owner/name" or "" when absent
+    status: "open" | "merged" | "declined" | "unknown";
+    decision: ReviewDecision;                          // from reviewers' approvalStatus
+    approvals: number;                                 // reviewers with approvalStatus APPROVED
+    reviewers: string[];                               // approving reviewer display names
+    lastUpdate?: string;
+  }
+  ```
+  `decision` = `changes_requested` if any reviewer status is `CHANGES_REQUESTED`/`NEEDS_WORK`, else
+  `approved` if any is `APPROVED`, else `review_required`.
+- **Output:** `{ pullRequests: Record<string /*issue key*/, LinkedPr[]> }`.
+- **Config:** `JIRA_DEV_STATUS_APP_TYPE` (default `"GitHub"`; `"GitHubEnterprise"` for GHE).
+- Registered MCP tool (stdio + `/api/tools` + bridge). jira tools **31 → 32**.
 
 ## 5. mcp-github tools (Phase 2) — exact IO
 
@@ -890,6 +980,30 @@ export interface PrSummary {
     skipped: Array<{ number: number; reason: string }>;
   }
   ```
+
+### 5.6 `get_pr_reviews` (v1.21, ADR-033 — approval status of Jira-linked PRs)
+- **Input:** `{ repo?: string, numbers: number[] (1–50, positive ints) }`
+  Same `repo` fallback and missing-repo error as §5.1.
+- **Behavior:** for each number, `GET /repos/{owner}/{repo}/pulls/{number}/reviews?per_page=100`
+  and reduce to a decision (pure `summarizeReviews`): each reviewer's **latest meaningful** vote
+  wins — `APPROVED` / `CHANGES_REQUESTED` / `DISMISSED` override earlier votes; `COMMENTED` and
+  `PENDING` are ignored; `DISMISSED` clears that reviewer's vote. `decision` = `"changes_requested"`
+  if any active CHANGES_REQUESTED, else `"approved"` if any active APPROVED, else
+  `"review_required"`. Fetched in parallel; a PR that 404s is **omitted** from the result map (not
+  fatal) — mirrors `get_linked_issues` resilience. Read-only (no writes).
+- **Output:** `{ repo: string; reviews: Record<number, PrReviewStatus> }` where
+  ```ts
+  type ReviewDecision = "approved" | "changes_requested" | "review_required";
+  interface PrReviewStatus {
+    decision: ReviewDecision;
+    approvals: number;          // distinct reviewers whose latest vote is APPROVED
+    changesRequested: number;   // distinct reviewers whose latest vote is CHANGES_REQUESTED
+    reviewers: string[];        // logins of approving reviewers
+  }
+  ```
+- **Consumer:** the Huddle code-review card calls this with the numbers of the auto-listed,
+  current-sprint-linked open PRs (§4.22) and shows an approval badge per PR. The aggregate is a
+  dependency-free approximation of GitHub's review decision (no CODEOWNERS/required-reviewer logic).
 
 ### 5.5 Jira key detection (`src/lib/jiraKeys.ts`)
 Regex `/\b([A-Z][A-Z0-9]{1,9}-\d+)\b/g` over PR **title + head branch name + body**
@@ -1801,3 +1915,82 @@ Changes made by the Architect agent during finalization:
     the linked Dev task too (`createTicketPair`, unchanged). The AI chat / fallback / Regenerate are
     preserved. Rationale: bulk PO→Dev already lives on the Linking page. New `createPoTicket` hook
     wrapper; new shadcn `sheet.tsx`. No MCP/tool surface change (frontend-only composition).
+
+## Changelog v1.18 (2026-06-24 — in-app AI Q&A assistant: tool-calling over read tools; ADR-029)
+
+97. **§4.9 (new) — `POST /api/ai/ask`** `{ question, boardId?, sprintId? }` → `{ answer, toolsUsed,
+    provider, model }`. The first **agentic tool-calling** use of the `AiProvider` port: a capped
+    loop offers the model a **read-only allowlist** of mcp-jira tools (as zod→JSON-Schema function
+    specs), runs the chosen `ToolDef.handler`s **in-process**, and synthesizes an answer. New
+    `chatWithTools` on the port + anthropic/github adapters; new `lib/ai/askService.ts`; new dep
+    `zod-to-json-schema`. **No write tools exposed.** Bridge-only (never an MCP tool).
+98. **§6 — Huddle `ChatPanel` gains an "ask" mode.** When AI is enabled, free-form input that isn't a
+    known command routes to `/api/ai/ask` and renders the answer; deterministic commands
+    (`huddle`/`sprint`/…) stay as-is for speed; AI-off keeps the help fallback. Amends ADR-002/006
+    (the router stays deterministic; the AI path is additive, behind the `AI_PROVIDER` flag).
+
+## Changelog v1.19 (2026-06-24 — floating assistant + chatbot write-actions w/ modal confirm; ADR-030)
+
+99. **§6 — assistant is a global floating widget.** The `ChatPanel` moves out of the Huddle sidebar
+    into a `AssistantWidget` — a **FAB at the lower-right** that pops the assistant on click, mounted
+    once in `App.tsx` so it's available on every tab (lazy-mounts on first open; history persists).
+100. **§4.5 — `update_ticket` gains `storyPoints`** (writes `JIRA_STORY_POINTS_FIELD`); refine now
+    accepts summary/description/storyPoints. New jiraClient support on the update path.
+101. **§4.9 — `/api/ai/ask` gains write-actions via `proposedAction`.** A curated WRITE_TOOLS set is
+    offered to the model but **never executed by the loop** — a write request returns
+    `proposedAction { tool, args }`; the UI confirms it in a **modal** (`ConfirmActionDialog`, an
+    editable form for `create_sprint`) and only then executes the write via the existing tool. Reads
+    still answer directly. Covers "update points of VRDB-2700 to 2pts", "move … to next sprint",
+    "create a new sprint …". ADR-030.
+
+## Changelog v1.20 (2026-06-25 — Huddle daily sections: auto-PRs + post-scrum + meeting goal; ADR-031)
+
+102. **§4.22 — auto-PRs in the code-review card (frontend-only).** The Huddle code-review card now
+    ALSO lists open GitHub PRs whose detected `jiraKeys` are in the **current sprint** (via the
+    existing `list_prs`, filtered against the loaded sprint board). Manual PR store stays as a
+    supplement; github-down degrades to manual-only. No tool change. ADR-031.
+103. **§4.23 (new) — `get_post_scrum` / `set_post_scrum`.** A manual, per-sprint, per-person store of
+    post-scrum "parking-lot" notes for tracking. `PostScrumNote { id, person, note, createdAt, resolved? }`;
+    `postScrumStore.ts`; `JIRA_POST_SCRUM_FILE` config (git-ignored). Full-replace set (fills id/createdAt).
+104. **§4.24 (new) — `get_meeting_goal` / `set_meeting_goal`.** A single editable "goal for today's
+    meeting" per sprint (standup focus), distinct from the Jira sprint goal. Store shape
+    `{ [sprintId]: { goal, updatedAt } }`; `meetingGoalStore.ts`; `JIRA_MEETING_GOAL_FILE` config (git-ignored).
+105. **§4.9 — read-allowlist gains `get_post_scrum` + `get_meeting_goal`** so the assistant can answer
+    "what's today's meeting goal?" / "any post-scrum notes for X?". jira tools **27 → 31**.
+106. **§6 — Huddle sidebar hosts four compact daily cards** (impediments, code review w/ auto-PRs,
+    post-scrum, meeting goal), redesigned tighter. New `PostScrumCard` + `MeetingGoalCard`, clients,
+    and `usePostScrum` / `useMeetingGoal` hooks. ADR-031.
+107. **§6 — Reports CSV export (frontend-only).** New pure `buildReportCsv(report, leavesCapacity?)`
+    beside `buildReportMarkdown`; a **Download .csv** button in the Reports export bar emits the
+    per-assignee breakdown (header + per-assignee rows + TOTAL; Leave Days column when capacity data
+    is present) via the same Blob pattern (`text/csv`). No tool/route change.
+108. **§6 — App-wide compact visual refresh (presentation-only).** Default shadcn card padding
+    `p-6 → p-4`; page containers unified to `space-y-4`; Reports headings `text-2xl → text-xl`. No
+    DOM/text/behavior change — the content + behavior test suite stays green. ADR-032.
+
+## Changelog v1.21 (2026-06-25 — approver status of Jira-linked PRs on the Huddle; ADR-033)
+
+109. **§5.6 (new) — `get_pr_reviews { numbers[], repo? }`.** Batch review/approval status for PRs:
+    per-PR `GET /pulls/{n}/reviews` reduced by pure `summarizeReviews` to
+    `{ decision: approved|changes_requested|review_required, approvals, changesRequested, reviewers[] }`.
+    Latest-meaningful-vote-per-reviewer; COMMENTED/PENDING ignored; DISMISSED clears; 404 PR omitted.
+    github tools **4 → 5**. New `githubClient.listReviews` + `PrReviewStatus`/`ReviewDecision` types.
+110. **§4.22 / §6 — approval badge on auto-linked PRs.** The Huddle code-review card calls
+    `get_pr_reviews` for its current-sprint auto-PR numbers (new `getPrReviews` client + `usePrReviews`
+    hook) and shows a per-PR badge (✓ approved + count · ✗ changes requested · ⏳ review required).
+    Read-only; github-down or unreviewed PRs simply show no badge. ADR-033.
+
+## Changelog v1.22 (2026-06-26 — multi-repo PRs from Jira Development Information; ADR-034)
+
+111. **§4.25 (new) — `get_issue_pull_requests { keys[] }`.** Reads each issue's linked PRs from Jira's
+    **Development** panel (`/rest/dev-status/…`, populated automatically by the *GitHub for Jira* app
+    from the issue key in branch/commit/PR-title) — **multi-repo**, with reviewer/approval data. Per-key
+    id-resolve + dev-status detail, pure `parseDevStatusPullRequests` → `LinkedPr[]` (url/title/repo/
+    status/decision/approvals/reviewers). Resilient per key; read-only. `JIRA_DEV_STATUS_APP_TYPE`
+    config (default `GitHub`). jira tools **31 → 32**. (Undocumented endpoint — defensive parse.)
+112. **§6 — Huddle code-review card now sourced from Jira (multi-repo).** Supersedes the single-repo
+    GitHub auto-PR source (ADR-031) + `get_pr_reviews`-on-the-card (ADR-033): the card calls
+    `get_issue_pull_requests` with the current sprint's ticket keys (new `getIssuePullRequests` client
+    + `useIssuePullRequests` hook) and renders each linked PR with its approval badge across all repos.
+    Manual PR store stays. `get_pr_reviews`/`list_prs` remain available tools (single-repo / Copilot).
+    ADR-034.

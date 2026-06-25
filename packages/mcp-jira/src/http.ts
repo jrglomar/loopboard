@@ -26,6 +26,7 @@ import { UpstreamError, ConfigError } from "./lib/errors.js";
 import { ZodError } from "zod";
 import { getAiProvider, getAiStatus } from "./lib/ai/provider.js";
 import { draftTickets, enhanceTicket, draftSprintSummary, planDevTickets } from "./lib/ai/draftService.js";
+import { askAssistant } from "./lib/ai/askService.js";
 
 // ---- Read package version at startup ----
 const _require = createRequire(import.meta.url);
@@ -138,6 +139,14 @@ const planDevTicketsInputSchema = z.object({
     .min(1)
     .max(20),
   instructions: z.string().max(2000).optional(),
+});
+
+// ---- Input zod schema for the AI Q&A assistant (v1.18, ADR-029) ----
+
+const askInputSchema = z.object({
+  question: z.string().min(1).max(2000),
+  boardId: z.number().int().positive().optional(),
+  sprintId: z.number().int().positive().optional(),
 });
 
 // ---- Input zod schema for sprint-summary AI endpoint (v1.4) ----
@@ -432,6 +441,53 @@ app.post("/api/ai/plan-dev-tickets", async (req, res) => {
       parsed.data.poStories,
       parsed.data.instructions
     );
+    res.json({ ok: true, data: result });
+  } catch (err) {
+    if (err instanceof UpstreamError) {
+      errorResponse(res, 502, "UPSTREAM", err.message);
+      return;
+    }
+    if (err instanceof ConfigError) {
+      errorResponse(res, 500, "CONFIG", err.message);
+      return;
+    }
+    const msg = err instanceof Error ? err.message : "Internal server error";
+    errorResponse(res, 500, "INTERNAL", msg);
+  }
+});
+
+// POST /api/ai/ask (v1.18, §4.9, ADR-029) — in-app AI Q&A assistant (read-only tool calls)
+app.post("/api/ai/ask", async (req, res) => {
+  const parsed = askInputSchema.safeParse(req.body);
+  if (!parsed.success) {
+    errorResponse(res, 400, "VALIDATION", "Input validation failed", parsed.error.issues);
+    return;
+  }
+
+  let provider;
+  try {
+    provider = await getAiProvider();
+  } catch (err) {
+    if (err instanceof ConfigError) {
+      errorResponse(res, 500, "CONFIG", err.message);
+      return;
+    }
+    const msg = err instanceof Error ? err.message : "Internal server error";
+    errorResponse(res, 500, "INTERNAL", msg);
+    return;
+  }
+
+  if (provider === null) {
+    errorResponse(res, 503, "AI_UNAVAILABLE", AI_UNAVAILABLE_MSG);
+    return;
+  }
+
+  try {
+    const result = await askAssistant(provider, parsed.data.question, {
+      boardId: parsed.data.boardId,
+      sprintId: parsed.data.sprintId,
+      today: new Date().toISOString().slice(0, 10),
+    });
     res.json({ ok: true, data: result });
   } catch (err) {
     if (err instanceof UpstreamError) {
