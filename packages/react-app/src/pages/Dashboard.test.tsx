@@ -40,10 +40,15 @@ vi.mock("../lib/boards", () => ({
 
 // Mock child components to avoid complex dependency chains
 vi.mock("../components/SprintBoard", () => ({
-  SprintBoard: ({ error, createSprintButton }: { error: { code: string; message: string } | null; createSprintButton?: React.ReactNode }) => {
+  SprintBoard: ({ error, createSprintButton, onSelectSprint }: { error: { code: string; message: string } | null; createSprintButton?: React.ReactNode; onSelectSprint?: (id: number) => void }) => {
     // Render error message so we can test no-sprint empty state
     if (error) return <div data-testid="sprint-board-error">{error.message}</div>;
-    return <div data-testid="sprint-board">{createSprintButton}Sprint Board</div>;
+    return (
+      <div data-testid="sprint-board">
+        {createSprintButton}Sprint Board
+        <button type="button" onClick={() => onSelectSprint?.(999)}>mock-pick-sprint</button>
+      </div>
+    );
   },
 }));
 
@@ -271,20 +276,21 @@ describe("Dashboard — sprint goal banner + shared context (v1.13, ADR-024)", (
     expect(await screen.findByText(/No goal set/i)).toBeTruthy();
   });
 
-  it("controlled: uses the boardKey prop from App (PO pressed)", async () => {
+  it("controlled: uses the boardKey prop from App (PO board id flows to hooks)", async () => {
+    // v1.24: when controlled, the board selector lives in the App shell — not the page.
     render(<Dashboard boardKey="po" sprintId={null} onBoardChange={vi.fn()} onSprintChange={vi.fn()} />);
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "PO" }).getAttribute("aria-pressed")).toBe("true");
+      const calls = vi.mocked(useJiraModule.useActiveSprint).mock.calls;
+      expect(calls.some((args) => args[0] === 20)).toBe(true); // PO board id
     });
+    // The in-page board toggle is gone in controlled mode (it's in the shell top-bar).
+    expect(screen.queryByRole("button", { name: "PO" })).toBeNull();
   });
 
   it("controlled: picking a sprint calls onSprintChange (carries to App)", async () => {
     const onSprintChange = vi.fn();
-    // SprintBoard is mocked; assert the wiring via the board toggle's onBoardChange instead.
-    const onBoardChange = vi.fn();
-    render(<Dashboard boardKey="dev" sprintId={null} onBoardChange={onBoardChange} onSprintChange={onSprintChange} />);
-    await waitFor(() => screen.getByRole("button", { name: "PO" }));
-    fireEvent.click(screen.getByRole("button", { name: "PO" }));
-    expect(onBoardChange).toHaveBeenCalledWith("po");
+    render(<Dashboard boardKey="dev" sprintId={null} onBoardChange={vi.fn()} onSprintChange={onSprintChange} />);
+    fireEvent.click(await screen.findByRole("button", { name: "mock-pick-sprint" }));
+    expect(onSprintChange).toHaveBeenCalledWith(999);
   });
 });

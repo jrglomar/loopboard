@@ -269,21 +269,24 @@ export function Planning({
             {/* Board + sprint context row */}
             <div className="flex items-end gap-4 flex-wrap">
 
-              {/* Board toggle */}
-              <div className="space-y-1.5">
-                {/* a11y: visual label above the toggle */}
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Board
-                </p>
-                {!boardsLoading && boards !== null ? (
-                  <BoardToggle
-                    selectedKey={selectedBoardKey}
-                    onChange={handleBoardChange}
-                  />
-                ) : boardsLoading ? (
-                  <Skeleton className="h-8 w-24" />
-                ) : null}
-              </div>
+              {/* Board toggle. v1.24: when controlled by the App shell, the selector lives in
+                  the shell top-bar — only render here in standalone use (e.g. tests). */}
+              {!onBoardChange && (
+                <div className="space-y-1.5">
+                  {/* a11y: visual label above the toggle */}
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Board
+                  </p>
+                  {!boardsLoading && boards !== null ? (
+                    <BoardToggle
+                      selectedKey={selectedBoardKey}
+                      onChange={handleBoardChange}
+                    />
+                  ) : boardsLoading ? (
+                    <Skeleton className="h-8 w-24" />
+                  ) : null}
+                </div>
+              )}
 
               {/* v1.8 (ADR-019): Team Manager — curated per-board roster */}
               <div className="space-y-1.5">

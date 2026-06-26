@@ -1,6 +1,6 @@
 # Integration Contracts
 
-**Status: FINAL — AUTHORITATIVE (v1.22)**  
+**Status: FINAL — AUTHORITATIVE (v1.24)**  
 Builder agents implement exactly what this document says. If something here is
 ambiguous, file a note to the Architect agent; do NOT invent new surface area or
 prefer the spec over this document — this document supersedes the spec on all
@@ -1994,3 +1994,28 @@ Changes made by the Architect agent during finalization:
     + `useIssuePullRequests` hook) and renders each linked PR with its approval badge across all repos.
     Manual PR store stays. `get_pr_reviews`/`list_prs` remain available tools (single-repo / Copilot).
     ADR-034.
+
+## Changelog v1.23 (2026-06-26 — Huddle: Fly-in tracker + bigger chat + theme refresh; ADR-035)
+
+113. **§6 — Fly-in tracker card.** New `FlyInCard` on the Huddle sidebar lists current-sprint tickets
+    whose title is LIKE "FLY IN" (pure `matchFlyIn`, word-boundary `\bfly[\s_-]*in\b`; `selectFlyIns`).
+    Derived from the already-loaded `get_active_sprint` issues — **no new tool/route**.
+114. **§6 — assistant popup enlarged.** `AssistantWidget` panel `w-[360px] → w-[440px]`; `ChatPanel`
+    height `h-[480px] → h-[min(640px,calc(100vh-9rem))]` (bigger, viewport-safe).
+115. **§6 — theme refresh (presentation-only, ADR-035).** Token pass in `globals.css` toward the
+    reference Kanban look: azure-blue primary (`243 75% 59% → 228 80% 60%` + ring + dark), cooler/
+    lighter background, softer border, rounder cards (`--radius 0.5rem → 0.75rem`), softer shadows.
+    App-wide via tokens; no DOM/text change — content/behavior tests stay green.
+
+## Changelog v1.24 (2026-06-26 — Huddle Fly-in (horizontal+status) + chat scrim + sidebar shell; ADR-036)
+
+116. **§6 — Fly-in tracker horizontal + status.** `FlyInCard` moved from the narrow sidebar to a
+    **full-width strip above the board** (Dashboard, shown only when there are fly-ins), rendered as a
+    wrap of ticket chips each with a **tinted status pill** (by `statusCategory`) + assignee.
+117. **§6 — assistant popup: 750px + scrim.** `AssistantWidget` panel `w-[440px] → w-[750px]`, added
+    `shadow-2xl` + a **dim backdrop scrim** (`bg-black/40`, click-to-dismiss, `aria-modal`).
+118. **§6 — shell: sidebar nav + board selector top-right (ADR-036).** The top header moved to a
+    **left sidebar** (brand + version + vertical `role="tab"` nav, same a11y as before). A single board
+    selector now lives in the **top-right top-bar**, driving the shared board context; the per-page
+    `BoardToggle` renders only in standalone/uncontrolled use (so page tests stay green). Hidden on
+    Linking (dual-board). No tool/route/contract-IO change.

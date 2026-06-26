@@ -53,14 +53,25 @@ export function AssistantWidget() {
 
   return (
     <>
+      {/* Dim scrim behind the panel while open — click to dismiss */}
+      {open && (
+        <div
+          className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[1px] transition-opacity"
+          aria-hidden="true"
+          onClick={() => setOpen(false)}
+        />
+      )}
+
       {/* Popup panel — mounted after first open, hidden (not unmounted) when closed */}
       {everOpened && (
         <div
           className={cn(
-            "fixed bottom-[5.5rem] right-4 sm:right-5 z-50 w-[360px] max-w-[calc(100vw-2rem)]",
+            "fixed bottom-[5.5rem] right-4 sm:right-5 z-50 w-[750px] max-w-[calc(100vw-2rem)]",
+            "rounded-lg shadow-2xl ring-1 ring-black/5",
             !open && "hidden"
           )}
           role="dialog"
+          aria-modal="true"
           aria-label="Sprint assistant"
         >
           <AssistantPanel />

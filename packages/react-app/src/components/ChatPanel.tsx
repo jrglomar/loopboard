@@ -521,7 +521,7 @@ export function ChatPanel({ className, selectedSprintId, aiStatus, assigneeFilte
   return (
     <div
       className={cn(
-        "flex flex-col bg-card border border-border rounded-lg shadow-sm overflow-hidden h-[480px]",
+        "flex flex-col bg-card border border-border rounded-lg shadow-sm overflow-hidden h-[min(640px,calc(100vh-9rem))]",
         className
       )}
     >

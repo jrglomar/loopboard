@@ -10,7 +10,9 @@
 @layer base {
   :root {
     /* ── Core shadcn/Radix theme variables ────────────────────────────────── */
-    --background: 220 14% 96%;       /* #f0f2f5 — app background */
+    /* v1.23 (ADR-035): theme refresh toward the reference Kanban look — cooler/lighter
+       background, a brighter azure-blue primary, rounder cards, softer borders. */
+    --background: 224 33% 97%;       /* #f4f6fb — app background (cool, airy) */
     --foreground: 221 39% 11%;       /* #111827 — text */
 
     --card: 0 0% 100%;               /* #ffffff — card/surface */
@@ -19,11 +21,11 @@
     --popover: 0 0% 100%;
     --popover-foreground: 221 39% 11%;
 
-    /* Primary = indigo hsl(243 75% 59%) */
-    --primary: 243 75% 59%;
+    /* Primary = azure blue hsl(228 80% 60%) (~#3f5fe6) */
+    --primary: 228 80% 60%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 14% 96%;
+    --secondary: 224 33% 97%;
     --secondary-foreground: 221 39% 11%;
 
     --muted: 210 40% 96%;
@@ -36,12 +38,12 @@
     --destructive: 0 72% 51%;        /* error red — matches --error below */
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 13% 84%;
-    --input: 220 13% 84%;
-    --ring: 243 75% 59%;             /* indigo focus ring */
+    --border: 220 16% 90%;           /* softer card hairline */
+    --input: 220 15% 87%;
+    --ring: 228 80% 60%;             /* azure focus ring */
 
-    /* radius: rounded-lg = 0.5rem, rounded-md = calc(0.5rem - 2px) */
-    --radius: 0.5rem;
+    /* radius: rounded-lg = 0.75rem (rounder cards, per the reference) */
+    --radius: 0.75rem;
 
     /* ── Semantic tokens: success ─────────────────────────────────────────── */
     --success: 142 71% 45%;
@@ -104,19 +106,19 @@
     --status-blocked-border: 0 72% 80%;
 
     /* ── Legacy app-specific tokens (kept for backward compat) ──────────────── */
-    --bg: hsl(220 14% 96%);
+    --bg: hsl(224 33% 97%);
     --surface: hsl(0 0% 100%);
     --surface-raised: hsl(210 40% 98%);
     --text: hsl(221 39% 11%);
     --text-muted: hsl(215 16% 47%);
     --text-on-accent: hsl(0 0% 100%);
-    --app-accent: hsl(243 75% 59%);
-    --app-accent-hover: hsl(243 75% 53%);
-    --accent-light: hsl(239 84% 93%);
+    --app-accent: hsl(228 80% 60%);
+    --app-accent-hover: hsl(228 80% 54%);
+    --accent-light: hsl(228 84% 94%);
 
-    /* ── Shadows ─────────────────────────────────────────────────────────── */
-    --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
-    --shadow-md: 0 4px 6px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.04);
+    /* ── Shadows (soft, diffuse — the floating-card look) ─────────────────── */
+    --shadow-sm: 0 1px 2px rgba(16,24,40,0.04), 0 1px 3px rgba(16,24,40,0.06);
+    --shadow-md: 0 4px 10px rgba(16,24,40,0.06), 0 2px 4px rgba(16,24,40,0.04);
   }
 
   /* ── Dark mode variable block (no toggle UI yet — ready for future) ─────── */
@@ -130,7 +132,7 @@
     --popover: 222 47% 14%;
     --popover-foreground: 213 31% 91%;
 
-    --primary: 243 75% 65%;
+    --primary: 228 80% 66%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 222 47% 18%;
@@ -147,7 +149,7 @@
 
     --border: 222 47% 22%;
     --input: 222 47% 22%;
-    --ring: 243 75% 65%;
+    --ring: 228 80% 66%;
 
     --success: 142 71% 50%;
     --success-foreground: 0 0% 100%;

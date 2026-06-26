@@ -7,6 +7,7 @@ import { ImpedimentsCard } from "../components/ImpedimentsCard";
 import { PullRequestsCard } from "../components/PullRequestsCard";
 import { PostScrumCard } from "../components/PostScrumCard";
 import { MeetingGoalCard } from "../components/MeetingGoalCard";
+import { FlyInCard, selectFlyIns } from "../components/FlyInCard";
 import { useActiveSprint, useDailyHuddle } from "../hooks/useJira";
 import { useBoards } from "../lib/boards";
 import type { BoardKey, SharedSprintProps } from "../lib/types";
@@ -93,26 +94,40 @@ export function Dashboard({
   const effectiveSprintId = selectedSprintId ?? sprint.data?.sprint.id ?? null;
 
   // v1.20 (ADR-031): the current sprint's ticket keys — auto-PRs are filtered to these.
-  const sprintKeys = useMemo(() => {
+  // v1.23 (ADR-035): also the flat issue list, reused for the Fly-in tracker.
+  const sprintIssues = useMemo(() => {
     if (!sprint.data) return [];
     const b = sprint.data.issuesByStatus;
-    return [...b.todo, ...b.inprogress, ...b.codereview, ...b.done].map((i) => i.key);
+    return [...b.todo, ...b.inprogress, ...b.codereview, ...b.done];
   }, [sprint.data]);
+  const sprintKeys = useMemo(() => sprintIssues.map((i) => i.key), [sprintIssues]);
+  const flyIns = useMemo(() => selectFlyIns(sprintIssues), [sprintIssues]);
 
   return (
-    // Two-column layout: board (flex-1) | sidebar (360px) at lg+; stacked below
-    <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5 items-start">
+    <div className="space-y-4">
+
+      {/* v1.24: Fly-in tracking — full-width strip above the board (status + wide visibility) */}
+      {flyIns.length > 0 && (
+        <section aria-label="Fly-in tickets">
+          <FlyInCard flyIns={flyIns} />
+        </section>
+      )}
+
+      {/* Two-column layout: board (flex-1) | sidebar (360px) at lg+; stacked below */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5 items-start">
 
       {/* Sprint board — left / full-width on mobile */}
       <section aria-label="Sprint board" className="min-w-0">
-        {/* v1.6: Board toggle header */}
-        <div className="flex items-center gap-3 mb-3 flex-wrap">
-          {/* a11y: only show the toggle when boards loaded; hidden (not present) during load */}
-          {!boardsLoading && boards !== null && (
-            <BoardToggle selectedKey={selectedBoardKey} onChange={handleBoardChange} />
-          )}
-          {/* When boards not available yet, nothing shown — toggle area is empty */}
-        </div>
+        {/* v1.6: Board toggle header. v1.24: when CONTROLLED by the App shell (onBoardChange
+            present), the board selector lives in the shell top-bar — only render the in-page
+            toggle in standalone use (e.g. tests). */}
+        {!onBoardChange && (
+          <div className="flex items-center gap-3 mb-3 flex-wrap">
+            {!boardsLoading && boards !== null && (
+              <BoardToggle selectedKey={selectedBoardKey} onChange={handleBoardChange} />
+            )}
+          </div>
+        )}
 
         {/* v1.13 (ADR-024): Sprint-goal banner — goal + % points done + days left */}
         {sprint.data && !isNoSprintError && (() => {
@@ -212,6 +227,7 @@ export function Dashboard({
         </section>
 
 
+      </div>
       </div>
     </div>
   );

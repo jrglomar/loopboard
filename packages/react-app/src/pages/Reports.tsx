@@ -1457,8 +1457,9 @@ export function Reports({
       <div className="flex items-center gap-3 print-report-header flex-wrap">
         <FileText className="h-6 w-6 text-primary" aria-hidden="true" />
         <h1 className="text-xl font-semibold text-foreground">Reports</h1>
-        {/* v1.6 (ADR-017): Board toggle — only shown when boards is loaded */}
-        {!boardsLoading && boards !== null && (
+        {/* v1.6 (ADR-017): Board toggle — only when boards loaded.
+            v1.24: when controlled by the App shell, the selector lives in the shell top-bar. */}
+        {!onBoardChange && !boardsLoading && boards !== null && (
           <ReportsBoardToggle
             selectedKey={selectedBoardKey}
             onChange={handleBoardChange}
