@@ -65,13 +65,14 @@ export function Linking() {
   const formId = useId();
   const { boards, loading: boardsLoading } = useBoards();
 
-  const poSprintList = useSprintList("all", boards?.po.id);
-  const devSprintList = useSprintList("all", boards?.dev.id);
+  // v1.25 (ADR-037): Linking is dual-board; uses each side's default project (element 0).
+  const poSprintList = useSprintList("all", boards?.po[0]?.id);
+  const devSprintList = useSprintList("all", boards?.dev[0]?.id);
 
   const [poSprintId, setPoSprintId] = useState<number | undefined>(undefined);
   const [devSprintId, setDevSprintId] = useState<number | undefined>(undefined);
 
-  const poTicketsState = useActiveSprint(boards?.po.id, poSprintId ?? null);
+  const poTicketsState = useActiveSprint(boards?.po[0]?.id, poSprintId ?? null);
   const poTickets = useMemo(() => flattenIssues(poTicketsState.data), [poTicketsState.data]);
 
   // Existing PO→Dev links (badged in the list)
@@ -152,6 +153,14 @@ export function Linking() {
     setDescMap(descByKey);
     const descOf = (key: string) => capDesc(descByKey[key] ?? "");
 
+    // v1.30 (ADR-042): the Dev task KEEPS the PO story's title — the AI only enhances the
+    // description — and is DRAFTED with the PO's points (editable on the plan card before create).
+    const draftFromPo = (items: PlanDevTicketItem[]): PlanDevTicketItem[] =>
+      items.map((it) => {
+        const po = chosen.find((t) => t.key === it.poKey);
+        return { ...it, devSummary: po?.summary ?? it.devSummary, storyPoints: po?.storyPoints ?? null };
+      });
+
     const fallback = (): PlanDevTicketItem[] =>
       chosen.map((t) => {
         const d = buildDraftPair(t.summary).dev;
@@ -180,17 +189,17 @@ export function Linking() {
           const d = buildDraftPair(t.summary).dev;
           return { poKey: t.key, devSummary: d.summary, devDescription: d.description };
         });
-        setPlan(items);
+        setPlan(draftFromPo(items));
         setAiNote(res.assistantMessage);
       } else {
-        setPlan(fallback());
+        setPlan(draftFromPo(fallback()));
         setAiNote("AI is off — drafted from local templates. Edit each task before creating.");
       }
       setPhase("plan");
     } catch (err: unknown) {
       // AI error/unavailable → deterministic fallback so the workflow never blocks
       const e = err as McpError;
-      setPlan(fallback());
+      setPlan(draftFromPo(fallback()));
       setAiNote(
         e.code === "AI_UNAVAILABLE"
           ? "AI is off — drafted from local templates. Edit each task before creating."
@@ -229,7 +238,8 @@ export function Linking() {
         instructions,
       });
       const item = res.items.find((i) => i.poKey === poKey) ?? res.items[0];
-      if (item) editPlanItem(poKey, { devSummary: item.devSummary, devDescription: item.devDescription });
+      // v1.30 (ADR-042): keep the PO title — regenerate only refreshes the description.
+      if (item) editPlanItem(poKey, { devDescription: item.devDescription });
     } catch {
       // Keep the current draft on failure — non-fatal.
     } finally {
@@ -248,6 +258,7 @@ export function Linking() {
           summary: item.devSummary.trim() || item.poKey,
           description: item.devDescription,
           linkedPoTicketKey: item.poKey,
+          storyPoints: item.storyPoints ?? undefined,
           ...(devSprintId !== undefined ? { sprintId: devSprintId } : {}),
         });
         setResults((prev) => prev.map((r, idx) => idx === i ? {
@@ -277,6 +288,7 @@ export function Linking() {
           summary: item.devSummary.trim() || item.poKey,
           description: item.devDescription,
           linkedPoTicketKey: item.poKey,
+          storyPoints: item.storyPoints ?? undefined,
           ...(devSprintId !== undefined ? { sprintId: devSprintId } : {}),
         });
         setResults((prev) => prev.map((r) => r.poKey === item.poKey ? {
@@ -461,7 +473,9 @@ export function Linking() {
             {plan.map((item) => (
               <div key={item.poKey} className="rounded-md border border-border bg-muted/20 p-3 space-y-2">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <p className="text-xs text-muted-foreground">New Dev task → linked to <span className="font-mono font-semibold text-foreground">{item.poKey}</span></p>
+                  <p className="text-xs text-muted-foreground">
+                    New Dev task → linked to <span className="font-mono font-semibold text-foreground">{item.poKey}</span>
+                  </p>
                   {(descMap[item.poKey] ?? "").trim().length > 0 ? (
                     <Badge variant="outline" className="text-[0.625rem] border-success-border text-success bg-success-bg">
                       drafted from PO description
@@ -472,10 +486,23 @@ export function Linking() {
                     </Badge>
                   )}
                 </div>
-                <div>
-                  <Label htmlFor={`${formId}-ps-${item.poKey}`} className="text-xs font-semibold mb-1 block">Summary</Label>
-                  <Input id={`${formId}-ps-${item.poKey}`} value={item.devSummary} maxLength={255}
-                    onChange={(e) => editPlanItem(item.poKey, { devSummary: e.target.value })} />
+                <div className="flex gap-2 items-end flex-wrap">
+                  <div className="flex-1 min-w-[180px]">
+                    <Label htmlFor={`${formId}-ps-${item.poKey}`} className="text-xs font-semibold mb-1 block">Title <span className="font-normal text-muted-foreground">(kept from PO — edit if needed)</span></Label>
+                    <Input id={`${formId}-ps-${item.poKey}`} value={item.devSummary} maxLength={255}
+                      onChange={(e) => editPlanItem(item.poKey, { devSummary: e.target.value })} />
+                  </div>
+                  {/* v1.30 (ADR-042): points drafted from the PO — editable before create */}
+                  <div className="w-24">
+                    <Label htmlFor={`${formId}-pp-${item.poKey}`} className="text-xs font-semibold mb-1 block">Points <span className="font-normal text-muted-foreground">(from PO)</span></Label>
+                    <Input
+                      id={`${formId}-pp-${item.poKey}`}
+                      type="number" min={0} step={1}
+                      value={item.storyPoints ?? ""}
+                      onChange={(e) => { const v = e.target.value; editPlanItem(item.poKey, { storyPoints: v === "" ? null : Number(v) }); }}
+                      aria-label={`Story points for the Dev task linked to ${item.poKey}`}
+                    />
+                  </div>
                 </div>
                 <div>
                   <Label htmlFor={`${formId}-pd-${item.poKey}`} className="text-xs font-semibold mb-1 block">Description</Label>

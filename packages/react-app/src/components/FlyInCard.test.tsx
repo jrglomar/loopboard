@@ -1,9 +1,9 @@
-// FlyInCard tests — v1.23, ADR-035. Pure matcher + render. Keyless/offline.
+// FlyInCard tests — v1.23 (ADR-035) + dual PO/Dev alignment v1.27 (ADR-040). Keyless/offline.
 
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import { FlyInCard, matchFlyIn, selectFlyIns } from "./FlyInCard";
-import type { IssueSummary } from "../lib/types";
+import type { IssueSummary, LinkedIssue } from "../lib/types";
 
 function issue(over: Partial<IssueSummary>): IssueSummary {
   return {
@@ -41,17 +41,51 @@ describe("selectFlyIns", () => {
   });
 });
 
-describe("FlyInCard", () => {
-  it("shows an empty state when there are no fly-in tickets", () => {
-    render(<FlyInCard flyIns={[]} />);
+describe("FlyInCard (dual PO/Dev, v1.27)", () => {
+  it("shows an empty state when neither board has fly-in tickets", () => {
+    render(<FlyInCard devFlyIns={[]} poFlyIns={[]} />);
     expect(screen.getByText(/No fly-in tickets this sprint/i)).toBeTruthy();
   });
 
-  it("renders each fly-in ticket as a key link + summary + assignee", () => {
-    render(<FlyInCard flyIns={[issue({ key: "VRDB-7", summary: "Fly in: QA onsite", assignee: "Alice" })]} />);
-    const link = screen.getByRole("link", { name: /Open VRDB-7 in a new tab/i });
-    expect(link.getAttribute("href")).toContain("/browse/VRDB-1"); // fixture url
+  it("renders Dev and PO groups with their tickets", () => {
+    render(
+      <FlyInCard
+        devFlyIns={[issue({ key: "VRDB-7", summary: "Fly in: QA onsite", assignee: "Alice" })]}
+        poFlyIns={[issue({ key: "VBPO-3", summary: "Fly-in approval", url: "https://jira.example.com/browse/VBPO-3" })]}
+      />
+    );
+    expect(screen.getByText("Dev board")).toBeTruthy();
+    expect(screen.getByText("PO board")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Open VRDB-7 in a new tab/i })).toBeTruthy();
     expect(screen.getByText("Fly in: QA onsite")).toBeTruthy();
     expect(screen.getByText("Alice")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Open VBPO-3 in a new tab/i })).toBeTruthy();
+  });
+
+  it("flags a PO fly-in as aligned (links to the Dev fly-in) when alignment data has a match", () => {
+    const aligned: LinkedIssue = {
+      key: "VRDB-9", summary: "Fly in: QA onsite", status: "In Progress",
+      url: "https://jira.example.com/browse/VRDB-9",
+    };
+    render(
+      <FlyInCard
+        devFlyIns={[]}
+        poFlyIns={[issue({ key: "VBPO-3", summary: "Fly-in approval" })]}
+        poAlignment={{ "VBPO-3": aligned }}
+      />
+    );
+    const link = screen.getByRole("link", { name: /Aligned with Dev fly-in VRDB-9/i });
+    expect(link.getAttribute("href")).toBe("https://jira.example.com/browse/VRDB-9");
+  });
+
+  it("flags a PO fly-in with no aligned Dev fly-in", () => {
+    render(
+      <FlyInCard
+        devFlyIns={[]}
+        poFlyIns={[issue({ key: "VBPO-3", summary: "Fly-in approval" })]}
+        poAlignment={{ "VBPO-3": null }}
+      />
+    );
+    expect(screen.getByText(/No Dev fly-in/i)).toBeTruthy();
   });
 });

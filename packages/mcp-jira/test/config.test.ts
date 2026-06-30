@@ -1,6 +1,34 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { getConfig, resetConfigCache } from "../src/lib/config.js";
+import { getConfig, resetConfigCache, parseProjects } from "../src/lib/config.js";
 import { ConfigError } from "../src/lib/errors.js";
+
+describe("parseProjects (v1.25, ADR-037)", () => {
+  it("parses a KEY:boardId,KEY2:boardId2 list in order", () => {
+    expect(parseProjects("VRDB:1038,OTHER:1234", "DEV", "1")).toEqual([
+      { projectKey: "VRDB", id: 1038 },
+      { projectKey: "OTHER", id: 1234 },
+    ]);
+  });
+
+  it("falls back to a 1-element list from the single key + board id when empty", () => {
+    expect(parseProjects("", "DEV", "1038")).toEqual([{ projectKey: "DEV", id: 1038 }]);
+    expect(parseProjects("   ", "PO", "10")).toEqual([{ projectKey: "PO", id: 10 }]);
+  });
+
+  it("skips malformed entries (no colon, missing key, non-numeric id) but keeps valid ones", () => {
+    expect(parseProjects("VRDB:1038, bad, :9, KEY:notnum, OK:7", "DEV", "1")).toEqual([
+      { projectKey: "VRDB", id: 1038 },
+      { projectKey: "OK", id: 7 },
+    ]);
+  });
+
+  it("tolerates surrounding whitespace", () => {
+    expect(parseProjects("  A : 1 ,  B:2 ", "DEV", "9")).toEqual([
+      { projectKey: "A", id: 1 },
+      { projectKey: "B", id: 2 },
+    ]);
+  });
+});
 
 // Save and restore process.env around each test
 const originalEnv = { ...process.env };

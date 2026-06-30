@@ -25,6 +25,9 @@ coverage/
 *.loopboard-post-scrum.json
 .loopboard-meeting-goal.json
 *.loopboard-meeting-goal.json
+# Offset-ledger store (v1.26 — host-local JSON, never committed)
+.loopboard-offset.json
+*.loopboard-offset.json
 
 # Editor / OS
 .DS_Store

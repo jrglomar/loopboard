@@ -8,10 +8,13 @@ export interface BoardRef {
   projectKey: string;
 }
 
-/** Boards config from GET /api/health .boards — dev + po (ADR-017) */
+/**
+ * Boards config from GET /api/health .boards — dev + po (ADR-017).
+ * v1.25 (ADR-037): each side is a LIST of projects (multi-project); element 0 = default.
+ */
 export interface Boards {
-  dev: BoardRef;
-  po: BoardRef;
+  dev: BoardRef[];
+  po: BoardRef[];
 }
 
 /** Which board is currently selected in the UI */
@@ -28,6 +31,11 @@ export interface SharedSprintProps {
   sprintId?: number | null;
   onBoardChange?: (key: BoardKey) => void;
   onSprintChange?: (id: number) => void;
+  /**
+   * v1.25 (ADR-037): the active project index for the currently-selected board side.
+   * Board-scoped pages resolve `boards[boardKey][projectIdx]`. Undefined → 0 (default project).
+   */
+  projectIdx?: number;
 }
 
 // ── mcp-jira shared types (CONTRACTS.md §4) ──────────────────────────────────
@@ -344,6 +352,9 @@ export interface PlanDevTicketItem {
   poKey: string;
   devSummary: string;
   devDescription: string;
+  // v1.30 (ADR-042): drafted from the PO's points, editable on the Linking plan card before
+  // create. Frontend-populated — the plan-dev-tickets endpoint does not return it.
+  storyPoints?: number | null;
 }
 
 /** POST /api/ai/plan-dev-tickets output. */
@@ -496,6 +507,28 @@ export interface LinkedPr {
 /** get_issue_pull_requests output — linked PRs keyed by issue key. */
 export interface GetIssuePullRequestsOutput {
   pullRequests: Record<string, LinkedPr[]>;
+}
+
+// ── Leaves & offset (v1.26, ADR-038) ─────────────────────────────────────────
+
+/** A leave type plotted per day. */
+export type LeaveType = "VL" | "EL" | "Holiday" | "Offset";
+
+/** Per-assignee map of ISO date (YYYY-MM-DD) → leave type. */
+export type AssigneeLeaves = Record<string, LeaveType>;
+
+/** One developer's computed offset standing (get_offset_ledger). */
+export interface OffsetSummary {
+  earned: number;
+  spent: number;
+  manualAdjust: number;
+  balance: number;
+}
+
+/** Offset policy from GET /api/health .policy. */
+export interface OffsetPolicy {
+  requiredPoints: number; // N
+  offsetThreshold: number; // N2
 }
 
 /** get_pr output */

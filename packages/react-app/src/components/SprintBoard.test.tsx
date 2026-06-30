@@ -860,4 +860,39 @@ describe("SprintBoard", () => {
     // My Issues button must not exist — it was removed per ADR-013
     expect(screen.queryByRole("button", { name: /my issues/i })).toBeNull();
   });
+
+  // ── v1.27 (ADR-039): linked-PR badge on cards ─────────────────────────────
+
+  it("renders a clickable PR badge on a card whose key has a linked PR", () => {
+    render(
+      <SprintBoard
+        data={SAMPLE_SPRINT}
+        loading={false}
+        error={null}
+        onRefresh={() => undefined}
+        prsByKey={{
+          "DEV-10": [
+            {
+              url: "https://github.com/acme/web/pull/42",
+              title: "Add refresh token",
+              repo: "acme/web",
+              status: "open",
+              decision: "approved",
+              approvals: 1,
+              reviewers: ["Bob"],
+            },
+          ],
+        }}
+      />
+    );
+    const badge = screen.getByRole("link", { name: /linked pull request/i });
+    expect(badge).toHaveAttribute("href", "https://github.com/acme/web/pull/42");
+  });
+
+  it("renders no PR badge when prsByKey is absent", () => {
+    render(
+      <SprintBoard data={SAMPLE_SPRINT} loading={false} error={null} onRefresh={() => undefined} />
+    );
+    expect(screen.queryByRole("link", { name: /linked pull request/i })).toBeNull();
+  });
 });

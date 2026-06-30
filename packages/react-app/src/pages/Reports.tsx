@@ -43,13 +43,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
-import { useSprintList, useSprintReport, useVelocity } from "../hooks/useJira";
+import { useSprintList, useSprintReport, useVelocity, useIssuePullRequests } from "../hooks/useJira";
 import { getAiStatus, aiSprintSummary } from "../lib/aiClient";
 import { useBoards } from "../lib/boards";
 import { buildReportMarkdown, buildReportCsv } from "../lib/reportMarkdown";
 import { formatPoints } from "../lib/format";
 import { computeCapacity, possibleCommittedVelocity, sprintWorkingDays } from "../lib/capacity";
 import { LeavesCalendarCard } from "../components/LeavesCalendarCard";
+import { PrBadge } from "../components/PrBadge";
 import type {
   SprintRef,
   SprintReport,
@@ -58,6 +59,7 @@ import type {
   AiStatus,
   BoardKey,
   SharedSprintProps,
+  LinkedPr,
 } from "../lib/types";
 import type { McpError } from "../lib/mcpClient";
 
@@ -384,9 +386,11 @@ interface IssueListProps {
   issues: SprintReport["completed"] | SprintReport["notCompleted"];
   emptyText: string;
   variant?: "completed" | "carryover";
+  /** v1.27 (ADR-039): linked PRs per issue key — drives the "has PR" badge per row. */
+  prsByKey?: Record<string, LinkedPr[]>;
 }
 
-function IssueList({ title, issues, emptyText, variant = "completed" }: IssueListProps) {
+function IssueList({ title, issues, emptyText, variant = "completed", prsByKey }: IssueListProps) {
   const isCarryover = variant === "carryover";
   return (
     <Card className="shadow-sm h-full">
@@ -443,6 +447,8 @@ function IssueList({ title, issues, emptyText, variant = "completed" }: IssueLis
                         ⚠ Blocked
                       </Badge>
                     )}
+                    {/* v1.27 (ADR-039): linked-PR badge */}
+                    <PrBadge prs={prsByKey?.[issue.key]} />
                   </div>
                 </div>
               </li>
@@ -1104,6 +1110,11 @@ function SprintReportView({
 
   const avgCompleted = velocity?.averageCompleted ?? 0;
   const possibleVelocity = possibleCommittedVelocity(avgCompleted, capacityFactor);
+
+  // v1.27 (ADR-039): linked PRs for the report's issue rows (completed + carryover).
+  // The hook only refetches when the SET of keys changes (order-independent).
+  const reportKeys = [...report.completed, ...report.notCompleted].map((i) => i.key);
+  const { data: prsByKey } = useIssuePullRequests(reportKeys);
   return (
     // a11y: main report region, labeled for screen readers
     <article aria-label={`Sprint report: ${report.sprint.name}`} className="space-y-4">
@@ -1243,6 +1254,7 @@ function SprintReportView({
           issues={report.completed}
           emptyText="No completed issues this sprint."
           variant="completed"
+          prsByKey={prsByKey}
         />
         {/* (7) Carryover list */}
         <IssueList
@@ -1250,6 +1262,7 @@ function SprintReportView({
           issues={report.notCompleted}
           emptyText="No carryover — all issues completed!"
           variant="carryover"
+          prsByKey={prsByKey}
         />
       </div>
 
@@ -1315,15 +1328,17 @@ export function Reports({
   sprintId: sprintIdProp,
   onBoardChange,
   onSprintChange,
+  projectIdx,
 }: SharedSprintProps = {}) {
   // ── v1.6 (ADR-017): board context ───────────────────────────────────────────
   const { boards, loading: boardsLoading } = useBoards();
   const [localBoardKey, setLocalBoardKey] = useState<BoardKey>("dev");
   const selectedBoardKey = boardKeyProp ?? localBoardKey;
+  const activeProjectIdx = projectIdx ?? 0; // v1.25 (ADR-037)
 
   // Numeric id for the selected board — undefined until boards loads (tools use server default)
   const selectedBoardId: number | undefined =
-    boards ? boards[selectedBoardKey].id : undefined;
+    boards ? boards[selectedBoardKey][activeProjectIdx]?.id : undefined;
 
   // ── Sprint picker state ─────────────────────────────────────────────────────
   const sprintList = useSprintList("all", selectedBoardId);

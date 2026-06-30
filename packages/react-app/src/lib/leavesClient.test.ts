@@ -17,14 +17,14 @@ const mockCallTool = vi.mocked(callTool);
 
 const SPRINT_ID = 42;
 const LEAVES_MAP = {
-  Alice: ["2026-06-01", "2026-06-02"],
-  Bob: ["2026-06-03"],
+  Alice: { "2026-06-01": "VL", "2026-06-02": "VL" },
+  Bob: { "2026-06-03": "VL" },
 };
 
 const GET_LEAVES_RESPONSE = { sprintId: SPRINT_ID, leaves: LEAVES_MAP };
 const SET_LEAVES_RESPONSE = {
   sprintId: SPRINT_ID,
-  leaves: { ...LEAVES_MAP, Carol: ["2026-06-04"] },
+  leaves: { ...LEAVES_MAP, Carol: { "2026-06-04": "Offset" } },
 };
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
@@ -71,27 +71,27 @@ describe("getLeaves", () => {
 // ── setLeaves ─────────────────────────────────────────────────────────────────
 
 describe("setLeaves", () => {
-  it("calls callTool with jira / set_leaves / { sprintId, assignee, dates }", async () => {
+  it("calls callTool with jira / set_leaves / { sprintId, assignee, entries }", async () => {
     mockCallTool.mockResolvedValueOnce(SET_LEAVES_RESPONSE);
-    await setLeaves(SPRINT_ID, "Carol", ["2026-06-04"]);
+    await setLeaves(SPRINT_ID, "Carol", [{ date: "2026-06-04", type: "Offset" }]);
     expect(mockCallTool).toHaveBeenCalledOnce();
     expect(mockCallTool).toHaveBeenCalledWith("jira", "set_leaves", {
       sprintId: SPRINT_ID,
       assignee: "Carol",
-      dates: ["2026-06-04"],
+      entries: [{ date: "2026-06-04", type: "Offset" }],
     });
   });
 
   it("returns the updated leaves map from the response envelope", async () => {
     mockCallTool.mockResolvedValueOnce(SET_LEAVES_RESPONSE);
-    const result = await setLeaves(SPRINT_ID, "Carol", ["2026-06-04"]);
+    const result = await setLeaves(SPRINT_ID, "Carol", [{ date: "2026-06-04", type: "Offset" }]);
     expect(result).toEqual(SET_LEAVES_RESPONSE.leaves);
   });
 
-  it("clears an assignee's leaves when dates is empty", async () => {
+  it("clears an assignee's leaves when entries is empty", async () => {
     const clearedResponse = {
       sprintId: SPRINT_ID,
-      leaves: { Alice: ["2026-06-01", "2026-06-02"] }, // Bob removed
+      leaves: { Alice: { "2026-06-01": "VL", "2026-06-02": "VL" } }, // Bob removed
     };
     mockCallTool.mockResolvedValueOnce(clearedResponse);
     const result = await setLeaves(SPRINT_ID, "Bob", []);
@@ -99,7 +99,7 @@ describe("setLeaves", () => {
     expect(mockCallTool).toHaveBeenCalledWith("jira", "set_leaves", {
       sprintId: SPRINT_ID,
       assignee: "Bob",
-      dates: [],
+      entries: [],
     });
   });
 
@@ -109,7 +109,7 @@ describe("setLeaves", () => {
       message: "Cannot reach jira bridge — run: npm run dev:jira:http",
     };
     mockCallTool.mockRejectedValueOnce(bridgeError);
-    await expect(setLeaves(SPRINT_ID, "Alice", ["2026-06-01"])).rejects.toMatchObject({
+    await expect(setLeaves(SPRINT_ID, "Alice", [{ date: "2026-06-01", type: "VL" }])).rejects.toMatchObject({
       code: "BRIDGE_DOWN",
     });
   });
@@ -118,10 +118,10 @@ describe("setLeaves", () => {
     const validationError = {
       code: "VALIDATION",
       message: "Invalid date format",
-      issues: [{ message: "dates[0]: Expected YYYY-MM-DD" }],
+      issues: [{ message: "entries[0].date: Expected YYYY-MM-DD" }],
     };
     mockCallTool.mockRejectedValueOnce(validationError);
-    await expect(setLeaves(SPRINT_ID, "Alice", ["not-a-date"])).rejects.toMatchObject({
+    await expect(setLeaves(SPRINT_ID, "Alice", [{ date: "not-a-date" as string, type: "VL" }])).rejects.toMatchObject({
       code: "VALIDATION",
     });
   });

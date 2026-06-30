@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { LayoutDashboard, CalendarRange, Link2, BarChart3 } from "lucide-react";
+import { LayoutDashboard, CalendarRange, CalendarDays, Link2, BarChart3 } from "lucide-react";
 import { Dashboard } from "./pages/Dashboard";
 import { Planning } from "./pages/Planning";
+import { Leaves } from "./pages/Leaves";
 import { Linking } from "./pages/Linking";
 import { Reports } from "./pages/Reports";
 import { AssistantWidget } from "./components/AssistantWidget";
 import { BoardToggle } from "./components/BoardToggle";
+import { useBoards } from "./lib/boards";
 import type { BoardKey } from "./lib/types";
 import { cn } from "@/lib/utils";
 
@@ -13,11 +15,12 @@ import { cn } from "@/lib/utils";
 
 // v1.7 (ADR-018): "Ticket Generator" tab removed; replaced by "Planning" tab.
 // v1.11 (ADR-022): "Linking" tab added (bulk PO→Dev ticket creation).
-type Tab = "dashboard" | "planning" | "linking" | "reports";
+type Tab = "dashboard" | "planning" | "leaves" | "linking" | "reports";
 
 const TABS: { id: Tab; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "dashboard", label: "Huddle", icon: LayoutDashboard },
   { id: "planning", label: "Planning", icon: CalendarRange },
+  { id: "leaves", label: "Leaves", icon: CalendarDays },
   { id: "linking", label: "Linking", icon: Link2 },
   { id: "reports", label: "Reports", icon: BarChart3 },
 ];
@@ -31,11 +34,22 @@ export function App() {
 
   // v1.13 (ADR-024): shared board + sprint context across Dashboard/Planning/Reports.
   // sprintId is the EXPLICIT pick (null = none → each page applies its own default).
+  const { boards } = useBoards();
   const [boardKey, setBoardKey] = useState<BoardKey>("dev");
   const [sprintId, setSprintId] = useState<number | null>(null);
+  // v1.25 (ADR-037): active project index per side; the top-bar dropdown picks it.
+  const [devProjectIdx, setDevProjectIdx] = useState(0);
+  const [poProjectIdx, setPoProjectIdx] = useState(0);
+  const projectIdx = boardKey === "dev" ? devProjectIdx : poProjectIdx;
+  const activeProjects = boards ? boards[boardKey] : [];
+  const setActiveProjectIdx = (i: number) => {
+    if (boardKey === "dev") setDevProjectIdx(i); else setPoProjectIdx(i);
+    setSprintId(null); // project switch invalidates the explicit sprint pick
+  };
   const shared = {
     boardKey,
     sprintId,
+    projectIdx,
     onBoardChange: (k: BoardKey) => { setBoardKey(k); setSprintId(null); },
     onSprintChange: (id: number) => setSprintId(id),
   };
@@ -105,6 +119,19 @@ export function App() {
                 Board
               </span>
               <BoardToggle selectedKey={boardKey} onChange={shared.onBoardChange} />
+              {/* v1.25 (ADR-037): project picker for the active side (only when >1 project) */}
+              {activeProjects.length > 1 && (
+                <select
+                  aria-label="Project"
+                  value={projectIdx}
+                  onChange={(e) => setActiveProjectIdx(Number(e.target.value))}
+                  className="h-8 rounded-md border border-border bg-card px-2 text-xs font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {activeProjects.map((p, i) => (
+                    <option key={p.projectKey} value={i}>{p.projectKey}</option>
+                  ))}
+                </select>
+              )}
             </div>
           )}
         </header>
@@ -116,6 +143,7 @@ export function App() {
         >
           {activeTab === "dashboard" && <Dashboard {...shared} />}
           {activeTab === "planning" && <Planning {...shared} />}
+          {activeTab === "leaves" && <Leaves {...shared} />}
           {activeTab === "linking" && <Linking />}
           {activeTab === "reports" && <Reports {...shared} />}
         </main>

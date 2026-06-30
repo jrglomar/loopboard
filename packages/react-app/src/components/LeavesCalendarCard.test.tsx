@@ -4,7 +4,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { LeavesCalendarCard } from "./LeavesCalendarCard";
-import type { SprintRef } from "../lib/types";
+import type { SprintRef, AssigneeLeaves } from "../lib/types";
 
 // ── Mock useJira (useLeaves) ───────────────────────────────────────────────────
 
@@ -43,7 +43,7 @@ const BY_ASSIGNEE = [
 ];
 
 // Default mock: loaded, no leaves recorded
-function mockLeavesLoaded(leaves: Record<string, string[]> = {}) {
+function mockLeavesLoaded(leaves: Record<string, AssigneeLeaves> = {}) {
   const mockSave = vi.fn().mockResolvedValue(undefined);
   vi.mocked(useJiraModule.useLeaves).mockReturnValue({
     data: leaves,
@@ -174,7 +174,7 @@ describe("LeavesCalendarCard — loading state", () => {
 
 describe("LeavesCalendarCard — grid renders from leaves data", () => {
   it("renders a table with scope headers for date columns", () => {
-    mockLeavesLoaded({ Alice: ["2026-06-01"], Bob: [] });
+    mockLeavesLoaded({ Alice: { "2026-06-01": "VL" }, Bob: {} });
     const { container } = render(
       <LeavesCalendarCard
         sprintId={42}
@@ -218,7 +218,7 @@ describe("LeavesCalendarCard — grid renders from leaves data", () => {
   });
 
   it("marks a cell as 'off' when that date is in leaves data", () => {
-    mockLeavesLoaded({ Alice: ["2026-06-01"] });
+    mockLeavesLoaded({ Alice: { "2026-06-01": "VL" } });
     render(
       <LeavesCalendarCard
         sprintId={42}
@@ -233,8 +233,8 @@ describe("LeavesCalendarCard — grid renders from leaves data", () => {
     expect(offButtons.length).toBe(1);
   });
 
-  it("renders 'off' text inside cells that are marked off", () => {
-    mockLeavesLoaded({ Alice: ["2026-06-01"] });
+  it("renders the leave-type abbreviation inside cells that are marked off", () => {
+    mockLeavesLoaded({ Alice: { "2026-06-01": "VL" } });
     render(
       <LeavesCalendarCard
         sprintId={42}
@@ -242,15 +242,15 @@ describe("LeavesCalendarCard — grid renders from leaves data", () => {
         byAssignee={BY_ASSIGNEE}
       />
     );
-    // The pressed button shows "off" text
+    // The pressed button shows the leave type abbreviation (VL).
     const pressedBtn = screen.getAllByRole("button").find(
       (btn) => btn.getAttribute("aria-pressed") === "true"
     );
-    expect(pressedBtn?.textContent).toBe("off");
+    expect(pressedBtn?.textContent).toBe("VL");
   });
 
   it("shows the correct leave days count in the row totals column", () => {
-    mockLeavesLoaded({ Alice: ["2026-06-01", "2026-06-02"] }); // 2 working days
+    mockLeavesLoaded({ Alice: { "2026-06-01": "VL", "2026-06-02": "VL" } }); // 2 working days
     render(
       <LeavesCalendarCard
         sprintId={42}
@@ -267,7 +267,7 @@ describe("LeavesCalendarCard — grid renders from leaves data", () => {
 
 describe("LeavesCalendarCard — toggle calls save", () => {
   it("calls save(assignee, newDates) when a non-off cell is clicked", async () => {
-    const mockSave = mockLeavesLoaded({ Alice: [] }); // Alice has no leaves
+    const mockSave = mockLeavesLoaded({ Alice: {} }); // Alice has no leaves
     render(
       <LeavesCalendarCard
         sprintId={42}
@@ -297,7 +297,7 @@ describe("LeavesCalendarCard — toggle calls save", () => {
   });
 
   it("calls save(assignee, datesWithoutDay) when an off cell is clicked (toggle off)", async () => {
-    const mockSave = mockLeavesLoaded({ Alice: ["2026-06-01"] });
+    const mockSave = mockLeavesLoaded({ Alice: { "2026-06-01": "VL" } });
     render(
       <LeavesCalendarCard
         sprintId={42}
@@ -326,7 +326,7 @@ describe("LeavesCalendarCard — toggle calls save", () => {
   });
 
   it("toggle buttons have descriptive accessible names (aria-label)", () => {
-    mockLeavesLoaded({ Alice: ["2026-06-01"] });
+    mockLeavesLoaded({ Alice: { "2026-06-01": "VL" } });
     render(
       <LeavesCalendarCard
         sprintId={42}
@@ -346,7 +346,7 @@ describe("LeavesCalendarCard — toggle calls save", () => {
 
 describe("LeavesCalendarCard — readOnly mode (Reports, v1.7)", () => {
   it("renders NO toggle buttons when readOnly=true", () => {
-    mockLeavesLoaded({ Alice: ["2026-06-01"] });
+    mockLeavesLoaded({ Alice: { "2026-06-01": "VL" } });
     render(
       <LeavesCalendarCard
         sprintId={42}
@@ -360,8 +360,8 @@ describe("LeavesCalendarCard — readOnly mode (Reports, v1.7)", () => {
     expect(buttons.length).toBe(0);
   });
 
-  it("still shows 'off' label for leave days in readOnly mode", () => {
-    mockLeavesLoaded({ Alice: ["2026-06-01"] });
+  it("shows the leave-type abbreviation for leave days in readOnly mode", () => {
+    mockLeavesLoaded({ Alice: { "2026-06-01": "VL" } });
     render(
       <LeavesCalendarCard
         sprintId={42}
@@ -370,12 +370,12 @@ describe("LeavesCalendarCard — readOnly mode (Reports, v1.7)", () => {
         readOnly
       />
     );
-    // The "off" text should still appear (as a static span)
-    expect(screen.getByText("off")).toBeTruthy();
+    // The leave type abbreviation (VL) should appear as a static span.
+    expect(screen.getByText("VL")).toBeTruthy();
   });
 
   it("renders the Leaves column with leave counts (data still shown)", () => {
-    mockLeavesLoaded({ Alice: ["2026-06-01", "2026-06-02"], Bob: [] });
+    mockLeavesLoaded({ Alice: { "2026-06-01": "VL", "2026-06-02": "VL" }, Bob: {} });
     render(
       <LeavesCalendarCard
         sprintId={42}
@@ -446,7 +446,7 @@ describe("LeavesCalendarCard — explicit assignees prop (v1.7)", () => {
 describe("LeavesCalendarCard — onLeavesChange", () => {
   it("calls onLeavesChange with per-assignee leave day counts when data loads", async () => {
     const onLeavesChange = vi.fn();
-    mockLeavesLoaded({ Alice: ["2026-06-01", "2026-06-02"], Bob: [] });
+    mockLeavesLoaded({ Alice: { "2026-06-01": "VL", "2026-06-02": "VL" }, Bob: {} });
     render(
       <LeavesCalendarCard
         sprintId={42}

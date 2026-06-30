@@ -21,7 +21,7 @@ import { fileURLToPath } from "url";
 import * as path from "path";
 import { z } from "zod";
 import { tools } from "./tools/index.js";
-import { getConfig } from "./lib/config.js";
+import { getConfig, getProjects, getOffsetPolicy, type ProjectRef } from "./lib/config.js";
 import { UpstreamError, ConfigError } from "./lib/errors.js";
 import { ZodError } from "zod";
 import { getAiProvider, getAiStatus } from "./lib/ai/provider.js";
@@ -188,28 +188,24 @@ app.get("/api/health", (_req, res) => {
   // getConfig() is safe here: if board IDs were missing the server would have
   // already exited at startup. The try/catch is a belt-and-suspenders guard so
   // health never throws (same philosophy as getAiStatus).
-  let boards: {
-    dev: { id: number; projectKey: string };
-    po: { id: number; projectKey: string };
-  };
+  // v1.25 (ADR-037): boards are now PER-SIDE LISTS (multi-project); element 0 = default.
+  let boards: { dev: ProjectRef[]; po: ProjectRef[] };
   try {
-    const cfg = getConfig();
-    boards = {
-      dev: {
-        id: parseInt(cfg.JIRA_DEV_BOARD_ID, 10),
-        projectKey: cfg.JIRA_DEV_PROJECT_KEY,
-      },
-      po: {
-        id: parseInt(cfg.JIRA_PO_BOARD_ID, 10),
-        projectKey: cfg.JIRA_PO_PROJECT_KEY,
-      },
-    };
+    boards = getProjects();
   } catch {
     // Fallback: return sentinel values rather than crashing health
     boards = {
-      dev: { id: NaN, projectKey: "DEV" },
-      po: { id: NaN, projectKey: "PO" },
+      dev: [{ id: NaN, projectKey: "DEV" }],
+      po: [{ id: NaN, projectKey: "PO" }],
     };
+  }
+
+  // v1.26 (ADR-038): offset policy (N required points + N2 threshold) — pure config.
+  let policy: { requiredPoints: number; offsetThreshold: number };
+  try {
+    policy = getOffsetPolicy();
+  } catch {
+    policy = { requiredPoints: 8, offsetThreshold: 2 };
   }
 
   res.json({
@@ -218,6 +214,7 @@ app.get("/api/health", (_req, res) => {
     version: SERVICE_VERSION,
     ai,
     boards,
+    policy,
   });
 });
 

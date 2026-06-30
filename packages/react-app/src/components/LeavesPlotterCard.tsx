@@ -145,11 +145,11 @@ export function LeavesPlotterCard({
     [sprint?.startDate, sprint?.endDate]
   );
 
-  // Build leavesByAssignee from the live leavesData
+  // Build leavesByAssignee (dates) from the live typed leavesData (v1.26 — keys are dates).
   const leavesByAssignee: Record<string, string[]> = React.useMemo(() => {
     const map: Record<string, string[]> = {};
     for (const name of rosterNames) {
-      map[name] = leavesData?.[name] ?? [];
+      map[name] = Object.keys(leavesData?.[name] ?? {});
     }
     return map;
   }, [leavesData, rosterNames]);

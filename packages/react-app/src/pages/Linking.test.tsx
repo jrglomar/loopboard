@@ -22,7 +22,7 @@ import * as boardsModule from "../lib/boards";
 import * as linkClientModule from "../lib/linkClient";
 import * as aiClientModule from "../lib/aiClient";
 
-const BOARDS = { dev: { id: 10, projectKey: "VRDB" }, po: { id: 20, projectKey: "VBPO" } };
+const BOARDS = { dev: [{ id: 10, projectKey: "VRDB" }], po: [{ id: 20, projectKey: "VBPO" }] };
 const PO_SPRINTS = { active: [{ id: 200, name: "PO S", state: "active" as const, startDate: null, endDate: null, goal: null }], future: [], closed: [] };
 const DEV_SPRINTS = { active: [{ id: 300, name: "Dev S", state: "active" as const, startDate: null, endDate: null, goal: null }], future: [], closed: [] };
 
@@ -121,7 +121,9 @@ describe("Linking page (v1.11)", () => {
 
     // AI on → "Generate plan with AI"
     fireEvent.click(screen.getByRole("button", { name: /Generate plan with AI/i }));
-    expect(await screen.findByDisplayValue("v1 dev")).toBeTruthy();
+    // v1.30 (ADR-042): the title is KEPT from the PO; the AI only drives the description.
+    expect(await screen.findByDisplayValue("d1")).toBeTruthy();
+    expect(screen.getByDisplayValue("Needs a dev task")).toBeTruthy(); // PO title retained
 
     // Comment + Regenerate that item
     fireEvent.change(screen.getByLabelText(/Comment to refine the draft for PO-2/i), { target: { value: "focus on the API layer" } });
@@ -134,7 +136,9 @@ describe("Linking page (v1.11)", () => {
       expect(last.poStories[0]!.key).toBe("PO-2");
       expect(last.instructions).toContain("focus on the API layer");
     });
-    expect(await screen.findByDisplayValue("v2 dev refined")).toBeTruthy();
+    // Description refreshed to v2; title still the PO's.
+    expect(await screen.findByDisplayValue("d2")).toBeTruthy();
+    expect(screen.getByDisplayValue("Needs a dev task")).toBeTruthy();
   });
 
   it("v1.14: Generate fetches the PO description and passes it to the AI plan", async () => {
@@ -205,5 +209,37 @@ describe("Linking page (v1.11)", () => {
     expect(await screen.findByRole("link", { name: /Open DEV-77 in Jira/i })).toBeTruthy();
     expect(await screen.findByText(/1 created/i)).toBeTruthy();
     expect(vi.mocked(useJiraModule.createLinkedDevTicket)).toHaveBeenCalledTimes(2);
+  });
+
+  it("v1.30 (ADR-042): keeps the PO title and carries the PO points onto the created Dev task", async () => {
+    vi.mocked(useJiraModule.createLinkedDevTicket).mockResolvedValue({
+      key: "DEV-99", url: "https://jira/browse/DEV-99", board: "DEV", linkedTo: "PO-2", sprintId: 300,
+    } as never);
+
+    render(<Linking />);
+    fireEvent.change(screen.getByRole("combobox", { name: /PO board sprint/i }), { target: { value: "200" } });
+    fireEvent.change(screen.getByRole("combobox", { name: /Dev board sprint/i }), { target: { value: "300" } });
+    await screen.findByText(/→ DEV-5/);
+    await waitFor(() => expect((screen.getByRole("checkbox", { name: /Select PO-2/i }) as HTMLInputElement).checked).toBe(true));
+
+    fireEvent.click(screen.getByRole("button", { name: /Build plan/i }));
+    await screen.findByText(/Plan — 1 Dev task/i);
+
+    // Title field is prefilled with the PO story's title (not an AI/template title).
+    expect(screen.getByDisplayValue("Needs a dev task")).toBeTruthy();
+    // Points field is drafted from the PO (mkIssue → 3) and is editable.
+    const pts = screen.getByLabelText(/Story points for the Dev task linked to PO-2/i) as HTMLInputElement;
+    expect(pts.value).toBe("3");
+    // Override the drafted points before creating.
+    fireEvent.change(pts, { target: { value: "5" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /Create all/i }));
+
+    await waitFor(() => {
+      // create_dev_ticket gets the PO title AND the EDITED points (5, not the PO's 3).
+      expect(vi.mocked(useJiraModule.createLinkedDevTicket)).toHaveBeenCalledWith(
+        expect.objectContaining({ linkedPoTicketKey: "PO-2", summary: "Needs a dev task", storyPoints: 5 })
+      );
+    });
   });
 });

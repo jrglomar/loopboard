@@ -1,25 +1,16 @@
-// Leaves client — CONTRACTS.md §4.14, §6, ADR-016
+// Leaves client — CONTRACTS.md §4.14, §6, ADR-016 (typed v1.26, ADR-038).
 // Wraps get_leaves / set_leaves MCP tools via the HTTP bridge.
-// Same McpError / BRIDGE_DOWN semantics as mcpClient.ts.
 
 import { callTool } from "./mcpClient";
+import type { AssigneeLeaves, LeaveType } from "./types";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+/** The per-sprint leaves map: assignee display name → (YYYY-MM-DD → LeaveType). */
+export type LeavesMap = Record<string, AssigneeLeaves>;
 
-/**
- * The per-sprint leaves map returned by get_leaves / set_leaves.
- * Maps assignee display name → array of YYYY-MM-DD leave date strings.
- */
-export type LeavesMap = Record<string, string[]>;
+/** A typed leave entry as sent to set_leaves. */
+export type LeaveEntry = { date: string; type: LeaveType };
 
-// ── get_leaves ────────────────────────────────────────────────────────────────
-
-/**
- * Fetch the leaves map for a given sprint.
- * Returns {} when no leaves have been recorded yet.
- *
- * CONTRACTS.md §4.14 v1.5
- */
+/** Fetch the typed leaves map for a sprint. {} when none recorded. */
 export async function getLeaves(sprintId: number): Promise<LeavesMap> {
   const result = await callTool<{ sprintId: number; leaves: LeavesMap }>(
     "jira",
@@ -29,24 +20,28 @@ export async function getLeaves(sprintId: number): Promise<LeavesMap> {
   return result.leaves;
 }
 
-// ── set_leaves ────────────────────────────────────────────────────────────────
+/** The whole store keyed by sprint id (string) → assignee → date → type. */
+export type AllLeavesMap = Record<string, LeavesMap>;
+
+/** Fetch EVERY sprint's typed leaves in one read (v1.29, ADR-041). {} when none. */
+export async function getAllLeaves(): Promise<AllLeavesMap> {
+  const result = await callTool<{ leaves: AllLeavesMap }>("jira", "get_all_leaves", {});
+  return result.leaves;
+}
 
 /**
- * Replace an assignee's leave dates for a sprint.
- * Pass an empty array to clear all leaves for that assignee.
- * Returns the updated full leaves map for the sprint.
- *
- * CONTRACTS.md §4.14 v1.5
+ * Replace an assignee's typed leave entries for a sprint (full replace).
+ * Pass [] to clear. Returns the updated full leaves map for the sprint.
  */
 export async function setLeaves(
   sprintId: number,
   assignee: string,
-  dates: string[]
+  entries: LeaveEntry[]
 ): Promise<LeavesMap> {
   const result = await callTool<{ sprintId: number; leaves: LeavesMap }>(
     "jira",
     "set_leaves",
-    { sprintId, assignee, dates }
+    { sprintId, assignee, entries }
   );
   return result.leaves;
 }

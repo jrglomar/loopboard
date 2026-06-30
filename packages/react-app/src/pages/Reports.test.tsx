@@ -653,7 +653,7 @@ describe("Reports page — leaves calendar card (v1.5)", () => {
 describe("Reports page — leaves are editable/clickable (v1.8.1)", () => {
   it("renders clickable day toggles in the leaves calendar", async () => {
     vi.mocked(useJiraModule.useLeaves).mockReturnValue({
-      data: { Alice: ["2026-05-12"], Bob: [] },
+      data: { Alice: { "2026-05-12": "VL" }, Bob: {} },
       loading: false,
       error: null,
       run: vi.fn(),
@@ -671,7 +671,7 @@ describe("Reports page — leaves are editable/clickable (v1.8.1)", () => {
   it("clicking a leave-day toggle calls useLeaves save()", async () => {
     const mockSave = vi.fn().mockResolvedValue(undefined);
     vi.mocked(useJiraModule.useLeaves).mockReturnValue({
-      data: { Alice: [] },
+      data: { Alice: {} },
       loading: false,
       error: null,
       run: vi.fn(),
@@ -706,7 +706,7 @@ describe("Reports page — board toggle (v1.6, ADR-017)", () => {
   it("renders the board toggle (Dev/PO) when boards is available", async () => {
     const { useBoards } = await import("../lib/boards");
     vi.mocked(useBoards).mockReturnValue({
-      boards: { dev: { id: 10, projectKey: "DEV" }, po: { id: 20, projectKey: "PO" } },
+      boards: { dev: [{ id: 10, projectKey: "DEV" }], po: [{ id: 20, projectKey: "PO" }] },
       loading: false,
     });
     await renderReports();
@@ -717,7 +717,7 @@ describe("Reports page — board toggle (v1.6, ADR-017)", () => {
   it("Dev is selected by default (aria-pressed=true)", async () => {
     const { useBoards } = await import("../lib/boards");
     vi.mocked(useBoards).mockReturnValue({
-      boards: { dev: { id: 10, projectKey: "DEV" }, po: { id: 20, projectKey: "PO" } },
+      boards: { dev: [{ id: 10, projectKey: "DEV" }], po: [{ id: 20, projectKey: "PO" }] },
       loading: false,
     });
     await renderReports();
@@ -728,7 +728,7 @@ describe("Reports page — board toggle (v1.6, ADR-017)", () => {
   it("switching to PO calls useSprintList with the PO board id", async () => {
     const { useBoards } = await import("../lib/boards");
     vi.mocked(useBoards).mockReturnValue({
-      boards: { dev: { id: 10, projectKey: "DEV" }, po: { id: 20, projectKey: "PO" } },
+      boards: { dev: [{ id: 10, projectKey: "DEV" }], po: [{ id: 20, projectKey: "PO" }] },
       loading: false,
     });
     await renderReports();
@@ -744,7 +744,7 @@ describe("Reports page — board toggle (v1.6, ADR-017)", () => {
   it("switching to PO calls useVelocity with the PO board id", async () => {
     const { useBoards } = await import("../lib/boards");
     vi.mocked(useBoards).mockReturnValue({
-      boards: { dev: { id: 10, projectKey: "DEV" }, po: { id: 20, projectKey: "PO" } },
+      boards: { dev: [{ id: 10, projectKey: "DEV" }], po: [{ id: 20, projectKey: "PO" }] },
       loading: false,
     });
     await renderReports();

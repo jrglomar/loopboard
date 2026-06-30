@@ -76,14 +76,19 @@ function prLabel(url: string): string {
 export function PullRequestsCard({
   sprintId,
   sprintKeys,
+  issuePrs: issuePrsProp,
 }: {
   sprintId: number | null;
   /** Current sprint's ticket keys — auto-PRs are filtered to these (v1.20). */
   sprintKeys?: string[];
+  /** v1.27 (ADR-039): linked PRs lifted by the parent (Dashboard) to skip a duplicate fetch. */
+  issuePrs?: Record<string, LinkedPr[]>;
 }) {
   const { data, loading, error, save } = usePullRequests(sprintId);
   // v1.22 (ADR-034): linked PRs across ALL repos, from Jira's Development panel.
-  const { data: issuePrs } = useIssuePullRequests(sprintKeys ?? []);
+  // v1.27: when the parent supplies the map, don't fetch again (pass [] to the hook).
+  const hookPrs = useIssuePullRequests(issuePrsProp ? [] : (sprintKeys ?? []));
+  const issuePrs = issuePrsProp ?? hookPrs.data;
   const [url, setUrl] = useState("");
   const [ticketKey, setTicketKey] = useState("");
   const [busy, setBusy] = useState(false);

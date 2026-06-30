@@ -594,7 +594,7 @@ describe("TicketGen", () => {
   it("v1.6: renders separate PO sprint and Dev sprint selects when boards is available", async () => {
     const { useBoards } = await import("../lib/boards");
     vi.mocked(useBoards).mockReturnValue({
-      boards: { dev: { id: 10, projectKey: "DEV" }, po: { id: 20, projectKey: "PO" } },
+      boards: { dev: [{ id: 10, projectKey: "DEV" }], po: [{ id: 20, projectKey: "PO" }] },
       loading: false,
     });
 
@@ -615,7 +615,7 @@ describe("TicketGen", () => {
   it("v1.6: passes separate PO and Dev sprint ids to createTicketPair", async () => {
     const { useBoards } = await import("../lib/boards");
     vi.mocked(useBoards).mockReturnValue({
-      boards: { dev: { id: 10, projectKey: "DEV" }, po: { id: 20, projectKey: "PO" } },
+      boards: { dev: [{ id: 10, projectKey: "DEV" }], po: [{ id: 20, projectKey: "PO" }] },
       loading: false,
     });
 
@@ -652,7 +652,7 @@ describe("TicketGen", () => {
   it("v1.6: shows PO and Dev sprint names in success panel", async () => {
     const { useBoards } = await import("../lib/boards");
     vi.mocked(useBoards).mockReturnValue({
-      boards: { dev: { id: 10, projectKey: "DEV" }, po: { id: 20, projectKey: "PO" } },
+      boards: { dev: [{ id: 10, projectKey: "DEV" }], po: [{ id: 20, projectKey: "PO" }] },
       loading: false,
     });
 

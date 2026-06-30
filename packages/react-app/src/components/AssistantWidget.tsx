@@ -27,7 +27,7 @@ function AssistantPanel() {
   }, []);
 
   const { boards } = useBoards();
-  const boardId = boards?.dev.id;
+  const boardId = boards?.dev[0]?.id; // v1.25 (ADR-037): default Dev project for AI context
   // Effective sprint = the dev board's active sprint, used as AI context (board/sprint ids).
   const sprint = useActiveSprint(boardId, null);
   const effectiveSprintId = sprint.data?.sprint.id ?? null;

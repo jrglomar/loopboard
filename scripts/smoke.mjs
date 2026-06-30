@@ -49,6 +49,7 @@ const JIRA_ENV = {
   // Point the leaves + team stores at throwaway temp files so smoke never touches the real ones.
   JIRA_LEAVES_FILE: path.join(os.tmpdir(), `loopboard-smoke-leaves-${process.pid}.json`),
   JIRA_TEAM_FILE: path.join(os.tmpdir(), `loopboard-smoke-team-${process.pid}.json`),
+  JIRA_OFFSET_FILE: path.join(os.tmpdir(), `loopboard-smoke-offset-${process.pid}.json`),
   // Pin AI off so the AI_UNAVAILABLE checks are deterministic even when the
   // developer's .env configures a provider (set vars are never overridden by dotenv)
   AI_PROVIDER: "",
@@ -83,6 +84,7 @@ const EXPECTED_JIRA_TOOLS = [
   "get_velocity",
   // v1.5 — leaves/offset tracker
   "get_leaves",
+  "get_all_leaves",
   "set_leaves",
   // v1.7 — sprint-planning assignment
   "get_assignable_users",
@@ -113,6 +115,10 @@ const EXPECTED_JIRA_TOOLS = [
   "set_meeting_goal",
   // v1.22 — multi-repo linked PRs from Jira Development Information
   "get_issue_pull_requests",
+  // v1.26 — offset-points ledger
+  "get_offset_ledger",
+  "set_offset_for_sprint",
+  "set_offset_adjustment",
 ];
 
 const EXPECTED_GITHUB_TOOLS = [
@@ -386,21 +392,58 @@ if (!jiraReady) {
     fail("[JIRA] health.ai disabled shape", String(e));
   }
 
-  // JIRA v1.6: health.boards exposes dev + po board config
+  // JIRA v1.6 + v1.25: health.boards exposes dev + po project LISTS (arrays; element 0 = default)
   try {
     const { status, body } = await httpGet(`http://127.0.0.1:${JIRA_PORT}/api/health`);
     const b = body.boards;
     if (
       status === 200 && b &&
-      typeof b.dev?.id === "number" && typeof b.dev?.projectKey === "string" &&
-      typeof b.po?.id === "number" && typeof b.po?.projectKey === "string"
+      Array.isArray(b.dev) && typeof b.dev[0]?.id === "number" && typeof b.dev[0]?.projectKey === "string" &&
+      Array.isArray(b.po) && typeof b.po[0]?.id === "number" && typeof b.po[0]?.projectKey === "string"
     ) {
-      pass(`[JIRA] health.boards: dev=${b.dev.id}/${b.dev.projectKey} po=${b.po.id}/${b.po.projectKey}`);
+      pass(`[JIRA] health.boards arrays: dev[${b.dev.length}]=${b.dev[0].id}/${b.dev[0].projectKey} po[${b.po.length}]=${b.po[0].id}/${b.po[0].projectKey}`);
     } else {
-      fail("[JIRA] health.boards shape", `status=${status} boards=${JSON.stringify(b)}`);
+      fail("[JIRA] health.boards arrays shape", `status=${status} boards=${JSON.stringify(b)}`);
     }
   } catch (e) {
-    fail("[JIRA] health.boards shape", String(e));
+    fail("[JIRA] health.boards arrays shape", String(e));
+  }
+
+  // JIRA v1.26: health.policy exposes the offset policy (N required points + N2 threshold)
+  try {
+    const { status, body } = await httpGet(`http://127.0.0.1:${JIRA_PORT}/api/health`);
+    const p = body.policy;
+    if (status === 200 && p && typeof p.requiredPoints === "number" && typeof p.offsetThreshold === "number") {
+      pass(`[JIRA] health.policy: requiredPoints=${p.requiredPoints} offsetThreshold=${p.offsetThreshold}`);
+    } else {
+      fail("[JIRA] health.policy shape", `status=${status} policy=${JSON.stringify(p)}`);
+    }
+  } catch (e) {
+    fail("[JIRA] health.policy shape", String(e));
+  }
+
+  // JIRA v1.26: get_offset_ledger {} → 200 with an entries map (read-only; temp store)
+  try {
+    const { status, body } = await httpPost(`http://127.0.0.1:${JIRA_PORT}/api/tools/get_offset_ledger`, {});
+    if (status === 200 && body.ok === true && body.data && typeof body.data.entries === "object") {
+      pass("[JIRA] POST get_offset_ledger {} → 200 entries map");
+    } else {
+      fail("[JIRA] POST get_offset_ledger {} → 200", `status=${status} body=${JSON.stringify(body).slice(0, 160)}`);
+    }
+  } catch (e) {
+    fail("[JIRA] POST get_offset_ledger {} → 200", String(e));
+  }
+
+  // JIRA v1.29: get_all_leaves {} → 200 with a leaves map (read-only; whole store)
+  try {
+    const { status, body } = await httpPost(`http://127.0.0.1:${JIRA_PORT}/api/tools/get_all_leaves`, {});
+    if (status === 200 && body.ok === true && body.data && typeof body.data.leaves === "object") {
+      pass("[JIRA] POST get_all_leaves {} → 200 leaves map");
+    } else {
+      fail("[JIRA] POST get_all_leaves {} → 200", `status=${status} body=${JSON.stringify(body).slice(0, 160)}`);
+    }
+  } catch (e) {
+    fail("[JIRA] POST get_all_leaves {} → 200", String(e));
   }
 
   // JIRA v1.5: set_leaves {} → 400 VALIDATION (sprintId/assignee required) — no Jira, no real file write
@@ -460,6 +503,8 @@ if (!jiraReady) {
     "get_post_scrum", "set_post_scrum", "get_meeting_goal", "set_meeting_goal",
     // v1.22 — linked PRs (validation precedes any Jira read)
     "get_issue_pull_requests",
+    // v1.26 — offset writes reject empty input (validation precedes any file write)
+    "set_offset_for_sprint", "set_offset_adjustment",
   ]) {
     try {
       const { status, body } = await httpPost(`http://127.0.0.1:${JIRA_PORT}/api/tools/${tool}`, {});

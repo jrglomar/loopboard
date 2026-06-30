@@ -113,20 +113,19 @@ describe("GET /api/health", () => {
     const body = (await res.json()) as {
       ok: boolean;
       boards: {
-        dev: { id: number; projectKey: string };
-        po: { id: number; projectKey: string };
+        dev: Array<{ id: number; projectKey: string }>;
+        po: Array<{ id: number; projectKey: string }>;
       };
     };
     expect(body.ok).toBe(true);
     expect(body.boards).toBeDefined();
 
-    // dev board
-    expect(body.boards.dev.id).toBe(10002);
-    expect(body.boards.dev.projectKey).toBe("DEV");
+    // v1.25 (ADR-037): boards are per-side arrays; element 0 = the default project.
+    expect(body.boards.dev[0]!.id).toBe(10002);
+    expect(body.boards.dev[0]!.projectKey).toBe("DEV");
 
-    // po board
-    expect(body.boards.po.id).toBe(10001);
-    expect(body.boards.po.projectKey).toBe("PO");
+    expect(body.boards.po[0]!.id).toBe(10001);
+    expect(body.boards.po[0]!.projectKey).toBe("PO");
   });
 
   it("returns boards with explicit project keys when set", async () => {
@@ -140,15 +139,15 @@ describe("GET /api/health", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
         boards: {
-          dev: { id: number; projectKey: string };
-          po: { id: number; projectKey: string };
+          dev: Array<{ id: number; projectKey: string }>;
+          po: Array<{ id: number; projectKey: string }>;
         };
       };
-      expect(body.boards.dev.projectKey).toBe("MYDEV");
-      expect(body.boards.po.projectKey).toBe("MYPO");
+      expect(body.boards.dev[0]!.projectKey).toBe("MYDEV");
+      expect(body.boards.po[0]!.projectKey).toBe("MYPO");
       // ids remain the same from stubbed env
-      expect(body.boards.dev.id).toBe(10002);
-      expect(body.boards.po.id).toBe(10001);
+      expect(body.boards.dev[0]!.id).toBe(10002);
+      expect(body.boards.po[0]!.id).toBe(10001);
     } finally {
       // Restore defaults and re-cache
       delete process.env["JIRA_DEV_PROJECT_KEY"];

@@ -12,7 +12,23 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { useLeaves } from "../hooks/useJira";
 import { sprintWorkingDays } from "../lib/capacity";
-import type { SprintRef } from "../lib/types";
+import type { SprintRef, LeaveType, AssigneeLeaves } from "../lib/types";
+import type { LeaveEntry } from "../lib/leavesClient";
+
+// ── Leave-type visuals (v1.26, ADR-038) ───────────────────────────────────────
+// Dark-mode-safe via role tokens: VL=info, EL=destructive, Holiday=success, Offset=accent.
+const LEAVE_STYLE: Record<LeaveType, string> = {
+  VL: "bg-[hsl(var(--info-bg))] text-[hsl(var(--info))] border-[hsl(var(--info-border))]",
+  EL: "bg-[hsl(var(--error-bg))] text-[hsl(var(--error))] border-[hsl(var(--error-border))]",
+  Holiday: "bg-[hsl(var(--success-bg))] text-[hsl(var(--success))] border-[hsl(var(--success-border))]",
+  Offset: "bg-[hsl(var(--accent)/0.12)] text-[hsl(var(--accent))] border-[hsl(var(--accent)/0.4)]",
+};
+const LEAVE_ABBR: Record<LeaveType, string> = { VL: "VL", EL: "EL", Holiday: "HO", Offset: "OF" };
+
+/** Build set_leaves entries from an assignee's date→type map. */
+function toEntries(map: AssigneeLeaves): LeaveEntry[] {
+  return Object.entries(map).map(([date, type]) => ({ date, type }));
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -86,6 +102,12 @@ export interface LeavesCalendarCardProps {
    * no setLeaves calls. Used by Reports (read-only leaves view, ADR-018 v1.7).
    */
   readOnly?: boolean;
+  /**
+   * v1.26 (ADR-038): the leave type painted on click. When provided (Leaves page), clicking a
+   * cell sets it to this type (or clears it if already that type). When omitted, clicking toggles
+   * a day off as the default "VL" (legacy Planning/Reports behavior).
+   */
+  paintType?: LeaveType;
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -97,6 +119,7 @@ export function LeavesCalendarCard({
   assignees: assigneesProp,
   onLeavesChange,
   readOnly = false,
+  paintType,
 }: LeavesCalendarCardProps) {
   // Resolve the roster: explicit assignees prop wins over byAssignee
   // perf: derived inline — no extra state
@@ -122,8 +145,8 @@ export function LeavesCalendarCard({
     const map: Record<string, number> = {};
     const workingSet = new Set(workingDays);
     for (const name of rosterNames) {
-      const dates = leaves?.[name] ?? [];
-      map[name] = dates.filter((d) => workingSet.has(d.slice(0, 10))).length;
+      const dateMap = leaves?.[name] ?? {};
+      map[name] = Object.keys(dateMap).filter((d) => workingSet.has(d.slice(0, 10))).length;
     }
     onLeavesChange(map);
   }, [leaves, rosterNames, workingDays, onLeavesChange]);
@@ -132,15 +155,15 @@ export function LeavesCalendarCard({
 
   async function handleToggle(assigneeName: string, date: string) {
     const cellKey = `${assigneeName}::${date}`;
-    const currentDates: string[] = leaves?.[assigneeName] ?? [];
-    const isOff = currentDates.includes(date);
-    const newDates = isOff
-      ? currentDates.filter((d) => d !== date)
-      : [...currentDates, date].sort();
+    const current: AssigneeLeaves = leaves?.[assigneeName] ?? {};
+    const type = paintType ?? "VL";
+    const next: AssigneeLeaves = { ...current };
+    if (next[date] === type) delete next[date]; // clicking the same type clears it
+    else next[date] = type; // set or overwrite with the painted type
 
     setSavingCell(cellKey);
     try {
-      await save(assigneeName, newDates);
+      await save(assigneeName, toEntries(next));
       setJustSaved(cellKey);
       setTimeout(() => setJustSaved((prev) => (prev === cellKey ? null : prev)), 1500);
     } catch {
@@ -301,9 +324,9 @@ export function LeavesCalendarCard({
             </thead>
             <tbody>
               {rosterNames.map((name) => {
-                const assigneeDates: string[] = leaves?.[name] ?? [];
+                const assigneeMap: AssigneeLeaves = leaves?.[name] ?? {};
                 const workingSet = new Set(workingDays);
-                const leaveDaysCount = assigneeDates.filter((d) =>
+                const leaveDaysCount = Object.keys(assigneeMap).filter((d) =>
                   workingSet.has(d.slice(0, 10))
                 ).length;
 
@@ -331,57 +354,43 @@ export function LeavesCalendarCard({
                       </div>
                     </th>
 
-                    {/* Day cells — toggle buttons (editable) or static (readOnly) */}
+                    {/* Day cells — typed (v1.26): colored by leave type, labeled with its abbreviation */}
                     {workingDays.map((day) => {
-                      const isOff = assigneeDates.includes(day);
+                      const cellType = assigneeMap[day]; // LeaveType | undefined
+                      const isOff = !!cellType;
                       const cellKey = `${name}::${day}`;
                       const isSaving = savingCell === cellKey;
                       const wasSaved = justSaved === cellKey;
+                      const filled = cellType ? LEAVE_STYLE[cellType] : "bg-muted border-border";
+                      const label = cellType ? LEAVE_ABBR[cellType] : "";
 
                       return (
                         <td key={day} className="py-1.5 px-1 text-center">
                           {readOnly ? (
-                            /* a11y: static cell — no button, just a visual indicator */
                             <span
-                              className={[
-                                "inline-flex items-center justify-center w-7 h-7 rounded text-[0.625rem] font-semibold",
-                                isOff
-                                  ? "bg-[hsl(var(--warning))] text-[hsl(var(--warning-foreground))] border border-[hsl(var(--warning-border))]"
-                                  : "bg-muted border border-border",
-                              ].join(" ")}
-                              title={isOff ? `${name} is off on ${day}` : undefined}
-                              aria-label={isOff ? `${name} off on ${formatFullDate(day)}` : undefined}
+                              className={["inline-flex items-center justify-center w-7 h-7 rounded border text-[0.625rem] font-semibold", filled].join(" ")}
+                              title={cellType ? `${name}: ${cellType} on ${day}` : undefined}
+                              aria-label={cellType ? `${name} ${cellType} on ${formatFullDate(day)}` : undefined}
                             >
-                              {isOff ? "off" : ""}
+                              {label}
                             </span>
                           ) : (
-                            /* a11y: button with aria-pressed and descriptive aria-label */
                             <button
                               type="button"
                               aria-pressed={isOff}
-                              aria-label={`${name} ${isOff ? "on" : "off"} on ${formatFullDate(day)}`}
+                              aria-label={`${name} ${cellType ?? "working"} on ${formatFullDate(day)}`}
                               onClick={() => void handleToggle(name, day)}
                               disabled={isSaving}
                               className={[
-                                "w-7 h-7 rounded transition-all text-[0.625rem] font-semibold",
+                                "w-7 h-7 rounded border transition-all text-[0.625rem] font-semibold hover:opacity-80",
                                 "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1",
                                 "disabled:opacity-50 disabled:cursor-wait",
-                                isOff
-                                  ? "bg-[hsl(var(--warning))] text-[hsl(var(--warning-foreground))] border border-[hsl(var(--warning-border))] hover:opacity-80"
-                                  : "bg-muted border border-border hover:bg-muted/70",
-                                wasSaved && !isOff
-                                  ? "ring-1 ring-[hsl(var(--status-done))]"
-                                  : "",
-                              ]
-                                .filter(Boolean)
-                                .join(" ")}
-                              title={
-                                isOff
-                                  ? `${name} is off on ${day}`
-                                  : `Mark ${name} off on ${day}`
-                              }
+                                filled,
+                                wasSaved ? "ring-1 ring-[hsl(var(--status-done))]" : "",
+                              ].filter(Boolean).join(" ")}
+                              title={cellType ? `${name}: ${cellType} on ${day}` : `Mark ${name} off on ${day}`}
                             >
-                              {isOff ? "off" : ""}
+                              {label}
                             </button>
                           )}
                         </td>

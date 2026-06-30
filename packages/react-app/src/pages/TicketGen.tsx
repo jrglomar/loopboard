@@ -431,8 +431,9 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
 
   // v1.6: separate PO and Dev sprint selects (active+future only)
   // perf: each board gets its own sprint list hook (called with per-board id)
-  const poSprintList = useSprintList("all", boards?.po.id);
-  const devSprintList = useSprintList("all", boards?.dev.id);
+  // v1.25 (ADR-037): ticket-gen pairs the default PO + Dev project (element 0).
+  const poSprintList = useSprintList("all", boards?.po[0]?.id);
+  const devSprintList = useSprintList("all", boards?.dev[0]?.id);
 
   // v1.4 (legacy): single sprint select used when boards is null (older bridge fallback)
   const sprintList = useSprintList("all");

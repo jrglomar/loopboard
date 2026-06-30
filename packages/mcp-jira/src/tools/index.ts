@@ -10,6 +10,7 @@ import { listSprintsTool } from "./listSprints.js";
 import { getSprintReportTool } from "./getSprintReport.js";
 import { getVelocityTool } from "./getVelocity.js";
 import { getLeavesTool } from "./getLeaves.js";
+import { getAllLeavesTool } from "./getAllLeaves.js";
 import { setLeavesTool } from "./setLeaves.js";
 import { getAssignableUsersTool } from "./getAssignableUsers.js";
 import { assignIssueTool } from "./assignIssue.js";
@@ -31,6 +32,9 @@ import { setPostScrumTool } from "./setPostScrum.js";
 import { getMeetingGoalTool } from "./getMeetingGoal.js";
 import { setMeetingGoalTool } from "./setMeetingGoal.js";
 import { getIssuePullRequestsTool } from "./getIssuePullRequests.js";
+import { getOffsetLedgerTool } from "./getOffsetLedger.js";
+import { setOffsetForSprintTool } from "./setOffsetForSprint.js";
+import { setOffsetAdjustmentTool } from "./setOffsetAdjustment.js";
 
 export const tools: ToolDef[] = [
   createPoTicket,
@@ -44,6 +48,7 @@ export const tools: ToolDef[] = [
   getSprintReportTool,
   getVelocityTool,
   getLeavesTool,
+  getAllLeavesTool,
   setLeavesTool,
   getAssignableUsersTool,
   assignIssueTool,
@@ -65,4 +70,7 @@ export const tools: ToolDef[] = [
   getMeetingGoalTool,
   setMeetingGoalTool,
   getIssuePullRequestsTool,
+  getOffsetLedgerTool,
+  setOffsetForSprintTool,
+  setOffsetAdjustmentTool,
 ];

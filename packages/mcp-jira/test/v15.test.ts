@@ -69,6 +69,7 @@ import { getSprint } from "../src/tools/getSprint.js";
 import { getSprintReportTool } from "../src/tools/getSprintReport.js";
 import { getVelocityTool } from "../src/tools/getVelocity.js";
 import { getLeavesTool } from "../src/tools/getLeaves.js";
+import { getAllLeavesTool } from "../src/tools/getAllLeaves.js";
 import { setLeavesTool } from "../src/tools/setLeaves.js";
 
 const client = jiraClient as MockedObject<typeof jiraClient>;
@@ -848,154 +849,172 @@ describe("leavesStore — readLeaves / writeLeaves", () => {
   });
 });
 
-describe("set_leaves — validation", () => {
+describe("set_leaves — validation (typed, v1.26)", () => {
   it("rejects invalid date format (YYYY/MM/DD)", async () => {
     await expect(
-      setLeavesTool.handler({ sprintId: 55, assignee: "Alice", dates: ["2026/06/03"] })
+      setLeavesTool.handler({ sprintId: 55, assignee: "Alice", entries: [{ date: "2026/06/03", type: "VL" }] })
     ).rejects.toThrow();
   });
 
-  it("rejects partial date (YYYY-MM)", async () => {
+  it("rejects a non-date string", async () => {
     await expect(
-      setLeavesTool.handler({ sprintId: 55, assignee: "Alice", dates: ["2026-06"] })
+      setLeavesTool.handler({ sprintId: 55, assignee: "Alice", entries: [{ date: "not-a-date", type: "VL" }] })
     ).rejects.toThrow();
   });
 
-  it("rejects non-date string", async () => {
+  it("rejects an invalid leave type", async () => {
     await expect(
-      setLeavesTool.handler({ sprintId: 55, assignee: "Alice", dates: ["not-a-date"] })
+      setLeavesTool.handler({ sprintId: 55, assignee: "Alice", entries: [{ date: "2026-06-03", type: "Sick" }] })
     ).rejects.toThrow();
   });
 
   it("rejects empty assignee", async () => {
     await expect(
-      setLeavesTool.handler({ sprintId: 55, assignee: "", dates: ["2026-06-03"] })
+      setLeavesTool.handler({ sprintId: 55, assignee: "", entries: [{ date: "2026-06-03", type: "VL" }] })
     ).rejects.toThrow();
   });
 
-  it("rejects assignee longer than 120 characters", async () => {
-    await expect(
-      setLeavesTool.handler({ sprintId: 55, assignee: "x".repeat(121), dates: ["2026-06-03"] })
-    ).rejects.toThrow();
-  });
-
-  it("accepts a valid date", async () => {
+  it("accepts valid typed entries", async () => {
     const result = await setLeavesTool.handler({
       sprintId: 55,
       assignee: "Alice",
-      dates: ["2026-06-03"],
-    }) as { sprintId: number; leaves: Record<string, string[]> };
+      entries: [{ date: "2026-06-03", type: "VL" }, { date: "2026-06-04", type: "Offset" }],
+    }) as { sprintId: number; leaves: Record<string, Record<string, string>> };
 
     expect(result.sprintId).toBe(55);
-    expect(result.leaves["Alice"]).toEqual(["2026-06-03"]);
+    expect(result.leaves["Alice"]).toEqual({ "2026-06-03": "VL", "2026-06-04": "Offset" });
   });
-});
 
-describe("set_leaves → get_leaves round-trip", () => {
-  it("set then get returns the same data", async () => {
-    await setLeavesTool.handler({
+  it("accepts legacy `dates` (back-compat) → all VL", async () => {
+    const result = await setLeavesTool.handler({
       sprintId: 55,
       assignee: "Alice",
       dates: ["2026-06-03", "2026-06-04"],
+    }) as { leaves: Record<string, Record<string, string>> };
+
+    expect(result.leaves["Alice"]).toEqual({ "2026-06-03": "VL", "2026-06-04": "VL" });
+  });
+
+  it("rejects when neither entries nor dates is provided", async () => {
+    await expect(setLeavesTool.handler({ sprintId: 55, assignee: "Alice" })).rejects.toThrow();
+  });
+});
+
+describe("set_leaves → get_leaves round-trip (typed)", () => {
+  it("set then get returns the same typed map", async () => {
+    await setLeavesTool.handler({
+      sprintId: 55,
+      assignee: "Alice",
+      entries: [{ date: "2026-06-03", type: "VL" }, { date: "2026-06-04", type: "EL" }],
     });
 
     const result = await getLeavesTool.handler({ sprintId: 55 }) as {
       sprintId: number;
-      leaves: Record<string, string[]>;
+      leaves: Record<string, Record<string, string>>;
     };
 
     expect(result.sprintId).toBe(55);
-    expect(result.leaves["Alice"]).toEqual(["2026-06-03", "2026-06-04"]);
+    expect(result.leaves["Alice"]).toEqual({ "2026-06-03": "VL", "2026-06-04": "EL" });
   });
 
   it("set for one sprint does not affect another sprint", async () => {
-    await setLeavesTool.handler({ sprintId: 55, assignee: "Alice", dates: ["2026-06-03"] });
-    await setLeavesTool.handler({ sprintId: 56, assignee: "Bob", dates: ["2026-06-10"] });
+    await setLeavesTool.handler({ sprintId: 55, assignee: "Alice", entries: [{ date: "2026-06-03", type: "VL" }] });
+    await setLeavesTool.handler({ sprintId: 56, assignee: "Bob", entries: [{ date: "2026-06-10", type: "Holiday" }] });
 
-    const s55 = await getLeavesTool.handler({ sprintId: 55 }) as { leaves: Record<string, string[]> };
-    const s56 = await getLeavesTool.handler({ sprintId: 56 }) as { leaves: Record<string, string[]> };
+    const s55 = await getLeavesTool.handler({ sprintId: 55 }) as { leaves: Record<string, Record<string, string>> };
+    const s56 = await getLeavesTool.handler({ sprintId: 56 }) as { leaves: Record<string, Record<string, string>> };
 
-    expect(s55.leaves["Alice"]).toEqual(["2026-06-03"]);
+    expect(s55.leaves["Alice"]).toEqual({ "2026-06-03": "VL" });
     expect(s55.leaves["Bob"]).toBeUndefined();
-    expect(s56.leaves["Bob"]).toEqual(["2026-06-10"]);
+    expect(s56.leaves["Bob"]).toEqual({ "2026-06-10": "Holiday" });
     expect(s56.leaves["Alice"]).toBeUndefined();
   });
 
   it("multiple assignees in the same sprint", async () => {
-    await setLeavesTool.handler({ sprintId: 55, assignee: "Alice", dates: ["2026-06-03"] });
-    await setLeavesTool.handler({ sprintId: 55, assignee: "Bob", dates: ["2026-06-04", "2026-06-05"] });
+    await setLeavesTool.handler({ sprintId: 55, assignee: "Alice", entries: [{ date: "2026-06-03", type: "VL" }] });
+    await setLeavesTool.handler({ sprintId: 55, assignee: "Bob", entries: [{ date: "2026-06-04", type: "Offset" }] });
 
-    const result = await getLeavesTool.handler({ sprintId: 55 }) as { leaves: Record<string, string[]> };
+    const result = await getLeavesTool.handler({ sprintId: 55 }) as { leaves: Record<string, Record<string, string>> };
 
-    expect(result.leaves["Alice"]).toEqual(["2026-06-03"]);
-    expect(result.leaves["Bob"]).toEqual(["2026-06-04", "2026-06-05"]);
+    expect(result.leaves["Alice"]).toEqual({ "2026-06-03": "VL" });
+    expect(result.leaves["Bob"]).toEqual({ "2026-06-04": "Offset" });
   });
 });
 
-describe("set_leaves — replace overwrites previous dates", () => {
-  it("replaces all dates when called again for the same assignee+sprint", async () => {
-    await setLeavesTool.handler({ sprintId: 55, assignee: "Alice", dates: ["2026-06-03", "2026-06-04"] });
-    // Replace with a different date
+describe("get_all_leaves (v1.29, ADR-041)", () => {
+  it("returns {} when the store is empty", async () => {
+    const result = await getAllLeavesTool.handler({}) as { leaves: Record<string, unknown> };
+    expect(result.leaves).toEqual({});
+  });
+
+  it("returns EVERY sprint's typed leaves in one read, keyed by sprint id", async () => {
+    await setLeavesTool.handler({ sprintId: 55, assignee: "Alice", entries: [{ date: "2026-06-03", type: "VL" }] });
+    await setLeavesTool.handler({ sprintId: 56, assignee: "Bob", entries: [{ date: "2026-06-10", type: "Holiday" }] });
+
+    const result = await getAllLeavesTool.handler({}) as {
+      leaves: Record<string, Record<string, Record<string, string>>>;
+    };
+
+    expect(result.leaves["55"]!["Alice"]).toEqual({ "2026-06-03": "VL" });
+    expect(result.leaves["56"]!["Bob"]).toEqual({ "2026-06-10": "Holiday" });
+  });
+
+  it("rejects unexpected input keys (strict schema)", async () => {
+    await expect(getAllLeavesTool.handler({ sprintId: 55 })).rejects.toThrow();
+  });
+});
+
+describe("set_leaves — replace overwrites previous entries (typed)", () => {
+  it("replaces the whole map when called again for the same assignee+sprint", async () => {
+    await setLeavesTool.handler({ sprintId: 55, assignee: "Alice", entries: [{ date: "2026-06-03", type: "VL" }, { date: "2026-06-04", type: "VL" }] });
     const result = await setLeavesTool.handler({
       sprintId: 55,
       assignee: "Alice",
-      dates: ["2026-06-10"],
-    }) as { leaves: Record<string, string[]> };
+      entries: [{ date: "2026-06-10", type: "Offset" }],
+    }) as { leaves: Record<string, Record<string, string>> };
 
-    expect(result.leaves["Alice"]).toEqual(["2026-06-10"]);
-    expect(result.leaves["Alice"]).not.toContain("2026-06-03");
+    expect(result.leaves["Alice"]).toEqual({ "2026-06-10": "Offset" });
+    expect(result.leaves["Alice"]!["2026-06-03"]).toBeUndefined();
+  });
+
+  it("last write wins on a duplicate date within entries", async () => {
+    const result = await setLeavesTool.handler({
+      sprintId: 55,
+      assignee: "Alice",
+      entries: [{ date: "2026-06-03", type: "VL" }, { date: "2026-06-03", type: "EL" }],
+    }) as { leaves: Record<string, Record<string, string>> };
+
+    expect(result.leaves["Alice"]).toEqual({ "2026-06-03": "EL" });
   });
 });
 
-describe("set_leaves — empty dates clears the assignee", () => {
+describe("set_leaves — empty entries clears the assignee (typed)", () => {
   it("clearing an assignee removes their entry from the sprint map", async () => {
-    await setLeavesTool.handler({ sprintId: 55, assignee: "Alice", dates: ["2026-06-03"] });
+    await setLeavesTool.handler({ sprintId: 55, assignee: "Alice", entries: [{ date: "2026-06-03", type: "VL" }] });
     const cleared = await setLeavesTool.handler({
       sprintId: 55,
       assignee: "Alice",
-      dates: [],
-    }) as { leaves: Record<string, string[]> };
+      entries: [],
+    }) as { leaves: Record<string, Record<string, string>> };
 
     expect(cleared.leaves["Alice"]).toBeUndefined();
   });
 
-  it("clearing the only assignee yields an empty leaves map", async () => {
-    await setLeavesTool.handler({ sprintId: 55, assignee: "Alice", dates: ["2026-06-03"] });
-    const cleared = await setLeavesTool.handler({ sprintId: 55, assignee: "Alice", dates: [] }) as {
-      leaves: Record<string, string[]>;
-    };
-
-    expect(Object.keys(cleared.leaves)).toHaveLength(0);
-  });
-
   it("get_leaves returns {} after the last assignee is cleared", async () => {
-    await setLeavesTool.handler({ sprintId: 55, assignee: "Alice", dates: ["2026-06-03"] });
-    await setLeavesTool.handler({ sprintId: 55, assignee: "Alice", dates: [] });
+    await setLeavesTool.handler({ sprintId: 55, assignee: "Alice", entries: [{ date: "2026-06-03", type: "VL" }] });
+    await setLeavesTool.handler({ sprintId: 55, assignee: "Alice", entries: [] });
 
-    const result = await getLeavesTool.handler({ sprintId: 55 }) as { leaves: Record<string, string[]> };
+    const result = await getLeavesTool.handler({ sprintId: 55 }) as { leaves: Record<string, Record<string, string>> };
     expect(result.leaves).toEqual({});
   });
 });
 
-describe("set_leaves — deduplication and sorting", () => {
-  it("dedupes dates", async () => {
-    const result = await setLeavesTool.handler({
-      sprintId: 55,
-      assignee: "Alice",
-      dates: ["2026-06-04", "2026-06-03", "2026-06-04"],
-    }) as { leaves: Record<string, string[]> };
-
-    expect(result.leaves["Alice"]).toEqual(["2026-06-03", "2026-06-04"]);
-  });
-
-  it("sorts dates in ascending order", async () => {
-    const result = await setLeavesTool.handler({
-      sprintId: 55,
-      assignee: "Alice",
-      dates: ["2026-06-10", "2026-06-03", "2026-06-07"],
-    }) as { leaves: Record<string, string[]> };
-
-    expect(result.leaves["Alice"]).toEqual(["2026-06-03", "2026-06-07", "2026-06-10"]);
+describe("readLeaves — legacy back-compat (v1.26)", () => {
+  it("normalizes a legacy string[] (untyped dates) to typed VL on read", async () => {
+    // Write the OLD shape directly to the temp store, then read via get_leaves.
+    fs.writeFileSync(tempLeavesFile!, JSON.stringify({ "55": { Alice: ["2026-06-03", "2026-06-04"] } }), "utf8");
+    const result = await getLeavesTool.handler({ sprintId: 55 }) as { leaves: Record<string, Record<string, string>> };
+    expect(result.leaves["Alice"]).toEqual({ "2026-06-03": "VL", "2026-06-04": "VL" });
   });
 });
 

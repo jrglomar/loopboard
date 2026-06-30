@@ -7,6 +7,8 @@ import { createIssue, createIssueLink, addIssuesToSprint } from "../lib/jiraClie
 const schema = z.object({
   summary: z.string().min(1).max(255),
   description: z.string(),
+  // v1.30 (ADR-042): carry the source PO story's points onto the linked Dev task.
+  storyPoints: z.number().min(0).optional(),
   linkedPoTicketKey: z.string().optional(),
   sprintId: z.number().int().positive().optional(),
 });
@@ -27,6 +29,8 @@ async function handler(input: unknown): Promise<CreateDevTicketOutput> {
     summary: args.summary,
     description: args.description,
     issueType: "Task",
+    storyPointsField: cfg.JIRA_STORY_POINTS_FIELD,
+    storyPoints: args.storyPoints,
   });
 
   const result: CreateDevTicketOutput = {

@@ -105,6 +105,7 @@ export function Planning({
   sprintId: sprintIdProp,
   onBoardChange,
   onSprintChange,
+  projectIdx,
 }: SharedSprintProps = {}) {
   const selectId = useId();
 
@@ -115,15 +116,16 @@ export function Planning({
   // Default board = Dev (ADR-018); shared when controlled.
   const [localBoardKey, setLocalBoardKey] = useState<BoardKey>("dev");
   const selectedBoardKey = boardKeyProp ?? localBoardKey;
+  const activeProjectIdx = projectIdx ?? 0; // v1.25 (ADR-037)
 
   // Resolved numeric board id; undefined until boards loads (tools use server default)
   const selectedBoardId: number | undefined =
-    boards !== null ? boards[selectedBoardKey].id : undefined;
+    boards !== null ? boards[selectedBoardKey][activeProjectIdx]?.id : undefined;
 
   // projectKey for the current board — passed to FRONTEND-2 slots (ADR-018)
   // perf: derived from already-loaded boards; no extra fetch
   const selectedProjectKey: string | undefined =
-    boards !== null ? boards[selectedBoardKey].projectKey : undefined;
+    boards !== null ? boards[selectedBoardKey][activeProjectIdx]?.projectKey : undefined;
   // selectedProjectKey is used by the FRONTEND-2 component slots below
 
   // ── Sprint list for the selected board ──────────────────────────────────

@@ -1,6 +1,6 @@
 # Integration Contracts
 
-**Status: FINAL — AUTHORITATIVE (v1.24)**  
+**Status: FINAL — AUTHORITATIVE (v1.31)**  
 Builder agents implement exactly what this document says. If something here is
 ambiguous, file a note to the Architect agent; do NOT invent new surface area or
 prefer the spec over this document — this document supersedes the spec on all
@@ -70,7 +70,7 @@ export interface ToolDef {
 
 | Route | Response |
 |---|---|
-| `GET /api/health` | `200 { ok: true, service: "mcp-jira"\|"mcp-github", version: string, ai?: {...}, boards?: { dev: { id: number; projectKey: string }; po: { id: number; projectKey: string } } }` — `ai` + `boards` are **mcp-jira only** (§4.9, §4.9-boards); mcp-github omits them |
+| `GET /api/health` | `200 { ok: true, service: "mcp-jira"\|"mcp-github", version: string, ai?: {...}, boards?: { dev: ProjectRef[]; po: ProjectRef[] } }` where `ProjectRef = { id: number; projectKey: string }` (v1.25: **arrays** — multi-project; element 0 = the default). `ai` + `boards` are **mcp-jira only**; mcp-github omits them |
 | `GET /api/tools` | `200 { ok: true, data: Array<{ name: string; description: string }> }` |
 | `POST /api/tools/:name` (JSON body = tool input) | `200 { ok: true, data: <tool output> }` |
 
@@ -115,12 +115,17 @@ so tests run with no `.env`.
 | `JIRA_DEV_PROJECT_KEY` | mcp-jira | optional | `"DEV"` |
 | `JIRA_PO_BOARD_ID` | mcp-jira | yes (no default) | — |
 | `JIRA_DEV_BOARD_ID` | mcp-jira | yes (no default) | — |
+| `JIRA_PO_PROJECTS` | mcp-jira | optional | `""` — extra PO projects as `KEY:boardId,KEY2:boardId2` (v1.25). When empty, the single `JIRA_PO_PROJECT_KEY`+`JIRA_PO_BOARD_ID` is the only PO project. |
+| `JIRA_DEV_PROJECTS` | mcp-jira | optional | `""` — extra Dev projects as `KEY:boardId,…` (v1.25); falls back to `JIRA_DEV_PROJECT_KEY`+`JIRA_DEV_BOARD_ID`. |
 | `JIRA_STORY_POINTS_FIELD` | mcp-jira | optional | `"customfield_10016"` |
 | `JIRA_LINK_TYPE` | mcp-jira | optional | `"Relates"` |
 | `JIRA_FLAGGED_FIELD` | mcp-jira | optional | `""` (disabled) |
 | `JIRA_CODE_REVIEW_STATUSES` | mcp-jira | optional | `"code review,in review,peer review,review"` (v1.2) |
 | `JIRA_VELOCITY_SPRINTS` | mcp-jira | optional | `6` — closed sprints averaged for velocity/forecast (v1.4) |
 | `JIRA_LEAVES_FILE` | mcp-jira | optional | `<mcp-jira pkg>/.loopboard-leaves.json` — JSON store for per-sprint leaves (v1.5) |
+| `JIRA_REQUIRED_POINTS` | mcp-jira | optional | `8` — N, required points/sprint per member (offset engine, v1.26) |
+| `JIRA_OFFSET_THRESHOLD` | mcp-jira | optional | `2` — N2, surplus threshold to earn an offset point (v1.26) |
+| `JIRA_OFFSET_FILE` | mcp-jira | optional | `<mcp-jira pkg>/.loopboard-offset.json` — JSON store for the offset ledger (v1.26) |
 | `JIRA_TEAM_FILE` | mcp-jira | optional | `<mcp-jira pkg>/.loopboard-team.json` — JSON store for the per-board team roster (v1.8) |
 | `GITHUB_TOKEN` | mcp-github | yes (no default) | — |
 | `GITHUB_REPO` | mcp-github | optional (used as default repo) | — |
@@ -211,7 +216,9 @@ case.
 - **Output:** `TicketRef & { sprintId?: number; sprintWarning?: string }` with `board: "PO"`.
 
 ### 4.2 `create_dev_ticket`
-- **Input:** `{ summary: string (1–255 chars), description: string, linkedPoTicketKey?: string, sprintId?: number }`
+- **Input:** `{ summary: string (1–255 chars), description: string, storyPoints?: number (≥ 0), linkedPoTicketKey?: string, sprintId?: number }`
+  (v1.30, ADR-042: `storyPoints` added — written to `JIRA_STORY_POINTS_FIELD` like `create_po_ticket`,
+  so a Dev task linked from a PO story can inherit the PO's points.)
 - **Behavior:** create issue type `Task` in `JIRA_DEV_PROJECT_KEY`. If
   `linkedPoTicketKey` is present, call `POST /rest/api/3/issueLink` with payload:
   ```json
@@ -532,18 +539,25 @@ export interface AiProvider {
 "github" | null; model: string | null }` — `enabled: false, provider: null, model: null`
 when `AI_PROVIDER` is unset. The React app uses this to pick AI vs deterministic mode.
 
-**`GET /api/health` (mcp-jira) also gains `boards` (v1.6, ADR-017)** — the configured board
-context so the React app can offer a PO/Dev switch without knowing env values:
+**`GET /api/health` (mcp-jira) also gains `boards` (v1.6, ADR-017; multi-project v1.25, ADR-037)** —
+the configured board context so the React app can offer a PO/Dev + project switch without knowing env
+values:
 ```ts
 boards: {
-  dev: { id: number; projectKey: string };   // JIRA_DEV_BOARD_ID + JIRA_DEV_PROJECT_KEY
-  po:  { id: number; projectKey: string };    // JIRA_PO_BOARD_ID  + JIRA_PO_PROJECT_KEY
+  dev: ProjectRef[];   // from JIRA_DEV_PROJECTS, else [JIRA_DEV_BOARD_ID + JIRA_DEV_PROJECT_KEY]
+  po:  ProjectRef[];   // from JIRA_PO_PROJECTS,  else [JIRA_PO_BOARD_ID  + JIRA_PO_PROJECT_KEY]
 }
+// ProjectRef = { id: number; projectKey: string }; element 0 is the default project for that side.
 ```
-Pure config (no Jira call). All existing board-scoped tools (`get_active_sprint`,
-`get_daily_huddle`, `list_sprints`, `get_sprint_report`, `get_velocity`, `create_sprint`)
-already accept `boardId` — the app passes `boards.dev.id` or `boards.po.id`; no tool
-signature changes.
+Pure config (no Jira call). `JIRA_PO_PROJECTS`/`JIRA_DEV_PROJECTS` are `KEY:boardId,KEY2:boardId2`
+lists; when empty, each side is the single-project 1-element array (back-compatible). All board-scoped
+tools (`get_active_sprint`, `get_daily_huddle`, `list_sprints`, `get_sprint_report`, `get_velocity`,
+`create_sprint`) already accept `boardId` — the app passes the **active** project's id (`boards[key][activeIdx].id`);
+no tool signature changes. Older bridges (object `boards`) → the app falls back to a 1-project list.
+
+**`GET /api/health` (mcp-jira) also gains `policy` (v1.26, ADR-038)** — the offset policy:
+`policy: { requiredPoints: number; offsetThreshold: number }` from `JIRA_REQUIRED_POINTS` (N) +
+`JIRA_OFFSET_THRESHOLD` (N2). Pure config; the Leaves page reads it to compute earned offsets (§4.26).
 
 **Quality gates:** all §4.9 tests run keyless/offline — mock the Anthropic SDK module and
 global fetch; cover: AI_UNAVAILABLE 503, missing-key CONFIG, happy path per provider,
@@ -661,25 +675,30 @@ export interface SprintRef {
 
 Real MCP tools backed by a **JSON file on the mcp-jira host** (`JIRA_LEAVES_FILE`, default
 `<mcp-jira pkg>/.loopboard-leaves.json` — git-ignored). This is the project's first stateful
-store (a deliberate, user-chosen exception to the stateless-bridge norm). File shape:
+store (a deliberate, user-chosen exception to the stateless-bridge norm).
+
+**v1.26 (ADR-038): leaves are now TYPED.** `LeaveType = "VL" | "EL" | "Holiday" | "Offset"`. File shape:
 ```jsonc
-{ "<sprintId>": { "<assigneeName>": ["2026-06-03", "2026-06-04"], ... }, ... }
+{ "<sprintId>": { "<assigneeName>": { "2026-06-03": "VL", "2026-06-04": "Offset" }, ... }, ... }
 ```
-Helpers in `src/lib/leavesStore.ts`: `readLeaves(): LeavesFile`, `writeLeaves(LeavesFile)`
-— read-modify-write with the file created on first write; tolerate a missing/corrupt file
-(treat as `{}`). The path is read from config at call time so tests can point it at a temp
-file. Dates are `YYYY-MM-DD` strings; values deduped + sorted.
+`readLeaves` (`src/lib/leavesStore.ts`) **normalizes on read** — a legacy `string[]` of dates becomes
+`{ [date]: "VL" }` — so the pre-v1.26 `.loopboard-leaves.json` keeps working with no migration. Path
+read from config at call time. `readLeaves`/`writeLeaves` tolerate a missing/corrupt file (treat `{}`).
 
 - **`get_leaves`** — Input `{ sprintId: number }`. Output
-  `{ sprintId: number, leaves: Record<string, string[]> }` (the assignee→dates map for that
-  sprint; `{}` when none recorded).
-- **`set_leaves`** — Input `{ sprintId: number, assignee: string (1–120), dates: string[] }`
-  — each date zod-validated `YYYY-MM-DD`. **Behavior:** replace that assignee's leave dates
-  for the sprint (empty `dates` clears the assignee). Read-modify-write the file. Output the
-  updated `{ sprintId, leaves }` for that sprint.
-- Both are registered MCP tools (stdio + `/api/tools` + bridge). Tests set
-  `JIRA_LEAVES_FILE` to a temp path (or mock `fs`) and run keyless/offline; cover
-  round-trip set→get, replace/clear, missing-file tolerance, date validation.
+  `{ sprintId, leaves: Record<string, Record<string /*YYYY-MM-DD*/, LeaveType>> }` (assignee → typed
+  map; `{}` when none).
+- **`set_leaves`** — Input `{ sprintId, assignee (1–120), entries: Array<{ date: YYYY-MM-DD, type: LeaveType }> }`
+  (full replace per assignee; empty `entries` clears). **Back-compat:** also accepts legacy
+  `dates: string[]` (→ all `"VL"`) so the transitional frontend keeps working; `entries` wins if both
+  are sent; at least one is required. Output the updated `{ sprintId, leaves }` (typed) for that sprint.
+- **`get_all_leaves`** (v1.29, ADR-041) — Input `{}` (strict). Output
+  `{ leaves: Record<string /*sprintId*/, Record<string /*assignee*/, Record<string /*YYYY-MM-DD*/, LeaveType>>> }`
+  — the WHOLE store in one read (legacy untyped dates normalized to `"VL"`). Powers the forward,
+  multi-sprint leave planner without a `get_leaves` call per sprint. Writes still go through `set_leaves`
+  (per sprint), so the date a leave lands on is attributed to the sprint whose range contains it.
+- All registered MCP tools. Tests point `JIRA_LEAVES_FILE` at a temp path; cover typed round-trip,
+  replace/clear, the legacy-dates shim, type validation, and the whole-store read.
 
 ### 4.15 `get_assignable_users` / `assign_issue` (v1.7 — sprint-planning assignment; ADR-018)
 
@@ -904,6 +923,26 @@ data, so the Huddle's code-review card uses it for both the PR list and the appr
 - **Output:** `{ pullRequests: Record<string /*issue key*/, LinkedPr[]> }`.
 - **Config:** `JIRA_DEV_STATUS_APP_TYPE` (default `"GitHub"`; `"GitHubEnterprise"` for GHE).
 - Registered MCP tool (stdio + `/api/tools` + bridge). jira tools **31 → 32**.
+
+### 4.26 `get_offset_ledger` / `set_offset_for_sprint` / `set_offset_adjustment` (v1.26, ADR-038 — offset ledger)
+
+Per-developer offset-point tracking, backed by a bridge-side JSON store (`JIRA_OFFSET_FILE`, default
+`<mcp-jira>/.loopboard-offset.json`, git-ignored). Store shape:
+`{ [assignee]: { bySprint: { [sprintId]: { earned, spent } }, manualAdjust } }`. **Two ways to adjust**
+(per the user): an **auto** per-sprint snapshot + a **manual** absolute delta.
+**`balance = Σ earned − Σ spent + manualAdjust`** (pure `summarizeOffset`).
+
+- **`get_offset_ledger`** — Input `{}`. Output `{ entries: Record<assignee, { earned, spent, manualAdjust, balance }> }`.
+- **`set_offset_for_sprint`** — Input `{ sprintId, entries: Array<{ assignee, earned ≥ 0, spent ≥ 0 }> }`.
+  **Idempotent** upsert of that sprint's `{ earned, spent }` per assignee (re-recording never
+  double-counts). The Leaves page computes earned (`offset.ts`, §6) + spent (Offset-leave days) and writes it.
+  Output the updated `entries` summary.
+- **`set_offset_adjustment`** — Input `{ assignee, manualAdjust: int }` — set the absolute manual delta.
+  Output the updated `entries` summary.
+- **Offset policy** (`GET /api/health` `.policy = { requiredPoints, offsetThreshold }`, from
+  `JIRA_REQUIRED_POINTS` (N) + `JIRA_OFFSET_THRESHOLD` (N2)). The UI computes earned =
+  `(donePoints + leaveDays) ≥ (N + N2) ? 1 : 0` (**max 1/sprint**).
+- Registered MCP tools. jira tools **32 → 35**. Tests use a temp store; keyless/offline.
 
 ## 5. mcp-github tools (Phase 2) — exact IO
 
@@ -2019,3 +2058,91 @@ Changes made by the Architect agent during finalization:
     selector now lives in the **top-right top-bar**, driving the shared board context; the per-page
     `BoardToggle` renders only in standalone/uncontrolled use (so page tests stay green). Hidden on
     Linking (dual-board). No tool/route/contract-IO change.
+
+## Changelog v1.25 (2026-06-26 — multi-project switching; ADR-037)
+
+119. **§2 — multiple PO/Dev projects.** New env `JIRA_PO_PROJECTS` / `JIRA_DEV_PROJECTS`
+    (`KEY:boardId,KEY2:boardId2`); pure `parseProjects()` falls back to the single
+    `JIRA_PO_PROJECT_KEY`+`JIRA_PO_BOARD_ID` (and Dev) as a 1-element list. `GET /api/health` `.boards`
+    becomes `{ dev: ProjectRef[]; po: ProjectRef[] }` (element 0 = default). React `Boards` type +
+    `boards.ts` validator + `useBoards` adapt; `App` shared context gains active PO/Dev project indices;
+    the top-right shell adds a **project dropdown** beside the Dev/PO toggle. Pages pass the active
+    project's `boardId` (no tool signature change). Older object-shaped `boards` → 1-project fallback. ADR-037.
+
+## Changelog v1.26 (2026-06-26 — typed leaves + offset-points engine; ADR-038, backend slice)
+
+120. **§4.14 — TYPED leaves.** `LeaveType = VL|EL|Holiday|Offset`; store shape
+    `{ sprintId: { assignee: { date: type } } }`; `readLeaves` normalizes legacy `string[]` → all `VL`
+    (no migration). `set_leaves` takes `entries:[{date,type}]` and **also** accepts legacy `dates:[]`
+    (→ VL) for transition. `get_leaves` returns the typed map.
+121. **§2 / §4.26 — offset engine.** `JIRA_REQUIRED_POINTS` (N=8) + `JIRA_OFFSET_THRESHOLD` (N2=2) →
+    `GET /api/health .policy`. New offset-ledger store + tools `get_offset_ledger`,
+    `set_offset_for_sprint` (auto snapshot, idempotent), `set_offset_adjustment` (manual delta).
+    `balance = Σ earned − Σ spent + manualAdjust`; earned = `(done+leaveDays ≥ N+N2)?1:0` (max 1/sprint).
+    jira tools **32 → 35**. (Frontend Leaves page + typed UI shipped in the v1.26 frontend slice:
+    new **Leaves** tab — typed calendar painter (VL/EL/Holiday/Offset) + per-developer offset table
+    with auto earned/spent + a manual adjustment column; `offset.ts` + `useOffsetLedger`.)
+
+## Changelog v1.27 (2026-06-30 — has-PR badge on the board + reports; ADR-039)
+
+122. **§6 — "has linked PR" badge (frontend-only; no tool change).** Reuses `get_issue_pull_requests`
+    (§4.25). The **Dashboard** lifts `useIssuePullRequests(sprintKeys)` once and passes the resulting
+    `Record<key, LinkedPr[]>` to **`SprintBoard`** (new optional `prsByKey` prop) → each `IssueCard`
+    renders a compact, clickable **PR badge** (`GitPullRequest` + count) when its key has ≥1 linked PR;
+    the badge links to the **newest** PR (latest `lastUpdate`) and its `title`/tooltip lists all PRs when
+    >1. Tint reflects an aggregate review tone over the still-open PRs (changes-requested → red, approved →
+    green, review-required → amber, all-merged/closed → muted). **Reports** badges its Completed and
+    Carryover issue rows the same way (lifts `useIssuePullRequests` over the report's issue keys). New pure
+    `src/lib/prBadge.ts` (`summarizePrBadge`) + shared `src/components/PrBadge.tsx`. The Huddle code-review
+    card (§6, v1.22) keeps its own list; Dashboard passes its lifted map down to avoid a duplicate fetch.
+
+## Changelog v1.28 (2026-06-30 — dual PO+Dev fly-in tracking + alignment; ADR-040)
+
+123. **§6 — dual fly-in tracker (frontend-only; no tool change).** Reuses `get_active_sprint` (both
+    boards) + `get_linked_issues`. The **Dashboard** now also fetches the **opposite** board's active
+    sprint (`useActiveSprint(otherBoardId, null)`, default project) so `selectFlyIns` yields **both**
+    `devFlyIns` and `poFlyIns`. New `useLinkedIssues(keys)` hook (over `get_linked_issues`, default
+    `projectKey` = Dev) resolves each PO fly-in's linked Dev issues; a PO fly-in is **aligned** when a
+    linked Dev issue is itself a fly-in (`matchFlyIn` on its summary) → `poAlignment: Record<poKey,
+    LinkedIssue | null>`. **`FlyInCard`** props change from `{ flyIns }` to `{ devFlyIns, poFlyIns,
+    poAlignment? }` and render **two labelled groups** (Dev / PO); each PO fly-in shows a green
+    **"✓ aligned"** link to the Dev fly-in or an amber **"⚠ No Dev fly-in"**. Its only caller (Dashboard)
+    is updated in the same change.
+
+## Changelog v1.29 (2026-06-30 — forward, multi-sprint leave planner; ADR-041)
+
+124. **§4.14 — `get_all_leaves {}`.** New read tool returning the WHOLE typed leaves store keyed by
+    sprint id (legacy untyped dates → `"VL"`). jira tools **35 → 36**. Writes stay per-sprint
+    (`set_leaves`).
+125. **§6 — leave planner (Leaves page).** The Leaves page calendar is a `LeavesPlannerCard` matrix
+    (person rows × **Mon–Fri** day columns — weekends never render, `sprintWorkingDays` excludes Sat/Sun)
+    that shows the **selected sprint** and saves each plotted day to **that day's sprint**
+    (auto-attribution). The sprint `<select>` is **grouped by state, Future → Active → Closed** so a
+    **future** sprint is easy to pick and plot ahead; it also scopes the offset table. The matrix has a
+    clean sticky name-column separator and neutral dividers only *between* sprints (no per-cell tint).
+    *(Revised same-day per user feedback from the initial multi-sprint window — show only the selected
+    sprint, switch via the picker. `selectCalendarSprints` is retained in `src/lib/leavePlanner.ts` next
+    to the still-used `buildLeaveCalendar`.)* New `useAllLeaves` hook (`get_all_leaves` load + per-sprint
+    `set_leaves` save) + `src/components/LeavesPlannerCard.tsx`. The per-developer **offset table stays
+    scoped to the selected sprint** (it needs that sprint's done points).
+
+## Changelog v1.30 (2026-06-30 — Linking keeps the PO title + carries PO points; ADR-042)
+
+126. **§4.2 — `create_dev_ticket` gains `storyPoints?`.** Written to `JIRA_STORY_POINTS_FIELD` exactly
+    like `create_po_ticket` (`createIssue` already supported the field). No other IO change.
+127. **§6 — Linking retains the PO title + drafts editable points.** On the Linking page the drafted Dev
+    task **keeps the PO story's title** — the AI (and the template fallback, and per-draft Regenerate) only
+    **enhance the description**; every draft's `devSummary` is forced back to its PO summary (`draftFromPo`).
+    Each draft also carries an **editable Points field, drafted from the PO's `storyPoints`** (plan item
+    `storyPoints?`), which the user can override before create; the bulk create (and "Retry failed") send
+    that value to `create_dev_ticket`. The plan card shows the Title "(kept from PO)" and a Points
+    "(from PO)" input side by side.
+
+## Changelog v1.31 (2026-06-30 — Huddle "who's on leave" card; ADR-043)
+
+128. **§6 — on-leave card (Huddle, frontend-only; no tool change).** Reuses `get_all_leaves` /
+    `useAllLeaves`. New pure `src/lib/leaveStatus.ts` `summarizeLeaveStatus(allLeaves, { today, horizonDays=7 })`
+    → `{ today: [{assignee,type}], upcoming: [{assignee,date,type,daysAway}] }` (flattens every sprint's
+    leaves, dedupes by (assignee,date), excludes past + far-out). New `src/components/LeaveStatusCard.tsx`
+    on the Dashboard/Huddle sidebar shows **who's out today** + **upcoming leave (next 7 days)** with a
+    leave-type chip. Board-agnostic (the leaves store is keyed by sprint only).

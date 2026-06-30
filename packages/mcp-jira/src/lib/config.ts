@@ -28,6 +28,9 @@ export const DEFAULT_POST_SCRUM_FILE = path.join(_packageDir, ".loopboard-post-s
 /** Default path for the meeting-goal JSON file — inside the mcp-jira package dir (v1.20). */
 export const DEFAULT_MEETING_GOAL_FILE = path.join(_packageDir, ".loopboard-meeting-goal.json");
 
+/** Default path for the offset-ledger JSON file — inside the mcp-jira package dir (v1.26). */
+export const DEFAULT_OFFSET_FILE = path.join(_packageDir, ".loopboard-offset.json");
+
 // Config schema — validated lazily on first call to getConfig().
 // All env reads happen inside getConfig(), never at module-import time,
 // so tool modules can be imported in tests without a .env file.
@@ -39,6 +42,10 @@ const configSchema = z.object({
   JIRA_DEV_PROJECT_KEY: z.string().default("DEV"),
   JIRA_PO_BOARD_ID: z.string().min(1),
   JIRA_DEV_BOARD_ID: z.string().min(1),
+  // v1.25 (ADR-037): optional multi-project lists, "KEY:boardId,KEY2:boardId2".
+  // Empty → the single PO/Dev project (key + board id above) is the only project for that side.
+  JIRA_PO_PROJECTS: z.string().default(""),
+  JIRA_DEV_PROJECTS: z.string().default(""),
   JIRA_STORY_POINTS_FIELD: z.string().default("customfield_10016"),
   JIRA_LINK_TYPE: z.string().default("Relates"),
   JIRA_FLAGGED_FIELD: z.string().default(""),
@@ -46,6 +53,11 @@ const configSchema = z.object({
     .string()
     .default("code review,in review,peer review,review"),
   JIRA_VELOCITY_SPRINTS: z.coerce.number().int().positive().default(6),
+  // v1.26 (ADR-038): offset policy — N required points/sprint + N2 surplus threshold.
+  JIRA_REQUIRED_POINTS: z.coerce.number().int().nonnegative().default(8),
+  JIRA_OFFSET_THRESHOLD: z.coerce.number().int().positive().default(2),
+  // v1.26: optional offset-ledger store path; default resolved from package dir.
+  JIRA_OFFSET_FILE: z.string().default(""),
   // v1.5: optional leaves file path; default resolved from package dir above.
   JIRA_LEAVES_FILE: z.string().default(""),
   // v1.8: optional team roster file path; default resolved from package dir above.
@@ -152,6 +164,61 @@ export function getPostScrumFilePath(): string {
 export function getMeetingGoalFilePath(): string {
   const cfg = getConfig();
   return cfg.JIRA_MEETING_GOAL_FILE || DEFAULT_MEETING_GOAL_FILE;
+}
+
+/** Resolved offset-ledger file path (v1.26) — JIRA_OFFSET_FILE or the default. */
+export function getOffsetFilePath(): string {
+  const cfg = getConfig();
+  return cfg.JIRA_OFFSET_FILE || DEFAULT_OFFSET_FILE;
+}
+
+/** Offset policy (v1.26, ADR-038) — N required points + N2 surplus threshold. */
+export function getOffsetPolicy(): { requiredPoints: number; offsetThreshold: number } {
+  const cfg = getConfig();
+  return { requiredPoints: cfg.JIRA_REQUIRED_POINTS, offsetThreshold: cfg.JIRA_OFFSET_THRESHOLD };
+}
+
+/** One configured project for a board side (v1.25, ADR-037). */
+export interface ProjectRef {
+  id: number; // board id
+  projectKey: string;
+}
+
+/**
+ * Parse a "KEY:boardId,KEY2:boardId2" project list (v1.25, ADR-037). Malformed entries
+ * (missing key or non-numeric id) are skipped. When the result is empty, returns a
+ * single-element list from the fallback key + board id — fully back-compatible.
+ */
+export function parseProjects(
+  raw: string,
+  fallbackKey: string,
+  fallbackBoardId: string
+): ProjectRef[] {
+  const out: ProjectRef[] = [];
+  for (const part of (raw ?? "").split(",")) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const colon = trimmed.indexOf(":");
+    if (colon <= 0) continue;
+    const key = trimmed.slice(0, colon).trim();
+    const id = parseInt(trimmed.slice(colon + 1).trim(), 10);
+    if (!key || !Number.isFinite(id)) continue;
+    out.push({ projectKey: key, id });
+  }
+  if (out.length === 0) {
+    const id = parseInt(fallbackBoardId, 10);
+    out.push({ projectKey: fallbackKey, id: Number.isFinite(id) ? id : NaN });
+  }
+  return out;
+}
+
+/** Resolved PO/Dev project lists from config (v1.25). Element 0 = the default project. */
+export function getProjects(): { dev: ProjectRef[]; po: ProjectRef[] } {
+  const cfg = getConfig();
+  return {
+    dev: parseProjects(cfg.JIRA_DEV_PROJECTS, cfg.JIRA_DEV_PROJECT_KEY, cfg.JIRA_DEV_BOARD_ID),
+    po: parseProjects(cfg.JIRA_PO_PROJECTS, cfg.JIRA_PO_PROJECT_KEY, cfg.JIRA_PO_BOARD_ID),
+  };
 }
 
 /**

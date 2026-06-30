@@ -35,11 +35,27 @@ afterEach(() => {
 // ── getBoards ─────────────────────────────────────────────────────────────────
 
 describe("getBoards", () => {
-  it("returns boards when health response has valid boards field", async () => {
+  it("returns boards when health response has valid boards arrays (v1.25 multi-project)", async () => {
     stubFetch({
       ok: true,
       service: "mcp-jira",
       version: "1.0.0",
+      boards: {
+        dev: [{ id: 10, projectKey: "DEV" }, { id: 11, projectKey: "DEV2" }],
+        po: [{ id: 20, projectKey: "PO" }],
+      },
+    });
+
+    const result = await getBoards();
+    expect(result).toEqual({
+      dev: [{ id: 10, projectKey: "DEV" }, { id: 11, projectKey: "DEV2" }],
+      po: [{ id: 20, projectKey: "PO" }],
+    });
+  });
+
+  it("normalizes a legacy object-shaped boards into 1-element arrays (older bridge)", async () => {
+    stubFetch({
+      ok: true,
       boards: {
         dev: { id: 10, projectKey: "DEV" },
         po: { id: 20, projectKey: "PO" },
@@ -48,8 +64,8 @@ describe("getBoards", () => {
 
     const result = await getBoards();
     expect(result).toEqual({
-      dev: { id: 10, projectKey: "DEV" },
-      po: { id: 20, projectKey: "PO" },
+      dev: [{ id: 10, projectKey: "DEV" }],
+      po: [{ id: 20, projectKey: "PO" }],
     });
   });
 

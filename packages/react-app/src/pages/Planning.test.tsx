@@ -17,11 +17,11 @@ import { Planning } from "./Planning";
 // Mock boards — boards loaded with dev+po ids
 vi.mock("../lib/boards", () => ({
   useBoards: vi.fn().mockReturnValue({
-    boards: { dev: { id: 10, projectKey: "DEV" }, po: { id: 20, projectKey: "PO" } },
+    boards: { dev: [{ id: 10, projectKey: "DEV" }], po: [{ id: 20, projectKey: "PO" }] },
     loading: false,
   }),
   getBoards: vi.fn().mockResolvedValue(
-    { dev: { id: 10, projectKey: "DEV" }, po: { id: 20, projectKey: "PO" } }
+    { dev: [{ id: 10, projectKey: "DEV" }], po: [{ id: 20, projectKey: "PO" }] }
   ),
 }));
 
@@ -248,7 +248,7 @@ const NO_FUTURE_SPRINT_LIST = {
 
 function setDefaultMocks() {
   vi.mocked(boardsModule.useBoards).mockReturnValue({
-    boards: { dev: { id: 10, projectKey: "DEV" }, po: { id: 20, projectKey: "PO" } },
+    boards: { dev: [{ id: 10, projectKey: "DEV" }], po: [{ id: 20, projectKey: "PO" }] },
     loading: false,
   });
   vi.mocked(useJiraModule.useSprintList).mockReturnValue({

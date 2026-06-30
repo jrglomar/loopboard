@@ -12,10 +12,12 @@ import {
   type GetActiveSprintOutput,
   type IssueSummary,
   type ActiveSprintRef,
+  type LinkedPr,
 } from "../lib/types";
 import { type McpError } from "../lib/mcpClient";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { PrBadge } from "./PrBadge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
@@ -44,6 +46,8 @@ interface SprintBoardProps {
   onAssigneeFilterChange?: (assignee: string | null) => void;
   /** v1.4: "New Sprint" button rendered in controls zone (provided by Dashboard) */
   createSprintButton?: React.ReactNode;
+  /** v1.27 (ADR-039): linked PRs per issue key — drives the "has PR" badge on cards. */
+  prsByKey?: Record<string, LinkedPr[]>;
 }
 
 // ── Column config (v1.3: icon + filled tinted band) ──────────────────────────
@@ -107,7 +111,7 @@ function InitialsAvatar({ name }: { name: string | null }) {
 
 // ── Issue Card ────────────────────────────────────────────────────────────────
 
-function IssueCard({ issue }: { issue: IssueSummary }) {
+function IssueCard({ issue, prs }: { issue: IssueSummary; prs?: LinkedPr[] }) {
   const isBlocked = issue.blocked;
 
   return (
@@ -161,15 +165,19 @@ function IssueCard({ issue }: { issue: IssueSummary }) {
             <InitialsAvatar name={issue.assignee} />
             <span className="truncate">{issue.assignee ?? "Unassigned"}</span>
           </span>
-          {issue.storyPoints != null && (
-            <Badge
-              variant="outline"
-              className="text-xs font-semibold flex-shrink-0"
-              title="Story points"
-            >
-              {issue.storyPoints} pt{issue.storyPoints !== 1 ? "s" : ""}
-            </Badge>
-          )}
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {/* v1.27 (ADR-039): linked-PR badge — clickable, opens newest PR */}
+            <PrBadge prs={prs} />
+            {issue.storyPoints != null && (
+              <Badge
+                variant="outline"
+                className="text-xs font-semibold flex-shrink-0"
+                title="Story points"
+              >
+                {issue.storyPoints} pt{issue.storyPoints !== 1 ? "s" : ""}
+              </Badge>
+            )}
+          </div>
         </div>
       </CardContent>
     </Card>
@@ -181,9 +189,11 @@ function IssueCard({ issue }: { issue: IssueSummary }) {
 interface ColumnProps {
   colorKey: ColKey;
   issues: IssueSummary[];
+  /** v1.27 (ADR-039): linked PRs per issue key for the card badge. */
+  prsByKey?: Record<string, LinkedPr[]>;
 }
 
-function SprintColumn({ colorKey, issues }: ColumnProps) {
+function SprintColumn({ colorKey, issues, prsByKey }: ColumnProps) {
   const cfg = COLUMN_CONFIG[colorKey];
   const Icon = cfg.icon;
 
@@ -226,7 +236,7 @@ function SprintColumn({ colorKey, issues }: ColumnProps) {
           <ul className="flex flex-col gap-2" style={{ listStyle: "none" }}>
             {issues.map((issue) => (
               <li key={issue.key}>
-                <IssueCard issue={issue} />
+                <IssueCard issue={issue} prs={prsByKey?.[issue.key]} />
               </li>
             ))}
           </ul>
@@ -730,6 +740,7 @@ export function SprintBoard({
   assigneeFilter = null,
   onAssigneeFilterChange,
   createSprintButton,
+  prsByKey,
 }: SprintBoardProps) {
   // v1.3: "Show blocked" toggle state — composes with assignee filter
   const [showBlockedOnly, setShowBlockedOnly] = useState(false);
@@ -898,10 +909,10 @@ export function SprintBoard({
       {/* perf: 4-column grid; overflow-x-auto for 360px */}
       <div className="overflow-x-auto">
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 min-w-0">
-          <SprintColumn colorKey="todo"       issues={filteredTodo} />
-          <SprintColumn colorKey="inprogress" issues={filteredInProgress} />
-          <SprintColumn colorKey="codereview" issues={filteredCodeReview} />
-          <SprintColumn colorKey="done"       issues={filteredDone} />
+          <SprintColumn colorKey="todo"       issues={filteredTodo}       prsByKey={prsByKey} />
+          <SprintColumn colorKey="inprogress" issues={filteredInProgress} prsByKey={prsByKey} />
+          <SprintColumn colorKey="codereview" issues={filteredCodeReview} prsByKey={prsByKey} />
+          <SprintColumn colorKey="done"       issues={filteredDone}       prsByKey={prsByKey} />
         </div>
       </div>
     </div>

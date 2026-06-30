@@ -2,7 +2,14 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import { callTool } from "../lib/mcpClient";
 import { getIssuePullRequests } from "../lib/issuePrsClient";
-import { getLeaves, setLeaves, type LeavesMap } from "../lib/leavesClient";
+import { getLinkedIssues } from "../lib/linkClient";
+import {
+  getOffsetLedger,
+  setOffsetForSprint,
+  setOffsetAdjustment,
+  type OffsetLedger,
+} from "../lib/offsetClient";
+import { getLeaves, getAllLeaves, setLeaves, type LeavesMap, type LeaveEntry, type AllLeavesMap } from "../lib/leavesClient";
 import { getAssignableUsers } from "../lib/assignClient";
 import { getTeamMembers, setTeamMembers, getRecentAssignees } from "../lib/teamClient";
 import { getImpediments, setImpediments, type ImpedimentInput } from "../lib/impedimentsClient";
@@ -30,6 +37,7 @@ import {
   type PostScrumNote,
   type MeetingGoal,
   type LinkedPr,
+  type LinkedIssue,
 } from "../lib/types";
 import { useMCP, type UseMCPState } from "./useMCP";
 
@@ -160,12 +168,15 @@ export async function createLinkedDevTicket(input: {
   description: string;
   linkedPoTicketKey: string;
   sprintId?: number;
+  /** v1.30 (ADR-042): points inherited from the source PO story. */
+  storyPoints?: number;
 }): Promise<CreateDevTicketOutput> {
   return callTool<CreateDevTicketOutput>("jira", "create_dev_ticket", {
     summary: input.summary,
     description: input.description,
     linkedPoTicketKey: input.linkedPoTicketKey,
     ...(input.sprintId !== undefined ? { sprintId: input.sprintId } : {}),
+    ...(input.storyPoints != null ? { storyPoints: input.storyPoints } : {}),
   });
 }
 
@@ -338,7 +349,8 @@ export interface UseLeavesState {
   loading: boolean;
   error: McpError | null;
   run: () => void;
-  save: (assignee: string, dates: string[]) => Promise<void>;
+  /** Replace an assignee's typed leave entries for the sprint (v1.26). */
+  save: (assignee: string, entries: LeaveEntry[]) => Promise<void>;
 }
 
 export function useLeaves(sprintId: number | null): UseLeavesState {
@@ -378,16 +390,17 @@ export function useLeaves(sprintId: number | null): UseLeavesState {
   }, [sprintId]);
 
   const save = useCallback(
-    async (assignee: string, dates: string[]) => {
+    async (assignee: string, entries: LeaveEntry[]) => {
       if (sprintId === null) return;
       // Optimistic update: apply immediately, rollback on error
       const prev = data;
+      const typed = Object.fromEntries(entries.map((e) => [e.date, e.type]));
       setData((cur) => ({
         ...(cur ?? {}),
-        [assignee]: dates,
+        [assignee]: typed,
       }));
       try {
-        const updated = await setLeaves(sprintId, assignee, dates);
+        const updated = await setLeaves(sprintId, assignee, entries);
         setData(updated);
       } catch (err: unknown) {
         // Rollback
@@ -396,6 +409,65 @@ export function useLeaves(sprintId: number | null): UseLeavesState {
       }
     },
     [sprintId, data]
+  );
+
+  return { data, loading, error, run, save };
+}
+
+// ── useAllLeaves (v1.29, ADR-041) ─────────────────────────────────────────────
+
+export interface UseAllLeavesState {
+  /** sprintId (string) → assignee → { date: type }. */
+  data: AllLeavesMap;
+  loading: boolean;
+  error: McpError | null;
+  run: () => void;
+  /** Save an assignee's typed entries for ONE sprint (full replace), optimistic + rollback. */
+  save: (sprintId: number, assignee: string, entries: LeaveEntry[]) => Promise<void>;
+}
+
+/**
+ * Load the WHOLE leaves store (every sprint) in one read for the forward multi-sprint planner.
+ * Saves still route per-sprint via set_leaves (the day's sprint owns the leave). CONTRACTS.md §4.14.
+ */
+export function useAllLeaves(): UseAllLeavesState {
+  const [data, setData] = useState<AllLeavesMap>({});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<McpError | null>(null);
+
+  const run = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    getAllLeaves()
+      .then((all) => { setData(all); setLoading(false); })
+      .catch((err: unknown) => {
+        setError(
+          err && typeof err === "object" && "code" in err && "message" in err
+            ? (err as McpError)
+            : { code: "UNKNOWN", message: String(err) }
+        );
+        setLoading(false);
+      });
+  }, []);
+
+  useEffect(() => { run(); }, [run]);
+
+  const save = useCallback(
+    async (sprintId: number, assignee: string, entries: LeaveEntry[]) => {
+      const key = String(sprintId);
+      const prev = data;
+      const typed = Object.fromEntries(entries.map((e) => [e.date, e.type]));
+      // Optimistic: apply immediately
+      setData((cur) => ({ ...cur, [key]: { ...(cur[key] ?? {}), [assignee]: typed } }));
+      try {
+        const updated = await setLeaves(sprintId, assignee, entries);
+        setData((cur) => ({ ...cur, [key]: updated }));
+      } catch (err: unknown) {
+        setData(prev); // rollback
+        throw err;
+      }
+    },
+    [data]
   );
 
   return { data, loading, error, run, save };
@@ -843,4 +915,79 @@ export function useIssuePullRequests(keys: string[]): {
   }, [key]);
 
   return { data, loading };
+}
+
+// ── useLinkedIssues (v1.27, ADR-040) ──────────────────────────────────────────
+
+/**
+ * Linked issues for a set of keys, via get_linked_issues (default projectKey = Dev).
+ * Refetches when the SET of keys changes (order-independent), request-guarded. Failures
+ * resolve to {} so the caller renders nothing. CONTRACTS.md §4.17. Used by the dual
+ * fly-in tracker to check whether a PO fly-in has an aligned Dev fly-in.
+ */
+export function useLinkedIssues(keys: string[]): {
+  data: Record<string, LinkedIssue[]>;
+  loading: boolean;
+} {
+  const [data, setData] = useState<Record<string, LinkedIssue[]>>({});
+  const [loading, setLoading] = useState(false);
+  const key = [...keys].sort().join(",");
+  const reqId = useRef(0);
+
+  useEffect(() => {
+    if (keys.length === 0) { setData({}); return; }
+    const myReq = ++reqId.current;
+    setLoading(true);
+    getLinkedIssues(keys)
+      .then((res) => { if (myReq === reqId.current) { setData(res.links); setLoading(false); } })
+      .catch(() => { if (myReq === reqId.current) { setData({}); setLoading(false); } });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return { data, loading };
+}
+
+// ── useOffsetLedger (v1.26, ADR-038) ──────────────────────────────────────────
+
+export interface UseOffsetLedgerState {
+  data: OffsetLedger | null;
+  loading: boolean;
+  error: McpError | null;
+  run: () => void;
+  /** Record the auto earned/spent snapshot for a sprint (idempotent), then refresh. */
+  recordSprint: (sprintId: number, entries: Array<{ assignee: string; earned: number; spent: number }>) => Promise<void>;
+  /** Set a developer's manual offset adjustment, then refresh. */
+  adjust: (assignee: string, manualAdjust: number) => Promise<void>;
+}
+
+/** The per-developer offset ledger (earned/spent/manualAdjust/balance). Loads on mount. */
+export function useOffsetLedger(): UseOffsetLedgerState {
+  const [data, setData] = useState<OffsetLedger | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<McpError | null>(null);
+
+  const run = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    getOffsetLedger()
+      .then((ledger) => { setData(ledger); setLoading(false); })
+      .catch((err: unknown) => { setError(toMcpError(err)); setLoading(false); });
+  }, []);
+
+  useEffect(() => { run(); }, [run]);
+
+  const recordSprint = useCallback(
+    async (sprintId: number, entries: Array<{ assignee: string; earned: number; spent: number }>) => {
+      const updated = await setOffsetForSprint(sprintId, entries);
+      setData(updated);
+    },
+    []
+  );
+
+  const adjust = useCallback(async (assignee: string, manualAdjust: number) => {
+    const updated = await setOffsetAdjustment(assignee, manualAdjust);
+    setData(updated);
+  }, []);
+
+  return { data, loading, error, run, recordSprint, adjust };
 }
