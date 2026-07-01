@@ -20,6 +20,7 @@ vi.mock("../src/lib/jiraClient.js", () => ({
   createIssue: vi.fn(),
   createIssueLink: vi.fn(),
   addIssuesToSprint: vi.fn(),
+  assignIssue: vi.fn(),
   getActiveSprints: vi.fn(),
   getActiveAndFutureSprints: vi.fn(),
   getSprintIssues: vi.fn(),
@@ -209,6 +210,36 @@ describe("create_dev_ticket", () => {
 
     expect(result.key).toBe("DEV-99");
     expect(result.linkWarning).toContain("Link type not found");
+  });
+
+  it("v1.36: assigns the new Dev task when assigneeAccountId is provided", async () => {
+    client.createIssue.mockResolvedValueOnce("DEV-99");
+    client.assignIssue.mockResolvedValueOnce(undefined);
+
+    const result = await createDevTicket.handler({
+      summary: "Dev task",
+      description: "Impl",
+      assigneeAccountId: "acc-123",
+    }) as { assigneeAccountId?: string; assignWarning?: string };
+
+    expect(client.assignIssue).toHaveBeenCalledWith("DEV-99", "acc-123");
+    expect(result.assigneeAccountId).toBe("acc-123");
+    expect(result.assignWarning).toBeUndefined();
+  });
+
+  it("v1.36: assignment failure is non-fatal — returns assignWarning, still creates the ticket", async () => {
+    client.createIssue.mockResolvedValueOnce("DEV-99");
+    client.assignIssue.mockRejectedValueOnce(new Error("assignee not permitted"));
+
+    const result = await createDevTicket.handler({
+      summary: "Dev task",
+      description: "Impl",
+      assigneeAccountId: "acc-123",
+    }) as { key: string; assigneeAccountId?: string; assignWarning?: string };
+
+    expect(result.key).toBe("DEV-99");
+    expect(result.assigneeAccountId).toBeUndefined();
+    expect(result.assignWarning).toContain("assignee not permitted");
   });
 });
 

@@ -1,6 +1,6 @@
 # Integration Contracts
 
-**Status: FINAL — AUTHORITATIVE (v1.31)**  
+**Status: FINAL — AUTHORITATIVE (v1.37)**  
 Builder agents implement exactly what this document says. If something here is
 ambiguous, file a note to the Architect agent; do NOT invent new surface area or
 prefer the spec over this document — this document supersedes the spec on all
@@ -118,7 +118,7 @@ so tests run with no `.env`.
 | `JIRA_PO_PROJECTS` | mcp-jira | optional | `""` — extra PO projects as `KEY:boardId,KEY2:boardId2` (v1.25). When empty, the single `JIRA_PO_PROJECT_KEY`+`JIRA_PO_BOARD_ID` is the only PO project. |
 | `JIRA_DEV_PROJECTS` | mcp-jira | optional | `""` — extra Dev projects as `KEY:boardId,…` (v1.25); falls back to `JIRA_DEV_PROJECT_KEY`+`JIRA_DEV_BOARD_ID`. |
 | `JIRA_STORY_POINTS_FIELD` | mcp-jira | optional | `"customfield_10016"` |
-| `JIRA_LINK_TYPE` | mcp-jira | optional | `"Relates"` |
+| `JIRA_LINK_TYPE` | mcp-jira | optional | `"Depends"` (v1.36 — was `"Relates"`; PO story ↔ Dev task link. Must exist in the Jira instance. Direction: PO story **depends on** its Dev task(s) — PO is the outward side.) |
 | `JIRA_FLAGGED_FIELD` | mcp-jira | optional | `""` (disabled) |
 | `JIRA_CODE_REVIEW_STATUSES` | mcp-jira | optional | `"code review,in review,peer review,review"` (v1.2) |
 | `JIRA_VELOCITY_SPRINTS` | mcp-jira | optional | `6` — closed sprints averaged for velocity/forecast (v1.4) |
@@ -216,9 +216,9 @@ case.
 - **Output:** `TicketRef & { sprintId?: number; sprintWarning?: string }` with `board: "PO"`.
 
 ### 4.2 `create_dev_ticket`
-- **Input:** `{ summary: string (1–255 chars), description: string, storyPoints?: number (≥ 0), linkedPoTicketKey?: string, sprintId?: number }`
-  (v1.30, ADR-042: `storyPoints` added — written to `JIRA_STORY_POINTS_FIELD` like `create_po_ticket`,
-  so a Dev task linked from a PO story can inherit the PO's points.)
+- **Input:** `{ summary: string (1–255 chars), description: string, storyPoints?: number (≥ 0), assigneeAccountId?: string (≥ 1), linkedPoTicketKey?: string, sprintId?: number }`
+  (v1.30, ADR-042: `storyPoints` written to `JIRA_STORY_POINTS_FIELD` like `create_po_ticket`.
+  v1.36, ADR-046: `assigneeAccountId` — assign the new Dev task to a developer at create time.)
 - **Behavior:** create issue type `Task` in `JIRA_DEV_PROJECT_KEY`. If
   `linkedPoTicketKey` is present, call `POST /rest/api/3/issueLink` with payload:
   ```json
@@ -226,15 +226,19 @@ case.
     "inwardIssue": { "key": "<dev-key>" },
     "outwardIssue": { "key": "<linkedPoTicketKey>" } }
   ```
-  (See ADR-003 for the deliberate deviation from spec §4.3 "parent/child".)
+  (See ADR-003 for the deliberate deviation from spec §4.3 "parent/child". With the default
+  `JIRA_LINK_TYPE="Depends"` this reads **"PO story depends on Dev task"** — PO is the outward side.)
   Link failure must NOT fail the creation: return the ticket and include
   `linkWarning: "<error message>"` in the output. On success with linking,
   `linkedTo` is the value of `linkedPoTicketKey`. If `sprintId` is present, apply the
-  add-to-sprint helper above (non-fatal) AFTER the link step.
+  add-to-sprint helper above (non-fatal) AFTER the link step. **v1.36:** if `assigneeAccountId`
+  is present, call the shared `assignIssue` (PUT assignee) AFTER the sprint step, **non-fatally** —
+  a failure returns `assignWarning: "<message>"` and does not fail the creation.
 - **Output:**
   ```ts
   TicketRef & { linkedTo?: string; linkWarning?: string;
-                sprintId?: number; sprintWarning?: string }
+                sprintId?: number; sprintWarning?: string;
+                assigneeAccountId?: string; assignWarning?: string } // v1.36
   // board is always "DEV"
   ```
 
@@ -2146,3 +2150,76 @@ Changes made by the Architect agent during finalization:
     leaves, dedupes by (assignee,date), excludes past + far-out). New `src/components/LeaveStatusCard.tsx`
     on the Dashboard/Huddle sidebar shows **who's out today** + **upcoming leave (next 7 days)** with a
     leave-type chip. Board-agnostic (the leaves store is keyed by sprint only).
+
+## Changelog v1.32 (2026-07-01 — quick UI: collapsible fly-in + Offset Tracker rename; frontend-only)
+
+129. **§6 — Fly-in card collapsible (collapsed by default).** `FlyInCard` header is now a toggle button
+    (`aria-expanded`, chevron); the counts (`(N) · Dev x · PO y`) stay visible while collapsed, and the
+    Dev/PO groups render only when expanded. Default collapsed.
+130. **§6 — "Leaves" → "Offset Tracker".** The sidebar tab **and** the page heading are renamed to
+    **Offset Tracker** (tab/route id stays `leaves`; file names unchanged). Presentation-only.
+
+## Changelog v1.33 (2026-07-01 — offset WALLET: main tracker + auto add/deduct; ADR-044, frontend-only)
+
+131. **§6 — offset wallet (Offset Tracker page).** A main per-developer **balance** tracker where
+    **spend is derived live** from `Offset`-type leaves (`get_all_leaves`/`useAllLeaves`) — plotting an
+    Offset leave immediately lowers the balance — and **earned auto-banks per sprint on view** (an effect
+    idempotently records the selected sprint's computed earned via `set_offset_for_sprint`, guarded by a
+    signature so it never loops; the manual "Record this sprint" button is removed). New pure
+    `src/lib/offsetWallet.ts` (`countOffsetLeaves`, `computeOffsetWallet` — `balance = earned − spent +
+    manual`, using ONLY the ledger's `earned`+`manualAdjust`, spend always derived) + new
+    `src/components/OffsetWalletCard.tsx` at the top of the page. The per-sprint offset table's Balance
+    column now shows the wallet balance; the manual-adjust `<Input>` (`set_offset_adjustment`) is unchanged.
+    No tool/IO change (`set_offset_for_sprint` now records earned-only; its stored `spent` is ignored).
+
+## Changelog v1.34 (2026-07-01 — offset usage history modal; ADR-044 Phase 2, frontend-only)
+
+132. **§6 — offset usage history.** Each `OffsetWalletCard` row gets a **History** button opening
+    `src/components/OffsetHistoryDialog.tsx` — a per-developer modal showing the standing (earned / used /
+    manual / balance) + every **Offset leave (a spend)** newest-first with its date + sprint. New pure
+    `buildOffsetHistory(assignee, ledger, allLeaves, sprintNameById?)` in `offsetWallet.ts`. (Earned is the
+    banked total — `get_offset_ledger` exposes no per-sprint earned breakdown — so the history is
+    usage-centric; a per-sprint earn log would need the ledger to expose `bySprint`.) No tool/IO change.
+
+## Changelog v1.35 (2026-07-01 — Reports full-report export form; ADR-045, frontend-only)
+
+133. **§6 — full sprint-report CSV export.** A new **"Full report (CSV)"** button in the Reports
+    `ExportBar` opens `src/components/SprintReviewExport.tsx` — a form for the qualitative fields (Team
+    name, Scrum master, Commitment points [prefilled from committed], Reason for delays, What worked well,
+    What didn't, Planned improvements, Kudos). On submit it downloads a **Field/Value CSV** built by new
+    pure `buildSprintReviewCsv(report, form, flyIns)` in `reportMarkdown.ts` (reuses `csvCell`/`csvRow`),
+    combining those answers with **pulled data**: Sprint duration (start–end + working days), Sprint goals,
+    Completed points, Incomplete points (committed − completed), and **Fly-ins** (`matchFlyIn` over the
+    report's completed + carryover issues). No persistence, no tool/IO change.
+
+## Changelog v1.36 (2026-07-01 — dependency link + assignable Dev create; ADR-046 Phase A, mcp-jira)
+
+134. **§2 — `JIRA_LINK_TYPE` default `"Relates"` → `"Depends"`.** The PO↔Dev link now expresses a real
+    dependency. Direction unchanged in code (`inwardIssue: dev, outwardIssue: po`) → with an asymmetric
+    `Depends` type this reads **"PO story depends on Dev task"**. The type must exist in the Jira instance.
+135. **§4.2 — `create_dev_ticket` gains `assigneeAccountId?`.** After create (+ link + sprint), when
+    present, the shared `assignIssue` (PUT assignee) is called **non-fatally** — a failure returns
+    `assignWarning` and does not fail the creation; the output echoes `assigneeAccountId`. Enables a Dev
+    task to be created already assigned (e.g. splitting a PO across two developers). jira tools still 36.
+136. **Linking point-driven breakdown (ADR-046 Phase B, react-app — no tool-surface change).** A PO story's
+    points now drive how many Dev tasks it becomes: pure `lib/points.ts` `suggestBreakdown` splits a total
+    that is not a single allowed estimate into a balanced pair of the allowed scale `{0.2,0.3,0.5,1,2,3,5,7}`
+    (4→[2,2], 6→[3,3], 8→[3,5]); a single allowed value or ≤1 stays one task. The Linking plan is grouped by
+    PO with 1–2 editable Dev-task rows, each with its own free-numeric **Points** + **Assignee** (Dev-board
+    roster) + add/remove. "Create all" loops `create_dev_ticket` with each row's `storyPoints` +
+    `assigneeAccountId` (the §4.2 fields from item 135). Frontend-only; no new tool, IO shapes unchanged.
+
+## Changelog v1.37 (2026-07-01 — Planning bulk assign + inline points + per-dev capacity; ADR-047, react-app)
+
+All frontend; **no new tool, jira tools stay 36, IO shapes unchanged** (C reuses `assign_issue` +
+`update_ticket`; D reuses `get_team_members` + `get_leaves` + `health.policy`).
+
+137. **Planning — bulk assign (ADR-047 Phase C).** `AssignmentList` gains a checkbox column + select-all and
+    a toolbar ("N selected · Assign to [dev] · Apply") that loops the existing `assign_issue` over the
+    selected tickets (optimistic per row; Apply disabled until a developer is chosen).
+138. **Planning — inline story points (ADR-047 Phase C).** The read-only Pts cell becomes a free-numeric input
+    that writes via **`update_ticket` `{ ticketKey, storyPoints }`** on blur/Enter (optimistic, reverts on
+    failure; wheel-guarded). New `updateTicketPoints` client wraps the existing tool.
+139. **Planning — per-developer capacity (ADR-047 Phase D).** `LeavesPlotterCard` adds a per-dev table:
+    `capacity = max(0, requiredPoints − workingLeaveDays)` (pure `lib/capacity.ts` `computeDevCapacity`),
+    N from `health.policy.requiredPoints` (default 8) — e.g. 1 VL + 1 Offset → 6 = 8 − 2.

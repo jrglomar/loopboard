@@ -140,6 +140,41 @@ export function computeCapacity(input: CapacityInput): CapacityResult {
   };
 }
 
+// ── computeDevCapacity (v1.37, ADR-047) ───────────────────────────────────────
+
+export interface DevCapacity {
+  /** Developer display name */
+  name: string;
+  /** Working leave days this sprint (from computeCapacity().byAssigneeLeaveDays) */
+  leaveDays: number;
+  /** Points of capacity remaining this sprint = max(0, requiredPoints − leaveDays) */
+  capacity: number;
+}
+
+/**
+ * Per-developer remaining capacity for the sprint (v1.37, ADR-047).
+ *
+ * Model (confirmed with the user): each developer owes `requiredPoints` (N, the
+ * offset policy's required points, e.g. 8). Each working leave day subtracts one
+ * point of capacity, floored at 0. So 8 required − (1 VL + 1 offset) = 6.
+ *
+ *   capacity(dev) = max(0, requiredPoints − leaveDays(dev))
+ *
+ * Returns one row per developer in `leaveDaysByAssignee`, sorted by name.
+ */
+export function computeDevCapacity(
+  requiredPoints: number,
+  leaveDaysByAssignee: Record<string, number>
+): DevCapacity[] {
+  return Object.entries(leaveDaysByAssignee)
+    .map(([name, leaveDays]) => ({
+      name,
+      leaveDays,
+      capacity: Math.max(0, requiredPoints - leaveDays),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 // ── possibleCommittedVelocity ─────────────────────────────────────────────────
 
 /**

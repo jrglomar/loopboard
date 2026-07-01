@@ -170,6 +170,8 @@ export async function createLinkedDevTicket(input: {
   sprintId?: number;
   /** v1.30 (ADR-042): points inherited from the source PO story. */
   storyPoints?: number;
+  /** v1.36 (ADR-046): create the Dev task already assigned to this developer. */
+  assigneeAccountId?: string;
 }): Promise<CreateDevTicketOutput> {
   return callTool<CreateDevTicketOutput>("jira", "create_dev_ticket", {
     summary: input.summary,
@@ -177,6 +179,7 @@ export async function createLinkedDevTicket(input: {
     linkedPoTicketKey: input.linkedPoTicketKey,
     ...(input.sprintId !== undefined ? { sprintId: input.sprintId } : {}),
     ...(input.storyPoints != null ? { storyPoints: input.storyPoints } : {}),
+    ...(input.assigneeAccountId ? { assigneeAccountId: input.assigneeAccountId } : {}),
   });
 }
 
@@ -207,6 +210,20 @@ export async function enhanceTicket(
     description: notes,
   });
   return { ticket, updated };
+}
+
+// ── updateTicketPoints (v1.37, ADR-047) ──────────────────────────────────────
+
+/**
+ * Set a ticket's story points via update_ticket (a real Jira write). Used by the
+ * Planning assignment table's inline editable points cell. update_ticket writes
+ * the configured story-points field (CONTRACTS §4.x).
+ */
+export async function updateTicketPoints(
+  ticketKey: string,
+  storyPoints: number
+): Promise<UpdateTicketOutput> {
+  return callTool<UpdateTicketOutput>("jira", "update_ticket", { ticketKey, storyPoints });
 }
 
 // ── createSprint ──────────────────────────────────────────────────────────────

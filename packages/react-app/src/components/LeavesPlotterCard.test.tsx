@@ -3,8 +3,9 @@
 // NOTE: v1.8 swaps useAssignableUsers → useTeamMembers; tests updated accordingly.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within, cleanup } from "@testing-library/react";
 import { LeavesPlotterCard } from "./LeavesPlotterCard";
+import { sprintWorkingDays } from "../lib/capacity";
 import type { SprintRef } from "../lib/types";
 
 // ── Mock hooks ────────────────────────────────────────────────────────────────
@@ -17,6 +18,12 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
     useVelocity: vi.fn(),
     useLeaves: vi.fn(),
   };
+});
+
+// v1.37 (ADR-047): the per-developer capacity table reads the offset policy (N).
+vi.mock("../lib/boards", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/boards")>();
+  return { ...actual, usePolicy: () => ({ requiredPoints: 8, offsetThreshold: 2 }) };
 });
 
 import * as useJiraModule from "../hooks/useJira";
@@ -432,5 +439,35 @@ describe("LeavesPlotterCard — loading state", () => {
     );
     const busyEl = container.querySelector('[aria-busy="true"]');
     expect(busyEl).toBeTruthy();
+  });
+});
+
+// ── Tests: per-developer capacity (v1.37, ADR-047) ─────────────────────────────
+
+describe("LeavesPlotterCard — per-developer capacity (v1.37)", () => {
+  it("shows capacity = required N (8) − working leave days for each developer", () => {
+    const workDays = sprintWorkingDays(SPRINT_WITH_DATES.startDate, SPRINT_WITH_DATES.endDate);
+    // Alice: 2 working leave days (1 VL + 1 Offset) → 8 − 2 = 6. Bob: none → 8.
+    vi.mocked(useJiraModule.useTeamMembers).mockReturnValue({
+      data: TEAM_MEMBERS, loading: false, error: null, run: vi.fn(), save: vi.fn(),
+    });
+    vi.mocked(useJiraModule.useVelocity).mockReturnValue({
+      data: DEFAULT_VELOCITY, loading: false, error: null, run: vi.fn(),
+    });
+    vi.mocked(useJiraModule.useLeaves).mockReturnValue({
+      data: { Alice: { [workDays[0]!]: "VL", [workDays[1]!]: "Offset" } },
+      loading: false, error: null, run: vi.fn(), save: vi.fn(),
+    });
+
+    render(
+      <LeavesPlotterCard boardId={10} sprintId={100} sprint={SPRINT_WITH_DATES} projectKey="DEV" />
+    );
+
+    const table = screen.getByRole("table", { name: "Per-developer capacity" });
+    const aliceRow = within(table).getByText("Alice").closest("tr")!;
+    expect(within(aliceRow).getByText("2")).toBeTruthy(); // leave days
+    expect(within(aliceRow).getByText("6")).toBeTruthy(); // capacity = 8 − 2
+    const bobRow = within(table).getByText("Bob").closest("tr")!;
+    expect(within(bobRow).getByText("8")).toBeTruthy();   // full capacity
   });
 });

@@ -2,13 +2,15 @@ import { z } from "zod";
 import type { ToolDef } from "../lib/toolDef.js";
 import type { TicketRef } from "../lib/types.js";
 import { getConfig } from "../lib/config.js";
-import { createIssue, createIssueLink, addIssuesToSprint } from "../lib/jiraClient.js";
+import { createIssue, createIssueLink, addIssuesToSprint, assignIssue } from "../lib/jiraClient.js";
 
 const schema = z.object({
   summary: z.string().min(1).max(255),
   description: z.string(),
   // v1.30 (ADR-042): carry the source PO story's points onto the linked Dev task.
   storyPoints: z.number().min(0).optional(),
+  // v1.36 (ADR-046): assign the new Dev task to a developer at create time.
+  assigneeAccountId: z.string().min(1).optional(),
   linkedPoTicketKey: z.string().optional(),
   sprintId: z.number().int().positive().optional(),
 });
@@ -18,6 +20,8 @@ type CreateDevTicketOutput = TicketRef & {
   linkWarning?: string;
   sprintId?: number;
   sprintWarning?: string;
+  assigneeAccountId?: string;
+  assignWarning?: string;
 };
 
 async function handler(input: unknown): Promise<CreateDevTicketOutput> {
@@ -62,6 +66,16 @@ async function handler(input: unknown): Promise<CreateDevTicketOutput> {
     } catch (err) {
       result.sprintWarning =
         err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  // Assign to a developer (v1.36) — non-fatal, AFTER the sprint step.
+  if (args.assigneeAccountId !== undefined) {
+    try {
+      await assignIssue(key, args.assigneeAccountId);
+      result.assigneeAccountId = args.assigneeAccountId;
+    } catch (err) {
+      result.assignWarning = err instanceof Error ? err.message : String(err);
     }
   }
 

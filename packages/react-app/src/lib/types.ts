@@ -123,6 +123,10 @@ export type CreateDevTicketOutput = TicketRef & {
   linkWarning?: string;
   sprintId?: number;
   sprintWarning?: string;
+  // v1.36 (ADR-046): the Dev task may be created already assigned; assignment is
+  // non-fatal, so a failure returns assignWarning (the ticket is still created).
+  assigneeAccountId?: string;
+  assignWarning?: string;
   // board: "DEV"
 };
 
@@ -355,6 +359,16 @@ export interface PlanDevTicketItem {
   // v1.30 (ADR-042): drafted from the PO's points, editable on the Linking plan card before
   // create. Frontend-populated — the plan-dev-tickets endpoint does not return it.
   storyPoints?: number | null;
+}
+
+/**
+ * One editable Dev-task row in the Linking plan (v1.36, ADR-046).
+ * Extends the AI draft shape with a stable row id, a per-task estimate, and an
+ * optional assignee — a single PO story may expand into up to two of these rows.
+ */
+export interface PlanRow extends PlanDevTicketItem {
+  id: string;
+  assigneeAccountId?: string;
 }
 
 /** POST /api/ai/plan-dev-tickets output. */

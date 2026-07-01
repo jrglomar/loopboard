@@ -11,6 +11,7 @@
 import { useState, useEffect, useId, useMemo, useCallback } from "react";
 import {
   Link2, Sparkles, Loader2, CheckCircle2, XCircle, ExternalLink, ListChecks, AlertCircle,
+  Plus, Trash2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,20 +22,22 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBoards } from "../lib/boards";
-import { useActiveSprint, useSprintList, createLinkedDevTicket } from "../hooks/useJira";
+import { useActiveSprint, useSprintList, useTeamMembers, createLinkedDevTicket } from "../hooks/useJira";
 import { getLinkedIssues, getIssueDescriptions } from "../lib/linkClient";
 import { getAiStatus, aiPlanDevTickets } from "../lib/aiClient";
 import { RefineDraftControl } from "../components/RefineDraftControl";
 import { buildDraftPair } from "../lib/ticketTemplates";
+import { suggestBreakdown } from "../lib/points";
 import { formatPoints } from "../lib/format";
 import type { McpError } from "../lib/mcpClient";
 import type {
-  IssueSummary, SprintRef, LinkedIssue, PlanDevTicketItem, AiStatus,
+  IssueSummary, SprintRef, LinkedIssue, PlanDevTicketItem, PlanRow, AiStatus,
 } from "../lib/types";
 
 type Phase = "select" | "plan" | "creating" | "done";
 
 interface RowResult {
+  id: string;
   poKey: string;
   status: "pending" | "ok" | "error";
   devKey?: string;
@@ -42,7 +45,24 @@ interface RowResult {
   linkedTo?: string;
   linkWarning?: string;
   sprintWarning?: string;
+  assignWarning?: string;
   error?: string;
+}
+
+// v1.36 (ADR-046): a stable row id — a PO story may expand into up to two Dev-task
+// rows, so poKey is no longer unique. Monotonic across the session.
+let _rowSeq = 0;
+const newRowId = (poKey: string): string => `${poKey}#${(++_rowSeq).toString(36)}`;
+
+/**
+ * How a PO story's points break into Dev-task estimates (v1.36, ADR-046):
+ * unestimated / ≤ 0 → one unestimated task; else the point-scale breakdown
+ * (a single allowed value stays one task; 4→[2,2], 6→[3,3], 8→[3,5], …).
+ */
+function breakdownFor(points: number | null | undefined): (number | null)[] {
+  if (points == null || points <= 0) return [null];
+  const parts = suggestBreakdown(points);
+  return parts.length > 0 ? parts : [points];
 }
 
 function flattenIssues(data: ReturnType<typeof useActiveSprint>["data"]): IssueSummary[] {
@@ -68,6 +88,8 @@ export function Linking() {
   // v1.25 (ADR-037): Linking is dual-board; uses each side's default project (element 0).
   const poSprintList = useSprintList("all", boards?.po[0]?.id);
   const devSprintList = useSprintList("all", boards?.dev[0]?.id);
+  // v1.36 (ADR-046): Dev-board roster powers the per-task assignee picker.
+  const devTeam = useTeamMembers(boards?.dev[0]?.id ?? null);
 
   const [poSprintId, setPoSprintId] = useState<number | undefined>(undefined);
   const [devSprintId, setDevSprintId] = useState<number | undefined>(undefined);
@@ -81,7 +103,7 @@ export function Linking() {
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [phase, setPhase] = useState<Phase>("select");
-  const [plan, setPlan] = useState<PlanDevTicketItem[]>([]);
+  const [plan, setPlan] = useState<PlanRow[]>([]);
   // v1.14: fetched PO descriptions (by key), reused by Generate + per-draft Regenerate.
   const [descMap, setDescMap] = useState<Record<string, string>>({});
   const [aiNote, setAiNote] = useState<string | null>(null);
@@ -153,12 +175,23 @@ export function Linking() {
     setDescMap(descByKey);
     const descOf = (key: string) => capDesc(descByKey[key] ?? "");
 
-    // v1.30 (ADR-042): the Dev task KEEPS the PO story's title — the AI only enhances the
-    // description — and is DRAFTED with the PO's points (editable on the plan card before create).
-    const draftFromPo = (items: PlanDevTicketItem[]): PlanDevTicketItem[] =>
-      items.map((it) => {
+    // v1.30 (ADR-042): the Dev task KEEPS the PO story's title (the AI only enhances the
+    // description). v1.36 (ADR-046): each PO expands into 1–2 Dev-task ROWS by its point
+    // breakdown, each row carrying its own editable points (and, later, assignee).
+    const expand = (items: PlanDevTicketItem[]): PlanRow[] =>
+      items.flatMap((it) => {
         const po = chosen.find((t) => t.key === it.poKey);
-        return { ...it, devSummary: po?.summary ?? it.devSummary, storyPoints: po?.storyPoints ?? null };
+        const summary = po?.summary ?? it.devSummary;
+        const parts = breakdownFor(po?.storyPoints ?? null);
+        const n = parts.length;
+        return parts.map((pts, idx) => ({
+          id: newRowId(it.poKey),
+          poKey: it.poKey,
+          devSummary: summary,
+          devDescription:
+            n > 1 ? `${it.devDescription}\n\n_(Part ${idx + 1} of ${n})_` : it.devDescription,
+          storyPoints: pts,
+        }));
       });
 
     const fallback = (): PlanDevTicketItem[] =>
@@ -189,17 +222,17 @@ export function Linking() {
           const d = buildDraftPair(t.summary).dev;
           return { poKey: t.key, devSummary: d.summary, devDescription: d.description };
         });
-        setPlan(draftFromPo(items));
+        setPlan(expand(items));
         setAiNote(res.assistantMessage);
       } else {
-        setPlan(draftFromPo(fallback()));
+        setPlan(expand(fallback()));
         setAiNote("AI is off — drafted from local templates. Edit each task before creating.");
       }
       setPhase("plan");
     } catch (err: unknown) {
       // AI error/unavailable → deterministic fallback so the workflow never blocks
       const e = err as McpError;
-      setPlan(draftFromPo(fallback()));
+      setPlan(expand(fallback()));
       setAiNote(
         e.code === "AI_UNAVAILABLE"
           ? "AI is off — drafted from local templates. Edit each task before creating."
@@ -211,17 +244,45 @@ export function Linking() {
     }
   }
 
-  function editPlanItem(poKey: string, patch: Partial<PlanDevTicketItem>) {
-    setPlan((prev) => prev.map((p) => (p.poKey === poKey ? { ...p, ...patch } : p)));
+  function editRow(id: string, patch: Partial<PlanRow>) {
+    setPlan((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  }
+
+  // v1.36 (ADR-046): manually add / remove a Dev-task row within a PO group.
+  function addRow(poKey: string) {
+    setPlan((prev) => {
+      const sibling = prev.find((p) => p.poKey === poKey);
+      const row: PlanRow = {
+        id: newRowId(poKey),
+        poKey,
+        devSummary: sibling?.devSummary ?? poKey,
+        devDescription: sibling?.devDescription ?? "",
+        storyPoints: null,
+      };
+      const lastIdx = prev.map((p) => p.poKey).lastIndexOf(poKey);
+      return lastIdx === -1
+        ? [...prev, row]
+        : [...prev.slice(0, lastIdx + 1), row, ...prev.slice(lastIdx + 1)];
+    });
+  }
+
+  function removeRow(id: string) {
+    setPlan((prev) => {
+      const row = prev.find((p) => p.id === id);
+      if (!row) return prev;
+      // keep at least one Dev task per PO story
+      if (prev.filter((p) => p.poKey === row.poKey).length <= 1) return prev;
+      return prev.filter((p) => p.id !== id);
+    });
   }
 
   // ── Regenerate one plan item from a reviewer comment (v1.12, ADR-023) ────────
-  const [regeneratingKey, setRegeneratingKey] = useState<string | null>(null);
-  async function regenerateItem(poKey: string, comment: string) {
-    const po = poTickets.find((t) => t.key === poKey);
-    const current = plan.find((p) => p.poKey === poKey);
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  async function regenerateRow(id: string, comment: string) {
+    const current = plan.find((p) => p.id === id);
+    const po = current ? poTickets.find((t) => t.key === current.poKey) : undefined;
     if (!po || !current) return;
-    setRegeneratingKey(poKey);
+    setRegeneratingId(id);
     try {
       const instructions =
         `A reviewer left this comment on the current Dev task draft: "${comment}". ` +
@@ -237,38 +298,39 @@ export function Linking() {
         ],
         instructions,
       });
-      const item = res.items.find((i) => i.poKey === poKey) ?? res.items[0];
+      const item = res.items.find((i) => i.poKey === po.key) ?? res.items[0];
       // v1.30 (ADR-042): keep the PO title — regenerate only refreshes the description.
-      if (item) editPlanItem(poKey, { devDescription: item.devDescription });
+      if (item) editRow(id, { devDescription: item.devDescription });
     } catch {
       // Keep the current draft on failure — non-fatal.
     } finally {
-      setRegeneratingKey(null);
+      setRegeneratingId(null);
     }
   }
 
   // ── Bulk create (sequential so the log streams + we don't hammer Jira) ────────
   async function handleCreateAll() {
     setPhase("creating");
-    setResults(plan.map((p) => ({ poKey: p.poKey, status: "pending" as const })));
-    for (let i = 0; i < plan.length; i++) {
-      const item = plan[i]!;
+    setResults(plan.map((p) => ({ id: p.id, poKey: p.poKey, status: "pending" as const })));
+    for (const item of plan) {
       try {
         const dev = await createLinkedDevTicket({
           summary: item.devSummary.trim() || item.poKey,
           description: item.devDescription,
           linkedPoTicketKey: item.poKey,
           storyPoints: item.storyPoints ?? undefined,
+          ...(item.assigneeAccountId ? { assigneeAccountId: item.assigneeAccountId } : {}),
           ...(devSprintId !== undefined ? { sprintId: devSprintId } : {}),
         });
-        setResults((prev) => prev.map((r, idx) => idx === i ? {
-          poKey: item.poKey, status: "ok", devKey: dev.key, devUrl: dev.url,
+        setResults((prev) => prev.map((r) => r.id === item.id ? {
+          id: item.id, poKey: item.poKey, status: "ok", devKey: dev.key, devUrl: dev.url,
           linkedTo: dev.linkedTo, linkWarning: dev.linkWarning, sprintWarning: dev.sprintWarning,
+          assignWarning: dev.assignWarning,
         } : r));
       } catch (err: unknown) {
         const e = err as McpError;
-        setResults((prev) => prev.map((r, idx) => idx === i ? {
-          poKey: item.poKey, status: "error", error: e.message ?? String(err),
+        setResults((prev) => prev.map((r) => r.id === item.id ? {
+          id: item.id, poKey: item.poKey, status: "error", error: e.message ?? String(err),
         } : r));
       }
     }
@@ -277,28 +339,30 @@ export function Linking() {
 
   // v1.13 P0: re-run ONLY the rows that failed (by poKey), leaving successes alone.
   async function handleRetryFailed() {
-    const failed = new Set(results.filter((r) => r.status === "error").map((r) => r.poKey));
+    const failed = new Set(results.filter((r) => r.status === "error").map((r) => r.id));
     if (failed.size === 0) return;
     setPhase("creating");
-    setResults((prev) => prev.map((r) => failed.has(r.poKey) ? { poKey: r.poKey, status: "pending" } : r));
+    setResults((prev) => prev.map((r) => failed.has(r.id) ? { ...r, status: "pending" } : r));
     for (const item of plan) {
-      if (!failed.has(item.poKey)) continue;
+      if (!failed.has(item.id)) continue;
       try {
         const dev = await createLinkedDevTicket({
           summary: item.devSummary.trim() || item.poKey,
           description: item.devDescription,
           linkedPoTicketKey: item.poKey,
           storyPoints: item.storyPoints ?? undefined,
+          ...(item.assigneeAccountId ? { assigneeAccountId: item.assigneeAccountId } : {}),
           ...(devSprintId !== undefined ? { sprintId: devSprintId } : {}),
         });
-        setResults((prev) => prev.map((r) => r.poKey === item.poKey ? {
-          poKey: item.poKey, status: "ok", devKey: dev.key, devUrl: dev.url,
+        setResults((prev) => prev.map((r) => r.id === item.id ? {
+          id: item.id, poKey: item.poKey, status: "ok", devKey: dev.key, devUrl: dev.url,
           linkedTo: dev.linkedTo, linkWarning: dev.linkWarning, sprintWarning: dev.sprintWarning,
+          assignWarning: dev.assignWarning,
         } : r));
       } catch (err: unknown) {
         const e = err as McpError;
-        setResults((prev) => prev.map((r) => r.poKey === item.poKey ? {
-          poKey: item.poKey, status: "error", error: e.message ?? String(err),
+        setResults((prev) => prev.map((r) => r.id === item.id ? {
+          id: item.id, poKey: item.poKey, status: "error", error: e.message ?? String(err),
         } : r));
       }
     }
@@ -323,6 +387,17 @@ export function Linking() {
 
   const okCount = results.filter((r) => r.status === "ok").length;
   const errCount = results.filter((r) => r.status === "error").length;
+
+  // v1.36 (ADR-046): group plan rows by their source PO story for the grouped render.
+  const planByPo = useMemo(() => {
+    const groups: { poKey: string; rows: PlanRow[] }[] = [];
+    for (const row of plan) {
+      let g = groups.find((x) => x.poKey === row.poKey);
+      if (!g) { g = { poKey: row.poKey, rows: [] }; groups.push(g); }
+      g.rows.push(row);
+    }
+    return groups;
+  }, [plan]);
 
   return (
     <div className="space-y-4">
@@ -470,55 +545,98 @@ export function Linking() {
             {aiNote && <p className="text-xs text-muted-foreground mt-1">{aiNote}</p>}
           </CardHeader>
           <CardContent className="space-y-4">
-            {plan.map((item) => (
-              <div key={item.poKey} className="rounded-md border border-border bg-muted/20 p-3 space-y-2">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <p className="text-xs text-muted-foreground">
-                    New Dev task → linked to <span className="font-mono font-semibold text-foreground">{item.poKey}</span>
-                  </p>
-                  {(descMap[item.poKey] ?? "").trim().length > 0 ? (
-                    <Badge variant="outline" className="text-[0.625rem] border-success-border text-success bg-success-bg">
-                      drafted from PO description
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-[0.625rem] text-warning-foreground border-warning-border gap-1">
-                      <AlertCircle className="h-3 w-3" aria-hidden="true" /> PO has no description — drafted from title
-                    </Badge>
-                  )}
-                </div>
-                <div className="flex gap-2 items-end flex-wrap">
-                  <div className="flex-1 min-w-[180px]">
-                    <Label htmlFor={`${formId}-ps-${item.poKey}`} className="text-xs font-semibold mb-1 block">Title <span className="font-normal text-muted-foreground">(kept from PO — edit if needed)</span></Label>
-                    <Input id={`${formId}-ps-${item.poKey}`} value={item.devSummary} maxLength={255}
-                      onChange={(e) => editPlanItem(item.poKey, { devSummary: e.target.value })} />
+            {planByPo.map((group) => {
+              const hasDesc = (descMap[group.poKey] ?? "").trim().length > 0;
+              return (
+                <div key={group.poKey} className="rounded-md border border-border bg-muted/20 p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <p className="text-xs text-muted-foreground">
+                      PO story <span className="font-mono font-semibold text-foreground">{group.poKey}</span>
+                      {" → "}<span className="font-semibold text-foreground">{group.rows.length}</span> Dev task{group.rows.length !== 1 ? "s" : ""}
+                    </p>
+                    {hasDesc ? (
+                      <Badge variant="outline" className="text-[0.625rem] border-success-border text-success bg-success-bg">
+                        drafted from PO description
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[0.625rem] text-warning-foreground border-warning-border gap-1">
+                        <AlertCircle className="h-3 w-3" aria-hidden="true" /> PO has no description — drafted from title
+                      </Badge>
+                    )}
                   </div>
-                  {/* v1.30 (ADR-042): points drafted from the PO — editable before create */}
-                  <div className="w-24">
-                    <Label htmlFor={`${formId}-pp-${item.poKey}`} className="text-xs font-semibold mb-1 block">Points <span className="font-normal text-muted-foreground">(from PO)</span></Label>
-                    <Input
-                      id={`${formId}-pp-${item.poKey}`}
-                      type="number" min={0} step={1}
-                      value={item.storyPoints ?? ""}
-                      onChange={(e) => { const v = e.target.value; editPlanItem(item.poKey, { storyPoints: v === "" ? null : Number(v) }); }}
-                      aria-label={`Story points for the Dev task linked to ${item.poKey}`}
-                    />
-                  </div>
+
+                  {group.rows.map((item, idx) => (
+                    <div key={item.id} className="rounded border border-border/70 bg-background p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Dev task {idx + 1} of {group.rows.length}
+                        </span>
+                        {group.rows.length > 1 && (
+                          <Button type="button" variant="ghost" size="sm"
+                            className="h-6 px-1.5 text-xs text-destructive hover:text-destructive"
+                            onClick={() => removeRow(item.id)}
+                            aria-label={`Remove Dev task ${idx + 1} for ${group.poKey}`}>
+                            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                          </Button>
+                        )}
+                      </div>
+                      <div className="flex gap-2 items-end flex-wrap">
+                        <div className="flex-1 min-w-[180px]">
+                          <Label htmlFor={`${formId}-ps-${item.id}`} className="text-xs font-semibold mb-1 block">Title <span className="font-normal text-muted-foreground">(kept from PO)</span></Label>
+                          <Input id={`${formId}-ps-${item.id}`} value={item.devSummary} maxLength={255}
+                            onChange={(e) => editRow(item.id, { devSummary: e.target.value })} />
+                        </div>
+                        {/* v1.36 (ADR-046): per-task points — auto-broken-down from the PO, free numeric */}
+                        <div className="w-20">
+                          <Label htmlFor={`${formId}-pp-${item.id}`} className="text-xs font-semibold mb-1 block">Points</Label>
+                          <Input
+                            id={`${formId}-pp-${item.id}`}
+                            type="number" min={0} step="any"
+                            value={item.storyPoints ?? ""}
+                            onChange={(e) => { const v = e.target.value; editRow(item.id, { storyPoints: v === "" ? null : Number(v) }); }}
+                            aria-label={`Story points for Dev task ${idx + 1} of ${group.poKey}`}
+                          />
+                        </div>
+                        {/* v1.36 (ADR-046): per-task assignee — the two Dev tasks can go to two developers */}
+                        <div className="w-44">
+                          <Label htmlFor={`${formId}-pa-${item.id}`} className="text-xs font-semibold mb-1 block">Assignee</Label>
+                          <select
+                            id={`${formId}-pa-${item.id}`} className={selectCls}
+                            value={item.assigneeAccountId ?? ""}
+                            onChange={(e) => editRow(item.id, { assigneeAccountId: e.target.value || undefined })}
+                            aria-label={`Assignee for Dev task ${idx + 1} of ${group.poKey}`}
+                          >
+                            <option value="">Unassigned</option>
+                            {(devTeam.data ?? []).map((m) => (
+                              <option key={m.accountId} value={m.accountId}>{m.displayName}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      <div>
+                        <Label htmlFor={`${formId}-pd-${item.id}`} className="text-xs font-semibold mb-1 block">Description</Label>
+                        <Textarea id={`${formId}-pd-${item.id}`} value={item.devDescription} rows={6}
+                          className="font-mono text-[0.8125rem]"
+                          onChange={(e) => editRow(item.id, { devDescription: e.target.value })} />
+                      </div>
+                      {aiStatus.enabled && (
+                        <RefineDraftControl
+                          busy={regeneratingId === item.id}
+                          labelFor={item.id}
+                          onRegenerate={(c) => void regenerateRow(item.id, c)}
+                        />
+                      )}
+                    </div>
+                  ))}
+
+                  <Button type="button" variant="outline" size="sm" className="h-7 text-xs"
+                    onClick={() => addRow(group.poKey)}
+                    aria-label={`Add another Dev task for ${group.poKey}`}>
+                    <Plus className="h-3.5 w-3.5 mr-1" aria-hidden="true" /> Add Dev task
+                  </Button>
                 </div>
-                <div>
-                  <Label htmlFor={`${formId}-pd-${item.poKey}`} className="text-xs font-semibold mb-1 block">Description</Label>
-                  <Textarea id={`${formId}-pd-${item.poKey}`} value={item.devDescription} rows={6}
-                    className="font-mono text-[0.8125rem]"
-                    onChange={(e) => editPlanItem(item.poKey, { devDescription: e.target.value })} />
-                </div>
-                {aiStatus.enabled && (
-                  <RefineDraftControl
-                    busy={regeneratingKey === item.poKey}
-                    labelFor={item.poKey}
-                    onRegenerate={(c) => void regenerateItem(item.poKey, c)}
-                  />
-                )}
-              </div>
-            ))}
+              );
+            })}
             <div className="flex items-center gap-3">
               <Button type="button" onClick={() => void handleCreateAll()} disabled={plan.length === 0}>
                 Create all ({plan.length}){devSprintName ? ` → ${devSprintName}` : ""}
@@ -541,7 +659,7 @@ export function Linking() {
           <CardContent>
             <ul role="status" aria-live="polite" className="space-y-1.5">
               {results.map((r) => (
-                <li key={r.poKey} className="flex items-start gap-2 text-sm">
+                <li key={r.id} className="flex items-start gap-2 text-sm">
                   {r.status === "pending" && <Loader2 className="h-4 w-4 mt-0.5 animate-spin text-muted-foreground flex-shrink-0" aria-hidden="true" />}
                   {r.status === "ok" && <CheckCircle2 className="h-4 w-4 mt-0.5 text-success flex-shrink-0" aria-hidden="true" />}
                   {r.status === "error" && <XCircle className="h-4 w-4 mt-0.5 text-destructive flex-shrink-0" aria-hidden="true" />}
@@ -555,6 +673,7 @@ export function Linking() {
                           aria-label={`Open ${r.devKey} in Jira`}>{r.devKey}<ExternalLink className="h-3 w-3" aria-hidden="true" /></a>
                         {r.linkedTo ? <span className="text-muted-foreground"> · linked</span> : r.linkWarning ? <span className="text-warning-foreground"> · link: {r.linkWarning}</span> : null}
                         {r.sprintWarning && <span className="text-warning-foreground"> · sprint: {r.sprintWarning}</span>}
+                        {r.assignWarning && <span className="text-warning-foreground"> · assign: {r.assignWarning}</span>}
                       </>
                     )}
                     {r.status === "error" && <span className="text-destructive">failed — {r.error}</span>}

@@ -2,7 +2,7 @@
 // Pure function; no mocks needed. Keyless/offline.
 
 import { describe, it, expect } from "vitest";
-import { buildReportMarkdown, buildReportCsv } from "./reportMarkdown";
+import { buildReportMarkdown, buildReportCsv, buildSprintReviewCsv, type SprintReviewForm } from "./reportMarkdown";
 import type { SprintReport, VelocityData } from "./types";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -401,5 +401,38 @@ describe("buildReportCsv", () => {
     expect(lines).toHaveLength(2);
     expect(lines[0]).toContain("Assignee");
     expect(lines[1]!.startsWith("TOTAL,")).toBe(true);
+  });
+});
+
+describe("buildSprintReviewCsv (v1.35, ADR-045)", () => {
+  const form: SprintReviewForm = {
+    teamName: "Voyagers", scrumMaster: "Rick", commitmentPoints: "40",
+    reasonForDelays: "PTO overlap, blocked by API",
+    whatWorkedWell: "Great pairing", whatDidNotWork: "Late reviews",
+    plannedImprovements: "Earlier PRs", kudos: "Alice for the auth work",
+  };
+
+  it("emits a Field,Value CSV mixing pulled data + form answers + fly-ins", () => {
+    const csv = buildSprintReviewCsv(BASE_REPORT, form, ["DEV-7: Fly in QA"]);
+    const lines = csv.split("\r\n");
+    expect(lines[0]).toBe("Field,Value");
+    expect(csv).toContain("Sprint,Sprint 6");
+    expect(csv).toContain("Sprint goals,Ship auth flow");
+    expect(csv).toContain("Team name,Voyagers");
+    expect(csv).toContain("Scrum master,Rick");
+    expect(csv).toContain("Commitment points,40");
+    expect(csv).toContain("Completed points,32");
+    expect(csv).toContain("Incomplete points,8"); // committed 40 − completed 32
+    expect(csv).toContain("Fly-ins,DEV-7: Fly in QA");
+    // a value containing a comma is quoted (csvCell)
+    expect(csv).toContain('Reason for delays / incomplete tasks,"PTO overlap, blocked by API"');
+    expect(csv).toContain("Kudos,Alice for the auth work");
+  });
+
+  it("shows — for goal and fly-ins when absent", () => {
+    const noGoal: SprintReport = { ...BASE_REPORT, sprint: { ...BASE_REPORT.sprint, goal: null } };
+    const csv = buildSprintReviewCsv(noGoal, form, []);
+    expect(csv).toContain("Sprint goals,—");
+    expect(csv).toContain("Fly-ins,—");
   });
 });

@@ -47,7 +47,7 @@ const configSchema = z.object({
   JIRA_PO_PROJECTS: z.string().default(""),
   JIRA_DEV_PROJECTS: z.string().default(""),
   JIRA_STORY_POINTS_FIELD: z.string().default("customfield_10016"),
-  JIRA_LINK_TYPE: z.string().default("Relates"),
+  JIRA_LINK_TYPE: z.string().default("Depends"), // v1.36 (ADR-046): PO story "depends on" its Dev task(s)
   JIRA_FLAGGED_FIELD: z.string().default(""),
   JIRA_CODE_REVIEW_STATUSES: z
     .string()

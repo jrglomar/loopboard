@@ -20,7 +20,7 @@ type Tab = "dashboard" | "planning" | "leaves" | "linking" | "reports";
 const TABS: { id: Tab; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "dashboard", label: "Huddle", icon: LayoutDashboard },
   { id: "planning", label: "Planning", icon: CalendarRange },
-  { id: "leaves", label: "Leaves", icon: CalendarDays },
+  { id: "leaves", label: "Offset Tracker", icon: CalendarDays },
   { id: "linking", label: "Linking", icon: Link2 },
   { id: "reports", label: "Reports", icon: BarChart3 },
 ];

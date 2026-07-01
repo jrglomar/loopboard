@@ -2,13 +2,14 @@
 // Plot typed leaves (VL/EL/Holiday/Offset) across a forward, multi-sprint calendar and track
 // per-developer offset points (auto earned/spent + a manual adjustment). Board-scoped (shared context).
 
-import { useState, useMemo } from "react";
-import { CalendarDays, RefreshCw } from "lucide-react";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { CalendarDays } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { BoardToggle } from "../components/BoardToggle";
 import { LeavesPlannerCard } from "../components/LeavesPlannerCard";
+import { OffsetWalletCard } from "../components/OffsetWalletCard";
+import { OffsetHistoryDialog } from "../components/OffsetHistoryDialog";
 import { useBoards, usePolicy } from "../lib/boards";
 import {
   useSprintList,
@@ -19,6 +20,7 @@ import {
 } from "../hooks/useJira";
 import { sprintWorkingDays } from "../lib/capacity";
 import { leaveDaysByType, totalLeaveDays, computeOffsetEarned, LEAVE_TYPES } from "../lib/offset";
+import { computeOffsetWallet, buildOffsetHistory } from "../lib/offsetWallet";
 import type { BoardKey, SharedSprintProps, LeaveType, SprintRef } from "../lib/types";
 import { cn } from "@/lib/utils";
 
@@ -80,7 +82,8 @@ export function Leaves({
   const ledger = useOffsetLedger();
 
   const [paintType, setPaintType] = useState<LeaveType>("VL");
-  const [recording, setRecording] = useState(false);
+  // v1.33 (ADR-044): the developer whose offset history modal is open (null = closed).
+  const [historyFor, setHistoryFor] = useState<string | null>(null);
 
   const roster = useMemo(() => (team.data ?? []).map((m) => m.displayName), [team.data]);
   const workingDays = useMemo(
@@ -115,23 +118,45 @@ export function Leaves({
     });
   }, [roster, report.data, allLeaves.data, selectedSprintId, workingDays, policy, ledger.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function recordSprint() {
-    if (selectedSprintId === null) return;
-    setRecording(true);
-    try {
-      await ledger.recordSprint(
-        selectedSprintId,
-        rows.map((r) => ({ assignee: r.name, earned: r.earnedThisSprint, spent: r.spentThisSprint }))
-      );
-    } catch { /* surfaced via ledger.error on refresh */ } finally { setRecording(false); }
-  }
+  // v1.33 (ADR-044): the offset WALLET — earned banks per sprint; spend is derived LIVE from Offset
+  // leaves; balance = earned − used + manual. Recomputes whenever the ledger or the leaves change.
+  const wallet = useMemo(
+    () => computeOffsetWallet(ledger.data, allLeaves.data),
+    [ledger.data, allLeaves.data]
+  );
+
+  // v1.33 (ADR-044, Phase 2): sprint id → name for the history modal's usage labels.
+  const sprintNameById = useMemo(
+    () => Object.fromEntries(allSprints.map((s) => [String(s.id), s.name])),
+    [allSprints]
+  );
+  const history = historyFor
+    ? buildOffsetHistory(historyFor, ledger.data, allLeaves.data, sprintNameById)
+    : null;
+
+  // Auto-bank the selected sprint's earned offsets (idempotent) once its report + leaves load.
+  // Guarded by a signature of {assignee: earned} so it only writes when the earned values change
+  // (never loops — the signature is independent of the ledger the write refreshes).
+  const recordEntries = useMemo(
+    () => rows.map((r) => ({ assignee: r.name, earned: r.earnedThisSprint, spent: 0 })),
+    [rows]
+  );
+  const bankedSig = useRef<string>("");
+  useEffect(() => {
+    if (selectedSprintId === null || !report.data || recordEntries.length === 0) return;
+    const sig = `${selectedSprintId}:` + recordEntries.map((e) => `${e.assignee}=${e.earned}`).join(",");
+    if (sig === bankedSig.current) return;
+    bankedSig.current = sig;
+    void ledger.recordSprint(selectedSprintId, recordEntries);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSprintId, report.data, recordEntries]);
 
   return (
     <div className="space-y-4">
       {/* Header + context */}
       <div className="flex items-center gap-3 flex-wrap">
         <CalendarDays className="h-6 w-6 text-primary" aria-hidden="true" />
-        <h1 className="text-xl font-semibold text-foreground">Leaves &amp; offset</h1>
+        <h1 className="text-xl font-semibold text-foreground">Offset Tracker</h1>
         {!onBoardChange && !boardsLoading && boards !== null && (
           <BoardToggle selectedKey={selectedBoardKey} onChange={handleBoardChange} />
         )}
@@ -159,6 +184,9 @@ export function Leaves({
           <span className="bg-muted rounded px-2 py-1">Offset step N2 <b className="font-medium text-foreground">{policy.offsetThreshold}</b></span>
         </span>
       </div>
+
+      {/* v1.33 (ADR-044): main offset wallet — per-developer balance, auto add (earned) / deduct (Offset leaves) */}
+      <OffsetWalletCard wallet={wallet} roster={roster} onHistory={setHistoryFor} />
 
       {/* Leave-type painter */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -194,13 +222,10 @@ export function Leaves({
       {/* Offset table */}
       <Card className="shadow-sm">
         <CardHeader className="px-4 pt-3 pb-2">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <h3 className="text-sm font-semibold text-foreground">Offset points</h3>
-            <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => void recordSprint()} disabled={recording || selectedSprintId === null}>
-              <RefreshCw className="h-4 w-4 mr-1.5" aria-hidden="true" />
-              {recording ? "Recording…" : "Record this sprint"}
-            </Button>
-          </div>
+          <h3 className="text-sm font-semibold text-foreground">
+            Offset points — this sprint
+            <span className="ml-2 text-xs font-normal text-muted-foreground">earned auto-banks; balance is the running wallet</span>
+          </h3>
         </CardHeader>
         <CardContent className="px-4 pb-3 pt-0 overflow-x-auto">
           {rows.length === 0 ? (
@@ -248,18 +273,26 @@ export function Leaves({
                         aria-label={`Manual adjustment for ${r.name}`}
                       />
                     </td>
-                    <td className="text-right px-2 font-semibold text-primary">{r.balance}</td>
+                    <td className="text-right px-2 font-semibold text-primary tabular-nums">{wallet[r.name]?.balance ?? 0}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
           <p className="mt-2 text-[0.6875rem] text-muted-foreground">
-            Earned = (done + leave days) ≥ N + N2 ? 1 : 0 (max 1 / sprint). Balance = Σ earned − Σ Offset leaves + manual.
-            "Record this sprint" saves the current sprint's earned/spent into the ledger.
+            Earned = (done + leave days) ≥ N + N2 ? 1 : 0 (max 1 / sprint) — auto-banked when you open the sprint.
+            Balance is the running wallet: Σ earned − Σ Offset leaves plotted + manual.
           </p>
         </CardContent>
       </Card>
+
+      {/* v1.33 (ADR-044, Phase 2): per-developer offset usage history */}
+      <OffsetHistoryDialog
+        assignee={historyFor}
+        history={history}
+        open={historyFor !== null}
+        onOpenChange={(o) => { if (!o) setHistoryFor(null); }}
+      />
     </div>
   );
 }

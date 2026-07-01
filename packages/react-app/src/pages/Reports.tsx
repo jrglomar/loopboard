@@ -51,6 +51,7 @@ import { formatPoints } from "../lib/format";
 import { computeCapacity, possibleCommittedVelocity, sprintWorkingDays } from "../lib/capacity";
 import { LeavesCalendarCard } from "../components/LeavesCalendarCard";
 import { PrBadge } from "../components/PrBadge";
+import { SprintReviewExport } from "../components/SprintReviewExport";
 import type {
   SprintRef,
   SprintReport,
@@ -1012,6 +1013,9 @@ function ExportBar({ report, velocity, aiSummary, leavesCapacity }: ExportBarPro
         <Download className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
         Download .csv
       </Button>
+
+      {/* v1.35 (ADR-045): full sprint-review CSV (form + pulled data) */}
+      <SprintReviewExport report={report} />
 
       <Button
         variant="outline"

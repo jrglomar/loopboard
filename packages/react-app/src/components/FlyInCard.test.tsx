@@ -1,9 +1,14 @@
 // FlyInCard tests — v1.23 (ADR-035) + dual PO/Dev alignment v1.27 (ADR-040). Keyless/offline.
 
 import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { FlyInCard, matchFlyIn, selectFlyIns } from "./FlyInCard";
 import type { IssueSummary, LinkedIssue } from "../lib/types";
+
+/** v1.32: the card is collapsed by default — expand it to reveal the groups. */
+function expand() {
+  fireEvent.click(screen.getByRole("button", { name: /Fly-in tracking/i }));
+}
 
 function issue(over: Partial<IssueSummary>): IssueSummary {
   return {
@@ -41,9 +46,25 @@ describe("selectFlyIns", () => {
   });
 });
 
-describe("FlyInCard (dual PO/Dev, v1.27)", () => {
-  it("shows an empty state when neither board has fly-in tickets", () => {
+describe("FlyInCard (dual PO/Dev, v1.27; collapsible v1.32)", () => {
+  it("is collapsed by default — counts show in the header, groups are hidden until expanded", () => {
+    render(
+      <FlyInCard
+        devFlyIns={[issue({ key: "VRDB-7", summary: "Fly in: QA onsite" })]}
+        poFlyIns={[issue({ key: "VBPO-3", summary: "Fly-in approval" })]}
+      />
+    );
+    // header count is visible while collapsed…
+    expect(screen.getByText(/Dev 1 · PO 1/)).toBeTruthy();
+    // …but the group content is not rendered yet
+    expect(screen.queryByText("Dev board")).toBeNull();
+    expand();
+    expect(screen.getByText("Dev board")).toBeTruthy();
+  });
+
+  it("shows an empty state when neither board has fly-in tickets (once expanded)", () => {
     render(<FlyInCard devFlyIns={[]} poFlyIns={[]} />);
+    expand();
     expect(screen.getByText(/No fly-in tickets this sprint/i)).toBeTruthy();
   });
 
@@ -54,6 +75,7 @@ describe("FlyInCard (dual PO/Dev, v1.27)", () => {
         poFlyIns={[issue({ key: "VBPO-3", summary: "Fly-in approval", url: "https://jira.example.com/browse/VBPO-3" })]}
       />
     );
+    expand();
     expect(screen.getByText("Dev board")).toBeTruthy();
     expect(screen.getByText("PO board")).toBeTruthy();
     expect(screen.getByRole("link", { name: /Open VRDB-7 in a new tab/i })).toBeTruthy();
@@ -74,6 +96,7 @@ describe("FlyInCard (dual PO/Dev, v1.27)", () => {
         poAlignment={{ "VBPO-3": aligned }}
       />
     );
+    expand();
     const link = screen.getByRole("link", { name: /Aligned with Dev fly-in VRDB-9/i });
     expect(link.getAttribute("href")).toBe("https://jira.example.com/browse/VRDB-9");
   });
@@ -86,6 +109,7 @@ describe("FlyInCard (dual PO/Dev, v1.27)", () => {
         poAlignment={{ "VBPO-3": null }}
       />
     );
+    expand();
     expect(screen.getByText(/No Dev fly-in/i)).toBeTruthy();
   });
 });

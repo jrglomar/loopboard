@@ -5,8 +5,8 @@
 //     whether it has an ALIGNED Dev fly-in (a linked Dev issue whose title is also a fly-in),
 //     derived from get_linked_issues. Derived from already-loaded sprint issues + one links fetch.
 
-import type { ReactNode } from "react";
-import { Plane, ExternalLink, CheckCircle2, AlertTriangle } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Plane, ExternalLink, CheckCircle2, AlertTriangle, ChevronRight, ChevronDown } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { IssueSummary, LinkedIssue } from "../lib/types";
@@ -132,30 +132,47 @@ export function FlyInCard({
   /** Per PO fly-in key → its aligned Dev fly-in (or null when none). Omit to hide alignment. */
   poAlignment?: Record<string, LinkedIssue | null>;
 }) {
+  // v1.32: collapsible, collapsed by default — the counts stay visible in the header.
+  const [expanded, setExpanded] = useState(false);
   const total = devFlyIns.length + poFlyIns.length;
+  const Chevron = expanded ? ChevronDown : ChevronRight;
+
   return (
     <Card className="shadow-sm">
-      <CardHeader className="px-4 pt-3 pb-2">
-        <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-          <Plane className="h-4 w-4 text-primary" aria-hidden="true" />
+      <CardHeader className="px-4 pt-2 pb-2">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="w-full flex items-center gap-1.5 text-sm font-semibold text-foreground rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Chevron className="h-4 w-4 text-muted-foreground flex-shrink-0" aria-hidden="true" />
+          <Plane className="h-4 w-4 text-primary flex-shrink-0" aria-hidden="true" />
           Fly-in tracking
-          {total > 0 && <span className="text-xs font-normal text-muted-foreground">({total})</span>}
-        </h3>
+          <span className="text-xs font-normal text-muted-foreground">
+            ({total}){total > 0 ? ` · Dev ${devFlyIns.length} · PO ${poFlyIns.length}` : ""}
+          </span>
+          <span className="ml-auto text-[0.6875rem] font-normal text-muted-foreground">
+            {expanded ? "Hide" : "Show"}
+          </span>
+        </button>
       </CardHeader>
-      <CardContent className="px-4 pb-3 pt-0 space-y-3">
-        {total === 0 ? (
-          <p className="text-sm text-muted-foreground">No fly-in tickets this sprint.</p>
-        ) : (
-          <>
-            <FlyInGroup label="Dev board" items={devFlyIns} />
-            <FlyInGroup
-              label="PO board"
-              items={poFlyIns}
-              alignmentFor={poAlignment ? (key) => poAlignment[key] : undefined}
-            />
-          </>
-        )}
-      </CardContent>
+      {expanded && (
+        <CardContent className="px-4 pb-3 pt-0 space-y-3">
+          {total === 0 ? (
+            <p className="text-sm text-muted-foreground">No fly-in tickets this sprint.</p>
+          ) : (
+            <>
+              <FlyInGroup label="Dev board" items={devFlyIns} />
+              <FlyInGroup
+                label="PO board"
+                items={poFlyIns}
+                alignmentFor={poAlignment ? (key) => poAlignment[key] : undefined}
+              />
+            </>
+          )}
+        </CardContent>
+      )}
     </Card>
   );
 }

@@ -14,6 +14,7 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
     ...actual,
     useActiveSprint: vi.fn(),
     useTeamMembers: vi.fn(),
+    updateTicketPoints: vi.fn(),   // v1.37 (ADR-047): inline points edit
   };
 });
 
@@ -120,6 +121,11 @@ function setDefaultMocks() {
     assigned: true,
   });
 
+  // v1.37 (ADR-047): inline points edit → update_ticket
+  vi.mocked(useJiraModule.updateTicketPoints).mockResolvedValue({
+    ticketKey: "DEV-10", updatedFields: ["storyPoints"],
+  } as never);
+
   // v1.15 ticket-action defaults
   vi.mocked(ticketActionsModule.getTransitions).mockResolvedValue({
     ticketKey: "DEV-10",
@@ -179,9 +185,10 @@ describe("AssignmentList — ticket rows from sprint data", () => {
     render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" />);
 
     await waitFor(() => {
+      // v1.37 (ADR-047): points are now inline-editable inputs (not static text).
       // DEV-10 has 5 pts, DEV-11 has 3 pts
-      expect(screen.getByText("5")).toBeTruthy();
-      expect(screen.getByText("3")).toBeTruthy();
+      expect(screen.getByDisplayValue("5")).toBeTruthy();
+      expect(screen.getByDisplayValue("3")).toBeTruthy();
     });
   });
 });
@@ -568,5 +575,89 @@ describe("AssignmentList — v1.15 move to sprint", () => {
       expect(vi.mocked(ticketActionsModule.moveIssueToSprint)).toHaveBeenCalledWith("DEV-10", 200)
     );
     await waitFor(() => expect(runSpy).toHaveBeenCalled());
+  });
+});
+
+// ── Tests: v1.37 (ADR-047) — bulk assign + editable points ─────────────────────
+
+describe("AssignmentList — v1.37 bulk assign", () => {
+  it("assigns every selected ticket to the chosen developer", async () => {
+    render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" />);
+    await waitFor(() => screen.getByRole("checkbox", { name: "Select DEV-10" }));
+
+    // Select both tickets → the bulk toolbar appears.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select DEV-10" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select DEV-11" }));
+    expect(await screen.findByText(/2 selected/i)).toBeTruthy();
+
+    // Pick Bob (acc-2) and Apply.
+    fireEvent.change(screen.getByRole("combobox", { name: /Bulk assign selected tickets to a developer/i }), {
+      target: { value: "acc-2" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(assignClientModule.assignIssue)).toHaveBeenCalledWith("DEV-10", "acc-2");
+      expect(vi.mocked(assignClientModule.assignIssue)).toHaveBeenCalledWith("DEV-11", "acc-2");
+    });
+  });
+
+  it("select-all checks every visible ticket", async () => {
+    render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" />);
+    await waitFor(() => screen.getByRole("checkbox", { name: "Select all tickets" }));
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select all tickets" }));
+
+    expect(await screen.findByText(/2 selected/i)).toBeTruthy();
+    expect((screen.getByRole("checkbox", { name: "Select DEV-10" }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("checkbox", { name: "Select DEV-11" }) as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("Apply is disabled until a developer is chosen", async () => {
+    render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" />);
+    await waitFor(() => screen.getByRole("checkbox", { name: "Select DEV-10" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select DEV-10" }));
+
+    const apply = screen.getByRole("button", { name: "Apply" }) as HTMLButtonElement;
+    expect(apply.disabled).toBe(true);
+    fireEvent.change(screen.getByRole("combobox", { name: /Bulk assign selected tickets to a developer/i }), {
+      target: { value: "acc-1" },
+    });
+    expect((screen.getByRole("button", { name: "Apply" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe("AssignmentList — v1.37 editable points", () => {
+  it("writes new points via update_ticket on blur", async () => {
+    render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" />);
+    const input = (await screen.findByLabelText("Story points for DEV-10")) as HTMLInputElement;
+    expect(input.value).toBe("5");
+
+    fireEvent.change(input, { target: { value: "8" } });
+    fireEvent.blur(input);
+
+    await waitFor(() =>
+      expect(vi.mocked(useJiraModule.updateTicketPoints)).toHaveBeenCalledWith("DEV-10", 8)
+    );
+  });
+
+  it("does not write when the value is unchanged", async () => {
+    render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" />);
+    const input = (await screen.findByLabelText("Story points for DEV-10")) as HTMLInputElement;
+
+    fireEvent.blur(input); // committed on mount === current → no write
+    await new Promise((r) => setTimeout(r, 0));
+    expect(vi.mocked(useJiraModule.updateTicketPoints)).not.toHaveBeenCalled();
+  });
+
+  it("reverts the input when the write fails", async () => {
+    vi.mocked(useJiraModule.updateTicketPoints).mockRejectedValueOnce({ code: "UPSTREAM", message: "nope" });
+    render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" />);
+    const input = (await screen.findByLabelText("Story points for DEV-10")) as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: "13" } });
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(input.value).toBe("5")); // reverted to the committed value
   });
 });

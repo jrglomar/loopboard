@@ -10,6 +10,7 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
     ...actual,
     useSprintList: vi.fn(),
     useActiveSprint: vi.fn(),
+    useTeamMembers: vi.fn(),        // v1.36 (ADR-046): Dev-board roster for the assignee picker
     createLinkedDevTicket: vi.fn(),
   };
 });
@@ -44,6 +45,10 @@ function setMocks() {
   vi.mocked(useJiraModule.useSprintList).mockImplementation((_s: unknown, boardId?: number) =>
     ({ data: boardId === 20 ? PO_SPRINTS : DEV_SPRINTS, loading: false, error: null, run: vi.fn() } as never));
   vi.mocked(useJiraModule.useActiveSprint).mockReturnValue({ data: SPRINT_DATA, loading: false, error: null, run: vi.fn() } as never);
+  vi.mocked(useJiraModule.useTeamMembers).mockReturnValue({
+    data: [{ accountId: "u1", displayName: "Alice" }, { accountId: "u2", displayName: "Bob" }],
+    loading: false, error: null, run: vi.fn(), save: vi.fn(),
+  } as never);
   // PO-1 already has DEV-5; PO-2 has none
   vi.mocked(linkClientModule.getLinkedIssues).mockResolvedValue({
     links: { "PO-1": [{ key: "DEV-5", summary: "x", status: "Done", url: "u" }], "PO-2": [] },
@@ -227,8 +232,9 @@ describe("Linking page (v1.11)", () => {
 
     // Title field is prefilled with the PO story's title (not an AI/template title).
     expect(screen.getByDisplayValue("Needs a dev task")).toBeTruthy();
-    // Points field is drafted from the PO (mkIssue → 3) and is editable.
-    const pts = screen.getByLabelText(/Story points for the Dev task linked to PO-2/i) as HTMLInputElement;
+    // Points field is drafted from the PO (mkIssue → 3, a single allowed value → one Dev task)
+    // and is editable. v1.36: the label is now per-task ("Dev task 1 of PO-2").
+    const pts = screen.getByLabelText(/Story points for Dev task 1 of PO-2/i) as HTMLInputElement;
     expect(pts.value).toBe("3");
     // Override the drafted points before creating.
     fireEvent.change(pts, { target: { value: "5" } });
@@ -240,6 +246,67 @@ describe("Linking page (v1.11)", () => {
       expect(vi.mocked(useJiraModule.createLinkedDevTicket)).toHaveBeenCalledWith(
         expect.objectContaining({ linkedPoTicketKey: "PO-2", summary: "Needs a dev task", storyPoints: 5 })
       );
+    });
+  });
+
+  // ── v1.36 (ADR-046): point-driven breakdown into up to two Dev tasks ──────────
+  const PO4 = {
+    sprint: { id: 200, name: "PO S", state: "active" as const, startDate: null, endDate: null, goal: null },
+    activeSprints: [], futureSprints: [],
+    issuesByStatus: { todo: [{ ...mkIssue("PO-9", "Password reset"), storyPoints: 4 }], inprogress: [], codereview: [], done: [] },
+    totals: { total: 1, todo: 1, inprogress: 0, codereview: 0, done: 0, blocked: 0, storyPointsTotal: 4, storyPointsDone: 0, storyPointsCodeReview: 0 },
+  };
+  function setup4ptPo() {
+    vi.mocked(useJiraModule.useActiveSprint).mockReturnValue({ data: PO4, loading: false, error: null, run: vi.fn() } as never);
+    vi.mocked(linkClientModule.getLinkedIssues).mockResolvedValue({ links: { "PO-9": [] } });
+    vi.mocked(linkClientModule.getIssueDescriptions).mockResolvedValue({ descriptions: { "PO-9": "reset flow" } });
+  }
+
+  describe("point-driven breakdown (v1.36)", () => {
+    it("splits a 4-point PO into two 2-point Dev tasks, each independently assignable", async () => {
+      setup4ptPo();
+      vi.mocked(useJiraModule.createLinkedDevTicket).mockResolvedValue({ key: "DEV-1", url: "https://jira/browse/DEV-1", board: "DEV", linkedTo: "PO-9" } as never);
+
+      render(<Linking />);
+      fireEvent.change(screen.getByRole("combobox", { name: /PO board sprint/i }), { target: { value: "200" } });
+      fireEvent.click(await screen.findByRole("button", { name: /Build plan \(1\)/i }));
+
+      await screen.findByText("Dev task 1 of 2");
+      expect(screen.getByText("Dev task 2 of 2")).toBeTruthy();
+
+      // Both rows seeded with the breakdown estimate: 2 + 2.
+      const points = screen.getAllByLabelText(/Story points for Dev task/i) as HTMLInputElement[];
+      expect(points.map((p) => p.value)).toEqual(["2", "2"]);
+
+      // Route the two tasks to two different developers.
+      const assignees = screen.getAllByLabelText(/Assignee for Dev task/i) as HTMLSelectElement[];
+      fireEvent.change(assignees[0]!, { target: { value: "u1" } });
+      fireEvent.change(assignees[1]!, { target: { value: "u2" } });
+
+      fireEvent.click(screen.getByRole("button", { name: /Create all/i }));
+      await waitFor(() => expect(vi.mocked(useJiraModule.createLinkedDevTicket)).toHaveBeenCalledTimes(2));
+
+      const calls = vi.mocked(useJiraModule.createLinkedDevTicket).mock.calls;
+      expect(calls[0]![0]).toMatchObject({ linkedPoTicketKey: "PO-9", storyPoints: 2, assigneeAccountId: "u1" });
+      expect(calls[1]![0]).toMatchObject({ linkedPoTicketKey: "PO-9", storyPoints: 2, assigneeAccountId: "u2" });
+    });
+
+    it("lets a planner add and remove Dev-task rows within a PO group", async () => {
+      setup4ptPo();
+
+      render(<Linking />);
+      fireEvent.change(screen.getByRole("combobox", { name: /PO board sprint/i }), { target: { value: "200" } });
+      fireEvent.click(await screen.findByRole("button", { name: /Build plan \(1\)/i }));
+      await screen.findByText("Dev task 1 of 2");
+
+      fireEvent.click(screen.getByRole("button", { name: /Add another Dev task for PO-9/i }));
+      await screen.findByText("Dev task 3 of 3");
+      expect(screen.getAllByLabelText(/Story points for Dev task/i)).toHaveLength(3);
+
+      const removeButtons = screen.getAllByRole("button", { name: /Remove Dev task/i });
+      fireEvent.click(removeButtons[removeButtons.length - 1]!);
+      await waitFor(() => expect(screen.queryByText("Dev task 3 of 3")).toBeNull());
+      expect(screen.getAllByLabelText(/Story points for Dev task/i)).toHaveLength(2);
     });
   });
 });

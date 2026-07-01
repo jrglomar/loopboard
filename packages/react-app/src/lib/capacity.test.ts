@@ -6,6 +6,7 @@ import {
   sprintWorkingDays,
   leaveDaysInSprint,
   computeCapacity,
+  computeDevCapacity,
   possibleCommittedVelocity,
 } from "./capacity";
 
@@ -256,5 +257,32 @@ describe("possibleCommittedVelocity", () => {
   it("returns average unchanged when factor is 1 (no leaves)", () => {
     const avg = 27.33;
     expect(possibleCommittedVelocity(avg, 1)).toBe(avg);
+  });
+});
+
+// ── computeDevCapacity (v1.37, ADR-047) ───────────────────────────────────────
+
+describe("computeDevCapacity", () => {
+  it("capacity = required points − working leave days (the headline case: 8 − 2 = 6)", () => {
+    const rows = computeDevCapacity(8, { Alice: 2, Bob: 0 });
+    expect(rows).toEqual([
+      { name: "Alice", leaveDays: 2, capacity: 6 },
+      { name: "Bob", leaveDays: 0, capacity: 8 },
+    ]);
+  });
+
+  it("floors capacity at 0 when leave days exceed the requirement", () => {
+    expect(computeDevCapacity(8, { Carol: 10 })).toEqual([
+      { name: "Carol", leaveDays: 10, capacity: 0 },
+    ]);
+  });
+
+  it("sorts rows by developer name", () => {
+    const names = computeDevCapacity(8, { Zoe: 0, Alice: 1, Mia: 3 }).map((r) => r.name);
+    expect(names).toEqual(["Alice", "Mia", "Zoe"]);
+  });
+
+  it("returns [] for an empty roster", () => {
+    expect(computeDevCapacity(8, {})).toEqual([]);
   });
 });

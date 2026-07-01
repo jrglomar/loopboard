@@ -16,7 +16,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { LeavesCalendarCard } from "./LeavesCalendarCard";
 import { useTeamMembers, useVelocity, useLeaves } from "../hooks/useJira";
-import { computeCapacity, sprintWorkingDays, possibleCommittedVelocity } from "../lib/capacity";
+import { computeCapacity, computeDevCapacity, sprintWorkingDays, possibleCommittedVelocity } from "../lib/capacity";
+import { usePolicy } from "../lib/boards";
 import { formatPoints } from "../lib/format";
 import type { SprintRef } from "../lib/types";
 
@@ -168,6 +169,13 @@ export function LeavesPlotterCard({
   const hasVelocityBaseline = (velocityState.data?.sprints.length ?? 0) > 0;
   const possibleVelocity = possibleCommittedVelocity(avgCompleted, capacity.capacityFactor);
 
+  // v1.37 (ADR-047): per-developer capacity = required points (N) − working leave days.
+  const policy = usePolicy();
+  const devCaps = React.useMemo(
+    () => computeDevCapacity(policy.requiredPoints, capacity.byAssigneeLeaveDays),
+    [policy.requiredPoints, capacity.byAssigneeLeaveDays]
+  );
+
   // ── Card header ─────────────────────────────────────────────────────────────
 
   const cardHeader = (
@@ -287,6 +295,36 @@ export function LeavesPlotterCard({
           averageCompleted={avgCompleted}
           hasVelocityBaseline={hasVelocityBaseline}
         />
+
+        {/* v1.37 (ADR-047): per-developer capacity — required N points − working leave days */}
+        {devCaps.length > 0 && (
+          <div className="rounded-lg border border-border bg-card px-4 py-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">
+              Per-developer capacity
+              <span className="ml-1 font-normal normal-case text-muted-foreground">
+                — required {policy.requiredPoints} pts − working leave days
+              </span>
+            </p>
+            <table className="w-full text-sm" aria-label="Per-developer capacity">
+              <thead>
+                <tr className="text-xs text-muted-foreground border-b border-border">
+                  <th className="text-left pb-1 font-medium">Developer</th>
+                  <th className="text-right pb-1 font-medium">Leave days</th>
+                  <th className="text-right pb-1 font-medium">Capacity (pts)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {devCaps.map((d) => (
+                  <tr key={d.name} className="border-t border-border/40">
+                    <td className="py-1 text-foreground">{d.name}</td>
+                    <td className="py-1 text-right tabular-nums text-[hsl(var(--warning-foreground))]">{d.leaveDays}</td>
+                    <td className="py-1 text-right tabular-nums font-semibold text-foreground">{formatPoints(d.capacity)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

@@ -71,4 +71,12 @@ describe("Leaves page (v1.26)", () => {
     render(<Leaves />);
     expect(screen.getByText(/Earned = \(done \+ leave days\)/)).toBeTruthy();
   });
+
+  it("renders the main offset wallet — balance = banked earned − derived spend (v1.33)", () => {
+    render(<Leaves />);
+    // Alice: ledger earned 1, one Offset leave → used 1 → balance 0 in the wallet card.
+    const wallet = screen.getByRole("list", { name: /Offset balances/i });
+    expect(wallet.textContent).toContain("Alice");
+    expect(wallet.textContent).toMatch(/earned 1 · used 1/);
+  });
 });

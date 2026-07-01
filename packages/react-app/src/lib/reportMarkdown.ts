@@ -9,6 +9,7 @@
 
 import type { SprintReport, VelocityData } from "./types";
 import { formatPoints } from "./format";
+import { sprintWorkingDays } from "./capacity";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -270,4 +271,55 @@ export function buildReportCsv(
   rows.push(csvRow(totalCells));
 
   return rows.join("\r\n");
+}
+
+// ── Full sprint-review CSV (v1.35, ADR-045) ───────────────────────────────────
+
+/** Retro/review fields the user fills in on the export form (data fields are pulled from the report). */
+export interface SprintReviewForm {
+  teamName: string;
+  scrumMaster: string;
+  /** Free text — prefilled from the report's committed points, editable. */
+  commitmentPoints: string;
+  reasonForDelays: string;
+  whatWorkedWell: string;
+  whatDidNotWork: string;
+  plannedImprovements: string;
+  kudos: string;
+}
+
+/**
+ * Build a Field/Value CSV combining PULLED report data (duration, goals, completed/incomplete points,
+ * fly-ins) with the user's typed retro answers. Two columns (Field, Value); one row per field.
+ * Pure + deterministic. `flyIns` is a pre-formatted list (e.g. "KEY: summary") pulled by the caller.
+ */
+export function buildSprintReviewCsv(
+  report: SprintReport,
+  form: SprintReviewForm,
+  flyIns: string[]
+): string {
+  const start = formatDate(report.sprint.startDate);
+  const end = formatDate(report.sprint.endDate);
+  const workingDays = sprintWorkingDays(report.sprint.startDate, report.sprint.endDate).length;
+  const duration = `${start} – ${end} (${workingDays} working day${workingDays !== 1 ? "s" : ""})`;
+  const incomplete = report.committedPoints - report.completedPoints;
+
+  const pairs: Array<[string, string]> = [
+    ["Sprint", report.sprint.name],
+    ["Sprint duration", duration],
+    ["Sprint goals", report.sprint.goal ?? "—"],
+    ["Team name", form.teamName],
+    ["Scrum master", form.scrumMaster],
+    ["Commitment points", form.commitmentPoints],
+    ["Completed points", formatPoints(report.completedPoints)],
+    ["Incomplete points", formatPoints(incomplete)],
+    ["Reason for delays / incomplete tasks", form.reasonForDelays],
+    ["Fly-ins", flyIns.length > 0 ? flyIns.join("; ") : "—"],
+    ["What worked well this sprint", form.whatWorkedWell],
+    ["What did not work well", form.whatDidNotWork],
+    ["Planned improvements for next sprint", form.plannedImprovements],
+    ["Kudos", form.kudos],
+  ];
+
+  return [csvRow(["Field", "Value"]), ...pairs.map((p) => csvRow(p))].join("\r\n");
 }

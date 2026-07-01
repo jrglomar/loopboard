@@ -19,7 +19,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useActiveSprint, useTeamMembers } from "../hooks/useJira";
+import { useActiveSprint, useTeamMembers, updateTicketPoints } from "../hooks/useJira";
 import { assignIssue } from "../lib/assignClient";
 import {
   getTransitions,
@@ -219,6 +219,74 @@ function MoveSprintCell({ issue, sprints, onMoved }: { issue: IssueSummary; spri
   );
 }
 
+// ── Points cell (v1.37, ADR-047) — inline-editable story points ────────────────
+
+function PointsCell({ issue }: { issue: IssueSummary }) {
+  const initial = issue.storyPoints != null ? String(issue.storyPoints) : "";
+  const [value, setValue] = useState(initial);
+  const committed = React.useRef(initial);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Re-sync when the underlying issue's points change (e.g. a sprint refetch).
+  React.useEffect(() => {
+    const v = issue.storyPoints != null ? String(issue.storyPoints) : "";
+    setValue(v);
+    committed.current = v;
+  }, [issue.storyPoints]);
+
+  async function commit() {
+    const next = value.trim();
+    if (next === committed.current) return; // unchanged — no write
+    const num = Number(next);
+    if (next === "" || !Number.isFinite(num) || num < 0) {
+      setValue(committed.current); // invalid → revert, never write a bad value
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      await updateTicketPoints(issue.key, num);
+      committed.current = next;
+      setSaving(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err: unknown) {
+      setError((err as McpError)?.message ?? "Update failed");
+      setValue(committed.current); // revert on failure
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <div className="flex items-center justify-end gap-1">
+        <input
+          type="number"
+          min={0}
+          step="any"
+          aria-label={`Story points for ${issue.key}`}
+          value={value}
+          disabled={saving}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={() => void commit()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+          }}
+          // guard: scrolling the page over a number input must not change its value
+          onWheel={(e) => (e.target as HTMLInputElement).blur()}
+          className="w-14 h-8 text-xs px-1.5 text-right border border-border rounded-md bg-background text-foreground font-[inherit] focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 transition-colors hover:border-ring disabled:opacity-50 disabled:cursor-wait"
+        />
+        {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground flex-shrink-0" aria-hidden="true" />}
+        {!saving && saved && <span className="text-[0.625rem] text-[hsl(var(--status-done-text))]" aria-hidden="true">✓</span>}
+      </div>
+      {error && <p className="text-[0.625rem] text-destructive max-w-[120px]" aria-live="polite">{error}</p>}
+    </div>
+  );
+}
+
 // ── Ticket row ────────────────────────────────────────────────────────────────
 
 interface TicketRowProps {
@@ -230,9 +298,12 @@ interface TicketRowProps {
   sprints: SprintRef[];
   /** v1.15: refetch the sprint after a status change / move */
   onChanged: () => void;
+  /** v1.37 (ADR-047): bulk-assign selection */
+  selected: boolean;
+  onToggleSelect: () => void;
 }
 
-function TicketRow({ issue, team, rowState, onAssign, sprints, onChanged }: TicketRowProps) {
+function TicketRow({ issue, team, rowState, onAssign, sprints, onChanged, selected, onToggleSelect }: TicketRowProps) {
   // v1.8 (ADR-019): team is keyed by accountId
   const currentInTeam =
     rowState.accountId !== null &&
@@ -273,6 +344,16 @@ function TicketRow({ issue, team, rowState, onAssign, sprints, onChanged }: Tick
 
   return (
     <tr className="border-t border-border/40 hover:bg-muted/20 transition-colors">
+      {/* v1.37 (ADR-047): bulk-assign row selection */}
+      <td className="py-2 pr-2">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggleSelect}
+          aria-label={`Select ${issue.key}`}
+          className="h-4 w-4 cursor-pointer accent-[hsl(var(--primary))]"
+        />
+      </td>
       {/* Ticket key → Jira link */}
       {/* a11y: descriptive aria-label on the link */}
       <td className="py-2 pr-3">
@@ -294,15 +375,9 @@ function TicketRow({ issue, team, rowState, onAssign, sprints, onChanged }: Tick
         </p>
       </td>
 
-      {/* Points */}
-      <td className="py-2 pr-4 text-right tabular-nums">
-        {issue.storyPoints !== null ? (
-          <span className="text-xs text-muted-foreground">
-            {formatPoints(issue.storyPoints)}
-          </span>
-        ) : (
-          <span className="text-xs text-muted-foreground">—</span>
-        )}
+      {/* Points — v1.37 (ADR-047): inline-editable */}
+      <td className="py-2 pr-4">
+        <PointsCell issue={issue} />
       </td>
 
       {/* Assignee select */}
@@ -381,7 +456,10 @@ export function AssignmentList({
   // v1.15 (ADR-026): assignee filter + points summary over the sprint's tickets.
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null);
   const filterId = React.useId();
-  React.useEffect(() => { setAssigneeFilter(null); }, [boardId, sprintId]);
+  // v1.37 (ADR-047): bulk-assign selection + the toolbar's target developer.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkAccountId, setBulkAccountId] = useState<string>("");
+  React.useEffect(() => { setAssigneeFilter(null); setSelected(new Set()); }, [boardId, sprintId]);
 
   // v1.8 (ADR-019): roster from curated team, NOT get_assignable_users
   const { data: team, loading: usersLoading, error: usersError, run: usersRun } =
@@ -512,6 +590,27 @@ export function AssignmentList({
     },
     [rowStates]
   );
+
+  // ── Bulk assign (v1.37, ADR-047) ──────────────────────────────────────────────
+
+  const toggleSelect = useCallback((key: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const handleBulkAssign = useCallback(async () => {
+    if (selected.size === 0 || bulkAccountId === "") return;
+    const member = (team ?? []).find((m) => m.accountId === bulkAccountId);
+    if (!member) return;
+    // Reuse the per-row optimistic assign machine for each selected ticket.
+    await Promise.all(
+      [...selected].map((k) => handleAssign(k, member.accountId, member.displayName))
+    );
+    setSelected(new Set());
+  }, [selected, bulkAccountId, team, handleAssign]);
 
   // ── Card header ─────────────────────────────────────────────────────────────
 
@@ -649,6 +748,38 @@ export function AssignmentList({
           </span>
         </div>
 
+        {/* v1.37 (ADR-047): bulk-assign toolbar — appears once rows are selected */}
+        {selected.size > 0 && (
+          <div
+            className="flex items-end gap-2 flex-wrap mb-3 p-2 rounded-md border border-primary/30 bg-primary/5"
+            role="group"
+            aria-label="Bulk assign selected tickets"
+          >
+            <span className="text-xs font-semibold text-foreground self-center">{selected.size} selected</span>
+            <div className="flex flex-col gap-0.5">
+              <label htmlFor={`${filterId}-bulk`} className="text-xs font-semibold text-muted-foreground">Assign to</label>
+              <select
+                id={`${filterId}-bulk`}
+                className={cellSelectCls + " max-w-[180px]"}
+                value={bulkAccountId}
+                onChange={(e) => setBulkAccountId(e.target.value)}
+                aria-label="Bulk assign selected tickets to a developer"
+              >
+                <option value="">Choose developer…</option>
+                {resolvedTeam.map((m) => (
+                  <option key={m.accountId} value={m.accountId}>{m.displayName}</option>
+                ))}
+              </select>
+            </div>
+            <Button type="button" size="sm" className="h-8" disabled={bulkAccountId === ""} onClick={() => void handleBulkAssign()}>
+              Apply
+            </Button>
+            <Button type="button" size="sm" variant="ghost" className="h-8" onClick={() => setSelected(new Set())}>
+              Clear
+            </Button>
+          </div>
+        )}
+
         {visibleIssues.length === 0 ? (
           <p className="text-sm text-muted-foreground">No tickets match this filter.</p>
         ) : (
@@ -660,6 +791,15 @@ export function AssignmentList({
           >
             <thead>
               <tr className="text-xs font-medium uppercase tracking-wide text-muted-foreground border-b border-border">
+                <th className="text-left pb-2 pr-2">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all tickets"
+                    checked={visibleIssues.length > 0 && visibleIssues.every((i) => selected.has(i.key))}
+                    onChange={(e) => setSelected(e.target.checked ? new Set(visibleIssues.map((i) => i.key)) : new Set())}
+                    className="h-4 w-4 cursor-pointer accent-[hsl(var(--primary))] align-middle"
+                  />
+                </th>
                 <th className="text-left pb-2 pr-3">Key</th>
                 <th className="text-left pb-2 pr-3">Summary</th>
                 <th className="text-right pb-2 pr-4">Pts</th>
@@ -682,6 +822,8 @@ export function AssignmentList({
                   }
                   sprints={sprints}
                   onChanged={sprintState.run}
+                  selected={selected.has(issue.key)}
+                  onToggleSelect={() => toggleSelect(issue.key)}
                 />
               ))}
             </tbody>
