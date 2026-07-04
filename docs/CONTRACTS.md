@@ -1,6 +1,6 @@
 # Integration Contracts
 
-**Status: FINAL — AUTHORITATIVE (v1.37)**  
+**Status: FINAL — AUTHORITATIVE (v1.39)**  
 Builder agents implement exactly what this document says. If something here is
 ambiguous, file a note to the Architect agent; do NOT invent new surface area or
 prefer the spec over this document — this document supersedes the spec on all
@@ -2223,3 +2223,50 @@ All frontend; **no new tool, jira tools stay 36, IO shapes unchanged** (C reuses
 139. **Planning — per-developer capacity (ADR-047 Phase D).** `LeavesPlotterCard` adds a per-dev table:
     `capacity = max(0, requiredPoints − workingLeaveDays)` (pure `lib/capacity.ts` `computeDevCapacity`),
     N from `health.policy.requiredPoints` (default 8) — e.g. 1 VL + 1 Offset → 6 = 8 − 2.
+
+## Changelog v1.38 (2026-07-01 — formatted sprint-review export: Excel + PDF + per-member table; ADR-048, react-app)
+
+Frontend only; **no new tool, jira tools stay 36, IO shapes unchanged** (reuses `get_sprint_report` +
+`get_leaves` + `get_offset_ledger`). Adds one runtime dep, `xlsx-js-style`.
+
+140. **Full sprint review → styled Excel / printable PDF, with a per-member table (ADR-048).** The export
+    dialog (formerly CSV only) now offers **Excel (.xlsx)** (styled workbook via `xlsx-js-style` — title
+    band, section headers, bordered member table, bold TOTAL), **Print / PDF** (self-contained print-ready
+    HTML), and **CSV** (unchanged). A shared model powers all three: `buildSprintReviewMeta` (the
+    Field/Value pairs) + `buildMemberReviewTable(report, leaves, ledger, requiredPoints, roster)` = one row
+    per **roster developer ∪ anyone with points/leaves/offset**, with **committed = capacity =
+    max(0, N − leave days)** (N = `health.policy.requiredPoints`; NOT the member's assigned tickets),
+    **completed = done points**, leave days per type (VL/EL/Holiday/Offset over working days), and offset
+    balance. **The summary "Commitment points" is prefilled from the TOTAL team capacity** (Σ committed over
+    the roster), not Jira's committed. Reports (`SprintReportView`) reads `useLeaves(sprintId)` +
+    `useOffsetLedger()` + `usePolicy()` + `useTeamMembers(sprint.boardId)` and threads them to the export.
+141. **Sprint-goal newline normalization (ADR-048).** A multi-line Jira sprint goal is collapsed to one
+    line joined with " · " (`normalizeGoal`) for both the on-screen Reports goal and the export — fixes
+    the goal rendering run-on (newlines→spaces) on-screen and the first-line-only truncation in exports.
+    All client-side download/print — no Jira writes.
+
+## Changelog v1.39 (2026-07-03 — typed leaves on Planning + export cleanup + header shell; ADR-049, react-app)
+
+All frontend/presentation; **no new tool, jira tools stay 36, IO shapes unchanged**.
+
+142. **Planning leave calendar gains the typed leave painter.** The Offset Tracker's leave-type picker is
+    extracted into a shared `LeaveTypePicker` (Vacation/Emergency/Holiday/Offset, ADR-038 visuals) and
+    added to `LeavesPlotterCard` — pick a type, then click days; the type flows through the calendar's
+    existing `paintType` into `set_leaves` typed entries. Same control on both pages.
+143. **Export surfaces simplified.** Reports export toolbar is now **Copy · Full report · Print/PDF**
+    (the ".md" and plain ".csv" downloads are removed; `buildReportMarkdown` still powers Copy). The Full
+    report dialog footer is now **Cancel · Download as PDF · Download as CSV (Styled Format)** — the
+    plain Field/Value CSV button is removed; the styled download remains the `.xlsx` workbook (the pure
+    `buildReportCsv`/`buildSprintReviewCsv` builders stay in §6 as library functions).
+144. **Shell: navigation back in the top header, full-width compact layout (ADR-049).** The v1.24 left
+    sidebar is replaced by a single sticky header (brand · horizontal nav tabs · board/project controls ·
+    version pill). `<main>` loses its `max-w-[1400px]` cap — every page now spans the full viewport with
+    compact paddings (header h-12, main px-3/5 py-4). role=tab semantics and landmarks preserved.
+145. **Full-screen polish after a live UI review (ADR-049 refinement, 2026-07-04).** Verified against the
+    running app with real sprint data: `<main>` gains a soft `max-w-[1800px]` centered cap (ultrawide
+    hygiene only); the leaves calendar/planner tables stop stretching (`w-full`→`w-auto`) and show FULL
+    member names (truncation caps 80–90px→200px, assignee column min 170px, planner gutter `px-12`→`px-4`);
+    the per-dev capacity table caps at `max-w-xl` and the Reports sprint select at `max-w-md`. Second pass
+    (user: "too much blank white space"): the **leaves/capacity plotter, leave-planner, and offset-points
+    CARDS are `w-fit max-w-full`** — each card shrink-wraps its content so the page background, not empty
+    white card, fills the remaining width. Presentation-only; no behavior change.

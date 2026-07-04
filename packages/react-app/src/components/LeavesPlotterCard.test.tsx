@@ -184,8 +184,9 @@ describe("LeavesPlotterCard — toggle persists via setLeaves", () => {
       />
     );
 
-    // Click the first un-pressed toggle button
-    const unpressed = screen.getAllByRole("button").find(
+    // Click the first un-pressed DAY cell (v1.39: the type-picker buttons also carry
+    // aria-pressed, so target cells by their "<name> working on <date>" accessible name).
+    const unpressed = screen.getAllByRole("button", { name: /working on/i }).find(
       (btn) => btn.getAttribute("aria-pressed") === "false"
     );
     expect(unpressed).toBeTruthy();
@@ -201,6 +202,31 @@ describe("LeavesPlotterCard — toggle persists via setLeaves", () => {
     // name should be one of the roster names
     expect(["Alice", "Bob"]).toContain(name);
     expect(dates.length).toBeGreaterThan(0);
+  });
+
+  it("v1.39: paints the type selected in the picker (same control as the Offset Tracker)", async () => {
+    const { mockSave } = mockDefaults();
+    render(
+      <LeavesPlotterCard
+        boardId={10}
+        sprintId={100}
+        sprint={SPRINT_WITH_DATES}
+        projectKey="DEV"
+      />
+    );
+
+    // The picker is present with all four types; Vacation (VL) is the default.
+    expect((screen.getByRole("button", { name: "Vacation" })).getAttribute("aria-pressed")).toBe("true");
+
+    // Switch the paint type to Emergency, then click a day cell.
+    fireEvent.click(screen.getByRole("button", { name: "Emergency" }));
+    const cell = screen.getAllByRole("button", { name: /working on/i })[0]!;
+    fireEvent.click(cell);
+
+    await waitFor(() => expect(mockSave).toHaveBeenCalledOnce());
+    const [, entries] = mockSave.mock.calls[0];
+    // Typed entries — the painted day carries the picked type, not the VL default.
+    expect(entries[0]).toMatchObject({ type: "EL" });
   });
 });
 

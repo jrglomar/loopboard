@@ -26,7 +26,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
   FileText,
-  Download,
   Copy,
   Printer,
   TrendingUp,
@@ -43,10 +42,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
-import { useSprintList, useSprintReport, useVelocity, useIssuePullRequests } from "../hooks/useJira";
+import { useSprintList, useSprintReport, useVelocity, useIssuePullRequests, useLeaves, useOffsetLedger, useTeamMembers } from "../hooks/useJira";
 import { getAiStatus, aiSprintSummary } from "../lib/aiClient";
-import { useBoards } from "../lib/boards";
-import { buildReportMarkdown, buildReportCsv } from "../lib/reportMarkdown";
+import { useBoards, usePolicy } from "../lib/boards";
+import { buildReportMarkdown, normalizeGoal } from "../lib/reportMarkdown";
 import { formatPoints } from "../lib/format";
 import { computeCapacity, possibleCommittedVelocity, sprintWorkingDays } from "../lib/capacity";
 import { LeavesCalendarCard } from "../components/LeavesCalendarCard";
@@ -69,10 +68,6 @@ import type { McpError } from "../lib/mcpClient";
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   return iso.slice(0, 10);
-}
-
-function slugify(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
 // ── State badge ───────────────────────────────────────────────────────────────
@@ -122,7 +117,7 @@ function SprintPicker({ closed, active, selectedId, onChange }: SprintPickerProp
         id="sprint-picker"
         value={selectedId ?? ""}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring transition-card min-w-[200px]"
+        className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring transition-card min-w-[200px] max-w-md"
         aria-label="Select sprint to view report"
       >
         {active.length > 0 && (
@@ -917,9 +912,16 @@ interface ExportBarProps {
   aiSummary: string | null;
   /** v1.5 (ADR-016): leaves & capacity data for the Markdown export */
   leavesCapacity?: import("../lib/reportMarkdown").LeavesCapacityData | null;
+  /** v1.38 (ADR-048): typed leaves + offset ledger for the full report's per-member table */
+  leaves?: import("../lib/leavesClient").LeavesMap | null;
+  ledger?: import("../lib/offsetClient").OffsetLedger | null;
+  /** v1.38 (ADR-048): required points (N) — per-member committed = max(0, N − leave days) */
+  requiredPoints: number;
+  /** v1.38 (ADR-048): dev roster names — summary commitment = Σ capacity over the whole team */
+  roster?: string[];
 }
 
-function ExportBar({ report, velocity, aiSummary, leavesCapacity }: ExportBarProps) {
+function ExportBar({ report, velocity, aiSummary, leavesCapacity, leaves, ledger, requiredPoints, roster }: ExportBarProps) {
   const [copied, setCopied] = useState(false);
 
   function getMarkdown(): string {
@@ -944,26 +946,6 @@ function ExportBar({ report, velocity, aiSummary, leavesCapacity }: ExportBarPro
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }
-
-  function downloadBlob(content: string, mime: string, ext: string) {
-    const blob = new Blob([content], { type: mime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `sprint-report-${slugify(report.sprint.name)}.${ext}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }
-
-  function handleDownload() {
-    downloadBlob(getMarkdown(), "text/markdown;charset=utf-8", "md");
-  }
-
-  function handleDownloadCsv() {
-    downloadBlob(buildReportCsv(report, leavesCapacity), "text/csv;charset=utf-8", "csv");
   }
 
   function handlePrint() {
@@ -992,30 +974,9 @@ function ExportBar({ report, velocity, aiSummary, leavesCapacity }: ExportBarPro
         {copied ? "Copied!" : "Copy"}
       </Button>
 
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={handleDownload}
-        type="button"
-        aria-label="Download report as Markdown file"
-      >
-        <Download className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-        Download .md
-      </Button>
-
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={handleDownloadCsv}
-        type="button"
-        aria-label="Download report as CSV file"
-      >
-        <Download className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
-        Download .csv
-      </Button>
-
-      {/* v1.35 (ADR-045): full sprint-review CSV (form + pulled data) */}
-      <SprintReviewExport report={report} />
+      {/* v1.39: .md/.csv downloads removed — the toolbar is Copy · Full report · Print/PDF */}
+      {/* v1.35 (ADR-045) + v1.38 (ADR-048): full sprint review — styled download + PDF with per-member table */}
+      <SprintReviewExport report={report} leaves={leaves ?? null} ledger={ledger ?? null} requiredPoints={requiredPoints} roster={roster ?? []} />
 
       <Button
         variant="outline"
@@ -1119,6 +1080,14 @@ function SprintReportView({
   // The hook only refetches when the SET of keys changes (order-independent).
   const reportKeys = [...report.completed, ...report.notCompleted].map((i) => i.key);
   const { data: prsByKey } = useIssuePullRequests(reportKeys);
+
+  // v1.38 (ADR-048): typed leaves + offset ledger + required points + dev roster feed the
+  // per-member table; the summary commitment = Σ capacity (N − leaves) over the whole roster.
+  const { data: sprintLeaves } = useLeaves(selectedSprintId);
+  const { data: offsetLedger } = useOffsetLedger();
+  const { requiredPoints } = usePolicy();
+  const { data: team } = useTeamMembers(report.sprint.boardId ?? null);
+  const roster = React.useMemo(() => (team ?? []).map((m) => m.displayName), [team]);
   return (
     // a11y: main report region, labeled for screen readers
     <article aria-label={`Sprint report: ${report.sprint.name}`} className="space-y-4">
@@ -1136,7 +1105,7 @@ function SprintReportView({
             </p>
             {report.sprint.goal && (
               <p className="text-sm text-foreground mt-1 italic">
-                Goal: {report.sprint.goal}
+                Goal: {normalizeGoal(report.sprint.goal)}
               </p>
             )}
           </div>
@@ -1146,6 +1115,10 @@ function SprintReportView({
               report={report}
               velocity={velocity}
               aiSummary={aiSummary}
+              leaves={sprintLeaves}
+              ledger={offsetLedger}
+              requiredPoints={requiredPoints}
+              roster={roster}
               leavesCapacity={
                 Object.keys(byAssigneeLeaveDays).length > 0 || workingDays.length > 0
                   ? {

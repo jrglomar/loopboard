@@ -46,6 +46,8 @@ vi.mock("../lib/aiClient", async (importOriginal) => {
 vi.mock("../lib/boards", () => ({
   useBoards: vi.fn().mockReturnValue({ boards: null, loading: false }),
   getBoards: vi.fn().mockResolvedValue(null),
+  // v1.38 (ADR-048): Reports reads usePolicy() for the per-member committed = N − leaves calc.
+  usePolicy: vi.fn().mockReturnValue({ requiredPoints: 8, offsetThreshold: 2 }),
 }));
 
 // ── Import mocked modules (after vi.mock so they are the mock versions) ───────

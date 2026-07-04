@@ -15,11 +15,12 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { LeavesCalendarCard } from "./LeavesCalendarCard";
+import { LeaveTypePicker } from "./LeaveTypePicker";
 import { useTeamMembers, useVelocity, useLeaves } from "../hooks/useJira";
 import { computeCapacity, computeDevCapacity, sprintWorkingDays, possibleCommittedVelocity } from "../lib/capacity";
 import { usePolicy } from "../lib/boards";
 import { formatPoints } from "../lib/format";
-import type { SprintRef } from "../lib/types";
+import type { SprintRef, LeaveType } from "../lib/types";
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -116,6 +117,9 @@ export function LeavesPlotterCard({
   // Pass null when boardId is undefined (skip fetch until context is ready)
   const { data: team, loading: usersLoading, error: usersError, run: usersRun } =
     useTeamMembers(boardId ?? null);
+
+  // v1.39: the leave type painted onto calendar cells (same picker as the Offset Tracker).
+  const [paintType, setPaintType] = React.useState<LeaveType>("VL");
 
   // perf: re-fetch the team roster when TeamManager persists a change
   React.useEffect(() => {
@@ -275,14 +279,23 @@ export function LeavesPlotterCard({
   // ── Full render ─────────────────────────────────────────────────────────────
 
   return (
-    <Card className="shadow-sm">
+    // w-fit: hug the calendar/capacity content — no trailing white card space (v1.39)
+    <Card className="shadow-sm w-full max-w-full">
       {cardHeader}
       <CardContent className="space-y-4">
+        {/* v1.39: same typed leave painter as the Offset Tracker — pick a type, then click days */}
+        <LeaveTypePicker
+          value={paintType}
+          onChange={setPaintType}
+          hint="Click a day to paint the selected type."
+        />
+
         {/* Editable leaves grid — delegates to LeavesCalendarCard with explicit roster */}
         <LeavesCalendarCard
           sprintId={sprintId ?? null}
           sprint={sprint}
           assignees={rosterNames}
+          paintType={paintType}
         />
 
         {/* Capacity summary panel */}
@@ -305,6 +318,7 @@ export function LeavesPlotterCard({
                 — required {policy.requiredPoints} pts − working leave days
               </span>
             </p>
+            {/* max-w: 3 narrow columns — don't stretch them across a full-width card */}
             <table className="w-full text-sm" aria-label="Per-developer capacity">
               <thead>
                 <tr className="text-xs text-muted-foreground border-b border-border">

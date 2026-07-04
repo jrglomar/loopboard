@@ -289,25 +289,38 @@ export interface SprintReviewForm {
 }
 
 /**
- * Build a Field/Value CSV combining PULLED report data (duration, goals, completed/incomplete points,
- * fly-ins) with the user's typed retro answers. Two columns (Field, Value); one row per field.
- * Pure + deterministic. `flyIns` is a pre-formatted list (e.g. "KEY: summary") pulled by the caller.
+ * Collapse a multi-line sprint goal into one readable line. Jira stores the goal as a single
+ * string but users often put several goals on separate lines; naive rendering either runs them
+ * together (newlines → spaces) or shows only the first line (spreadsheet cell). Join with " · ".
  */
-export function buildSprintReviewCsv(
-  report: SprintReport,
-  form: SprintReviewForm,
-  flyIns: string[]
-): string {
+export function normalizeGoal(goal: string | null | undefined): string {
+  const g = (goal ?? "").replace(/\s*[\r\n]+\s*/g, " · ").trim();
+  return g.length > 0 ? g : "—";
+}
+
+/** Human-readable sprint duration string, e.g. "2026-06-18 – 2026-07-01 (10 working days)". */
+export function sprintDurationLabel(report: SprintReport): string {
   const start = formatDate(report.sprint.startDate);
   const end = formatDate(report.sprint.endDate);
   const workingDays = sprintWorkingDays(report.sprint.startDate, report.sprint.endDate).length;
-  const duration = `${start} – ${end} (${workingDays} working day${workingDays !== 1 ? "s" : ""})`;
-  const incomplete = report.committedPoints - report.completedPoints;
+  return `${start} – ${end} (${workingDays} working day${workingDays !== 1 ? "s" : ""})`;
+}
 
-  const pairs: Array<[string, string]> = [
+/**
+ * The Field/Value pairs of a full sprint review — PULLED report data (duration, goals, points,
+ * fly-ins) merged with the user's typed retro answers. Shared by the CSV, Excel, and print
+ * renderers so all three stay in lock-step. Pure + deterministic.
+ */
+export function buildSprintReviewMeta(
+  report: SprintReport,
+  form: SprintReviewForm,
+  flyIns: string[]
+): Array<[string, string]> {
+  const incomplete = report.committedPoints - report.completedPoints;
+  return [
     ["Sprint", report.sprint.name],
-    ["Sprint duration", duration],
-    ["Sprint goals", report.sprint.goal ?? "—"],
+    ["Sprint duration", sprintDurationLabel(report)],
+    ["Sprint goals", normalizeGoal(report.sprint.goal)],
     ["Team name", form.teamName],
     ["Scrum master", form.scrumMaster],
     ["Commitment points", form.commitmentPoints],
@@ -320,6 +333,18 @@ export function buildSprintReviewCsv(
     ["Planned improvements for next sprint", form.plannedImprovements],
     ["Kudos", form.kudos],
   ];
+}
 
+/**
+ * Build a Field/Value CSV combining PULLED report data (duration, goals, completed/incomplete points,
+ * fly-ins) with the user's typed retro answers. Two columns (Field, Value); one row per field.
+ * Pure + deterministic. `flyIns` is a pre-formatted list (e.g. "KEY: summary") pulled by the caller.
+ */
+export function buildSprintReviewCsv(
+  report: SprintReport,
+  form: SprintReviewForm,
+  flyIns: string[]
+): string {
+  const pairs = buildSprintReviewMeta(report, form, flyIns);
   return [csvRow(["Field", "Value"]), ...pairs.map((p) => csvRow(p))].join("\r\n");
 }

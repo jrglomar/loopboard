@@ -27,8 +27,10 @@ const TABS: { id: Tab; label: string; icon: typeof LayoutDashboard }[] = [
 
 // ── App Shell ─────────────────────────────────────────────────────────────────
 
-// a11y: semantic landmarks — <aside> sidebar (nav), <header> top bar, <main>.
-// v1.24: header moved to a LEFT SIDEBAR; board selection moved to the TOP-RIGHT.
+// a11y: semantic landmarks — <header> top bar (brand + nav + board controls), <main>.
+// v1.39 (ADR-049): navigation moved BACK to a single top header (was a left sidebar,
+// v1.24/ADR-036); the main column is now FULL-WIDTH with compact paddings so every
+// page gets the whole viewport.
 export function App() {
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
 
@@ -55,99 +57,97 @@ export function App() {
   };
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="min-h-screen bg-background flex flex-col">
 
-      {/* ── Left sidebar: brand + vertical nav ── */}
-      <aside className="w-56 flex-shrink-0 flex flex-col bg-card border-r border-border">
-        {/* Brand */}
-        <div className="h-14 flex items-center gap-2 px-4 border-b border-border">
-          <span className="h-7 w-7 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-            <LayoutDashboard className="h-4 w-4 text-primary" aria-hidden="true" />
-          </span>
-          <span className="text-[1.0625rem] font-bold tracking-tight text-foreground select-none">
-            Loop<span className="text-primary">board</span>
-          </span>
-          <span
-            className="ml-auto text-[0.625rem] font-semibold px-1.5 py-0.5 bg-primary/10 text-primary rounded-full whitespace-nowrap"
-            aria-label="Product version"
-          >
-            v{__APP_VERSION__}
-          </span>
-        </div>
-
-        {/* Navigation */}
-        {/* a11y: <nav> landmark with aria-label (asserted by App.test) */}
-        <nav aria-label="Main navigation" className="flex-1 p-3">
-          <div className="flex flex-col gap-1" role="tablist" aria-label="Page tabs">
-            {TABS.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                aria-pressed={activeTab === id}
-                aria-current={activeTab === id ? "page" : undefined}
-                aria-selected={activeTab === id}
-                onClick={() => setActiveTab(id)}
-                className={cn(
-                  "flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors text-left",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-                  activeTab === id
-                    ? "bg-primary/10 text-primary"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                )}
-              >
-                <Icon className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
-                {label}
-              </button>
-            ))}
+      {/* ── Top header: brand · nav · board controls · version ── */}
+      <header
+        role="banner"
+        className="sticky top-0 z-40 bg-card border-b border-border"
+      >
+        <div className="h-12 flex items-center gap-2 sm:gap-4 px-3 sm:px-5">
+          {/* Brand */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className="h-7 w-7 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+              <LayoutDashboard className="h-4 w-4 text-primary" aria-hidden="true" />
+            </span>
+            <span className="text-[1.0625rem] font-bold tracking-tight text-foreground select-none whitespace-nowrap">
+              Loop<span className="text-primary">board</span>
+            </span>
           </div>
-        </nav>
-      </aside>
 
-      {/* ── Right column: top bar + main ── */}
-      <div className="flex-1 flex flex-col min-w-0">
-
-        {/* Top bar — board selection on the right */}
-        <header
-          role="banner"
-          className="h-14 flex-shrink-0 flex items-center justify-end gap-3 px-4 sm:px-6 bg-card border-b border-border sticky top-0 z-40"
-        >
-          {/* Board selection (shared context) — hidden on Linking (dual-board) */}
-          {activeTab !== "linking" && (
-            <div className="flex items-center gap-2">
-              <span className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide">
-                Board
-              </span>
-              <BoardToggle selectedKey={boardKey} onChange={shared.onBoardChange} />
-              {/* v1.25 (ADR-037): project picker for the active side (only when >1 project) */}
-              {activeProjects.length > 1 && (
-                <select
-                  aria-label="Project"
-                  value={projectIdx}
-                  onChange={(e) => setActiveProjectIdx(Number(e.target.value))}
-                  className="h-8 rounded-md border border-border bg-card px-2 text-xs font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          {/* Navigation — horizontal tabs in the header (v1.39) */}
+          {/* a11y: <nav> landmark with aria-label; role=tab semantics preserved */}
+          {/* perf: overflow-x-auto keeps all 5 tabs reachable on narrow viewports */}
+          <nav aria-label="Main navigation" className="flex-1 min-w-0 overflow-x-auto">
+            <div className="flex items-center gap-0.5" role="tablist" aria-label="Page tabs">
+              {TABS.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-pressed={activeTab === id}
+                  aria-current={activeTab === id ? "page" : undefined}
+                  aria-selected={activeTab === id}
+                  onClick={() => setActiveTab(id)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[0.8125rem] font-medium transition-colors whitespace-nowrap",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+                    activeTab === id
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                  )}
                 >
-                  {activeProjects.map((p, i) => (
-                    <option key={p.projectKey} value={i}>{p.projectKey}</option>
-                  ))}
-                </select>
-              )}
+                  <Icon className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                  {/* a11y: label always visible — the tablist scrolls horizontally on narrow screens */}
+                  {label}
+                </button>
+              ))}
             </div>
-          )}
-        </header>
+          </nav>
 
-        {/* a11y: main landmark wraps page content */}
-        <main
-          className="flex-1 max-w-[1400px] w-full mx-auto px-4 sm:px-6 py-5"
-          id="main-content"
-        >
-          {activeTab === "dashboard" && <Dashboard {...shared} />}
-          {activeTab === "planning" && <Planning {...shared} />}
-          {activeTab === "leaves" && <Leaves {...shared} />}
-          {activeTab === "linking" && <Linking />}
-          {activeTab === "reports" && <Reports {...shared} />}
-        </main>
-      </div>
+          {/* Right side: board selection (hidden on Linking — dual-board) + version */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {activeTab !== "linking" && (
+              <>
+                <span className="hidden md:inline text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide">
+                  Board
+                </span>
+                <BoardToggle selectedKey={boardKey} onChange={shared.onBoardChange} />
+                {/* v1.25 (ADR-037): project picker for the active side (only when >1 project) */}
+                {activeProjects.length > 1 && (
+                  <select
+                    aria-label="Project"
+                    value={projectIdx}
+                    onChange={(e) => setActiveProjectIdx(Number(e.target.value))}
+                    className="h-8 rounded-md border border-border bg-card px-2 text-xs font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    {activeProjects.map((p, i) => (
+                      <option key={p.projectKey} value={i}>{p.projectKey}</option>
+                    ))}
+                  </select>
+                )}
+              </>
+            )}
+            <span
+              className="text-[0.625rem] font-semibold px-1.5 py-0.5 bg-primary/10 text-primary rounded-full whitespace-nowrap"
+              aria-label="Product version"
+            >
+              v{__APP_VERSION__}
+            </span>
+          </div>
+        </div>
+      </header>
+
+      {/* a11y: main landmark wraps page content */}
+      {/* v1.39: full-width with a SOFT cap — pages span the viewport on normal monitors;
+          the 1800px ceiling only engages on ultrawides so content never gets gangly. */}
+      <main className="flex-1 w-full max-w-[1800px] mx-auto px-3 sm:px-5 py-4" id="main-content">
+        {activeTab === "dashboard" && <Dashboard {...shared} />}
+        {activeTab === "planning" && <Planning {...shared} />}
+        {activeTab === "leaves" && <Leaves {...shared} />}
+        {activeTab === "linking" && <Linking />}
+        {activeTab === "reports" && <Reports {...shared} />}
+      </main>
 
       {/* v1.19 (ADR-030): global floating AI assistant (FAB lower-right) */}
       <AssistantWidget />

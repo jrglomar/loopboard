@@ -124,14 +124,15 @@ export function LeavesPlannerCard({
   }
 
   return (
+    // w-fit: hug the day grid — the page background, not white card, fills the rest (v1.39)
     <Card className="shadow-sm">
       {header}
-      <CardContent className="px-12 pb-3 pt-0 overflow-x-auto">
+      <CardContent className="px-4 pb-3 pt-0 overflow-x-auto">
         <table className="text-xs border-collapse w-full " aria-label="Forward leave planner — click a cell to plot the selected type">
           <thead>
             {/* Sprint group header row */}
             <tr>
-              <th className="sticky left-0 bg-card z-10 text-left pb-2 pr-3 border-r border-border min-w-[120px]" aria-hidden="true" />
+              <th className="sticky left-0 bg-card z-10 text-left pb-2 pr-4 border-r border-border min-w-[170px]" aria-hidden="true" />
               {nonEmptySegments.map((seg, si) => (
                 <th
                   key={seg.sprintId}
@@ -175,7 +176,7 @@ export function LeavesPlannerCard({
                     <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 text-primary font-semibold text-[0.625rem] flex-shrink-0" aria-hidden="true">
                       {initials(name)}
                     </span>
-                    <span className="truncate max-w-[90px]" title={name}>{name}</span>
+                    <span className="truncate max-w-[200px] whitespace-nowrap" title={name}>{name}</span>
                   </div>
                 </th>
                 {calendar.days.map((d, i) => {

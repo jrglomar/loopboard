@@ -1,9 +1,11 @@
-// SprintReviewExport tests — v1.35, ADR-045. Keyless/offline.
+// SprintReviewExport tests — v1.35 (ADR-045) + v1.38 (ADR-048). Keyless/offline.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { SprintReviewExport } from "./SprintReviewExport";
 import type { SprintReport } from "../lib/types";
+import type { LeavesMap } from "../lib/leavesClient";
+import type { OffsetLedger } from "../lib/offsetClient";
 
 const REPORT: SprintReport = {
   sprint: {
@@ -16,8 +18,16 @@ const REPORT: SprintReport = {
     { key: "DEV-7", summary: "Fly in: onsite QA", status: "Done", statusCategory: "done", assignee: "Al", assigneeAccountId: null, storyPoints: 3, issueType: "Story", url: "u", blocked: false },
   ],
   notCompleted: [],
-  byAssignee: [],
+  byAssignee: [{ name: "Al", donePoints: 32, totalPoints: 40, doneCount: 2, totalCount: 3 }],
 };
+
+// Al: 1 VL on a sprint working day (2026-06-01 is a Monday).
+const LEAVES: LeavesMap = { Al: { "2026-06-01": "VL" } };
+const LEDGER: OffsetLedger = { Al: { earned: 1, spent: 0, manualAdjust: 0, balance: 1 } };
+
+function renderExport() {
+  return render(<SprintReviewExport report={REPORT} leaves={LEAVES} ledger={LEDGER} requiredPoints={8} roster={["Al"]} />);
+}
 
 let capturedBlob: Blob | null = null;
 
@@ -29,34 +39,57 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-describe("SprintReviewExport (v1.35)", () => {
-  it("opens the form with commitment prefilled from the report", () => {
-    render(<SprintReviewExport report={REPORT} />);
-    fireEvent.click(screen.getByRole("button", { name: /Full report \(CSV\)/i }));
+function openForm() {
+  fireEvent.click(screen.getByRole("button", { name: /Full report/i }));
+}
+
+describe("SprintReviewExport", () => {
+  it("prefills commitment from team capacity (N − leaves), not Jira committed", () => {
+    renderExport();
+    openForm();
     expect(screen.getByText(/Full sprint report — Sprint 5/)).toBeTruthy();
-    expect((screen.getByLabelText(/Commitment points/i) as HTMLInputElement).value).toBe("40");
+    // Al has 1 leave day (VL on 2026-06-01) → capacity = 8 − 1 = 7 (NOT the 40 committed points).
+    expect((screen.getByLabelText(/Commitment points/i) as HTMLInputElement).value).toBe("7");
   });
 
-  it("exports a Field/Value CSV that combines typed answers, pulled data, and fly-ins", async () => {
-    render(<SprintReviewExport report={REPORT} />);
-    fireEvent.click(screen.getByRole("button", { name: /Full report \(CSV\)/i }));
+  it("v1.39: the footer offers exactly Cancel · Download as PDF · Download as CSV (Styled Format)", () => {
+    renderExport();
+    openForm();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Download as PDF/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Download as CSV \(Styled Format\)/i })).toBeTruthy();
+    // the plain Field/Value CSV button is gone
+    expect(screen.queryByRole("button", { name: /^CSV$/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Excel/i })).toBeNull();
+  });
 
-    fireEvent.change(screen.getByLabelText(/Team name/i), { target: { value: "QA Team" } });
-    fireEvent.change(screen.getByLabelText(/Kudos/i), { target: { value: "Great sprint" } });
-    fireEvent.click(screen.getByRole("button", { name: /Export CSV/i }));
+  it("v1.38: 'Download as CSV (Styled Format)' downloads the styled workbook", () => {
+    renderExport();
+    openForm();
+    fireEvent.click(screen.getByRole("button", { name: /Download as CSV \(Styled Format\)/i }));
 
     expect(capturedBlob).toBeTruthy();
-    // jsdom's Blob has no .text() — read it via FileReader.
-    const text = await new Promise<string>((resolve) => {
-      const fr = new FileReader();
-      fr.onload = () => resolve(String(fr.result));
-      fr.readAsText(capturedBlob!);
-    });
-    expect(text.split("\r\n")[0]).toBe("Field,Value");
-    expect(text).toContain("Team name,QA Team");
-    expect(text).toContain("Sprint goals,Ship it");
-    expect(text).toContain("Completed points,32");
-    expect(text).toContain("Kudos,Great sprint");
-    expect(text).toContain("Fly-ins,DEV-7: Fly in: onsite QA"); // pulled via matchFlyIn
+    expect(capturedBlob!.type).toContain("spreadsheetml"); // styled workbook mimetype
+    expect(capturedBlob!.size).toBeGreaterThan(0);
+  });
+
+  it("v1.38: 'Download as PDF' opens a print-ready HTML report with the per-member table", () => {
+    const written: string[] = [];
+    const fakeWin = {
+      document: { open: vi.fn(), write: vi.fn((h: string) => written.push(h)), close: vi.fn() },
+      focus: vi.fn(),
+      print: vi.fn(),
+    };
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(fakeWin as unknown as Window);
+
+    renderExport();
+    openForm();
+    fireEvent.click(screen.getByRole("button", { name: /Download as PDF/i }));
+
+    expect(openSpy).toHaveBeenCalled();
+    const html = written.join("");
+    expect(html).toContain("Sprint Review");
+    expect(html).toContain("Per-member");
+    expect(html).toContain("Al"); // the member row rendered
   });
 });

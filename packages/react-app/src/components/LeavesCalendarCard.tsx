@@ -300,7 +300,7 @@ export function LeavesCalendarCard({
                 {/* Corner cell */}
                 <th
                   scope="col"
-                  className="text-left pb-2 pr-3 font-medium text-muted-foreground uppercase tracking-wide min-w-[80px]"
+                  className="text-left pb-2 pr-4 font-medium text-muted-foreground uppercase tracking-wide min-w-[170px]"
                 >
                   Assignee
                 </th>
@@ -348,7 +348,7 @@ export function LeavesCalendarCard({
                         >
                           {initials(name)}
                         </span>
-                        <span className="truncate max-w-[80px]" title={name}>
+                        <span className="truncate max-w-[200px] whitespace-nowrap" title={name}>
                           {name}
                         </span>
                       </div>

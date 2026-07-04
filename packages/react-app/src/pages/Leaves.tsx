@@ -18,21 +18,12 @@ import {
   useAllLeaves,
   useOffsetLedger,
 } from "../hooks/useJira";
+import { LeaveTypePicker } from "../components/LeaveTypePicker";
 import { sprintWorkingDays } from "../lib/capacity";
-import { leaveDaysByType, totalLeaveDays, computeOffsetEarned, LEAVE_TYPES } from "../lib/offset";
+import { leaveDaysByType, totalLeaveDays, computeOffsetEarned } from "../lib/offset";
 import { computeOffsetWallet, buildOffsetHistory } from "../lib/offsetWallet";
 import type { BoardKey, SharedSprintProps, LeaveType, SprintRef } from "../lib/types";
 import { cn } from "@/lib/utils";
-
-const PAINT_STYLE: Record<LeaveType, string> = {
-  VL: "bg-[hsl(var(--info-bg))] text-[hsl(var(--info))]",
-  EL: "bg-[hsl(var(--error-bg))] text-[hsl(var(--error))]",
-  Holiday: "bg-[hsl(var(--success-bg))] text-[hsl(var(--success))]",
-  Offset: "bg-[hsl(var(--accent)/0.12)] text-[hsl(var(--accent))]",
-};
-const PAINT_LABEL: Record<LeaveType, string> = {
-  VL: "Vacation", EL: "Emergency", Holiday: "Holiday", Offset: "Offset",
-};
 
 export function Leaves({
   boardKey: boardKeyProp,
@@ -188,26 +179,12 @@ export function Leaves({
       {/* v1.33 (ADR-044): main offset wallet — per-developer balance, auto add (earned) / deduct (Offset leaves) */}
       <OffsetWalletCard wallet={wallet} roster={roster} onHistory={setHistoryFor} />
 
-      {/* Leave-type painter */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-sm text-muted-foreground">Plot type:</span>
-        {LEAVE_TYPES.map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setPaintType(t)}
-            aria-pressed={paintType === t}
-            className={cn(
-              "text-xs font-medium px-3 py-1.5 rounded-md transition-shadow",
-              PAINT_STYLE[t],
-              paintType === t ? "ring-2 ring-offset-1 ring-current" : "opacity-80 hover:opacity-100"
-            )}
-          >
-            {PAINT_LABEL[t]}
-          </button>
-        ))}
-        <span className="text-xs text-muted-foreground ml-auto">Click a day to paint the selected type. The sprint picker scopes the offset table below.</span>
-      </div>
+      {/* Leave-type painter — v1.39: shared LeaveTypePicker (also used by Planning's calendar) */}
+      <LeaveTypePicker
+        value={paintType}
+        onChange={setPaintType}
+        hint="Click a day to paint the selected type. The sprint picker scopes the offset table below."
+      />
 
       {/* v1.29 (ADR-041): forward, multi-sprint leave planner — each day saves to its own sprint */}
       <LeavesPlannerCard
@@ -219,7 +196,7 @@ export function Leaves({
         loading={allLeaves.loading}
       />
 
-      {/* Offset table */}
+      {/* Offset table — w-fit: the card hugs the table instead of leaving white space (v1.39) */}
       <Card className="shadow-sm">
         <CardHeader className="px-4 pt-3 pb-2">
           <h3 className="text-sm font-semibold text-foreground">
