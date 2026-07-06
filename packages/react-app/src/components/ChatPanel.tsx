@@ -443,6 +443,15 @@ export function ChatPanel({ className, selectedSprintId, aiStatus, assigneeFilte
     setMessages((prev) => [...prev, { ...msg, id: nextId() }]);
   }, []);
 
+  // v1.40 (ADR-050): Ask-mode conversation memory — the prior Q/A turns are sent with each
+  // question (≤8) so follow-ups like "move IT to the next sprint" resolve. Ref, not state:
+  // it never drives a render.
+  const askHistoryRef = useRef<Array<{ role: "user" | "assistant"; content: string }>>([]);
+  const rememberAskTurn = (role: "user" | "assistant", content: string) => {
+    if (!content) return;
+    askHistoryRef.current = [...askHistoryRef.current, { role, content: content.slice(0, 2000) }].slice(-8);
+  };
+
   const submit = useCallback(async () => {
     const text = input.trim();
     if (!text || busy) return;
@@ -470,14 +479,20 @@ export function ChatPanel({ className, selectedSprintId, aiStatus, assigneeFilte
           question: text,
           ...(boardId !== undefined ? { boardId } : {}),
           ...(contextSprintId != null ? { sprintId: contextSprintId } : {}),
+          // v1.40 (ADR-050): prior turns give the assistant conversation memory.
+          ...(askHistoryRef.current.length > 0 ? { history: askHistoryRef.current } : {}),
         });
         if (res.proposedAction) {
           // v1.19 (ADR-030): the assistant wants to make a change — confirm in a modal.
           responseText = res.answer || "I can do that — please review and confirm.";
           setPendingAction(res.proposedAction);
           setConfirmOpen(true);
+          rememberAskTurn("user", text);
+          rememberAskTurn("assistant", `[proposed ${res.proposedAction.tool}]`);
         } else {
           responseText = res.answer;
+          rememberAskTurn("user", text);
+          rememberAskTurn("assistant", res.answer);
         }
       } else {
         const out = await executeAction(action, aiStatus, selectedSprintId, assigneeFilter);

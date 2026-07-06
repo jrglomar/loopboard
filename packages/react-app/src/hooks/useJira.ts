@@ -16,6 +16,7 @@ import { getImpediments, setImpediments, type ImpedimentInput } from "../lib/imp
 import { getPullRequests, setPullRequests, type PullRequestInput } from "../lib/prsClient";
 import { getPostScrum, setPostScrum, type PostScrumInput } from "../lib/postScrumClient";
 import { getMeetingGoal, setMeetingGoal } from "../lib/meetingGoalClient";
+import { getMeetingNotes, setMeetingNotes, type MeetingNotesData } from "../lib/meetingNotesClient";
 import type { McpError } from "../lib/mcpClient";
 import {
   type GetActiveSprintOutput,
@@ -893,6 +894,60 @@ export function useMeetingGoal(sprintId: number | null): UseMeetingGoalState {
       const prev = data;
       try {
         const updated = await setMeetingGoal(sprintId, goal);
+        setData(updated);
+      } catch (err: unknown) {
+        setData(prev);
+        throw err;
+      }
+    },
+    [sprintId, data]
+  );
+
+  return { data, loading, error, run, save };
+}
+
+// ── useMeetingNotes (v1.41, ADR-051) ──────────────────────────────────────────
+
+export interface UseMeetingNotesState {
+  /** The saved notes, or null when none exist yet. */
+  data: MeetingNotesData | null;
+  loading: boolean;
+  error: McpError | null;
+  run: () => void;
+  /** Replace the notes with the given HTML (empty clears); updates local state. */
+  save: (html: string) => Promise<void>;
+}
+
+/**
+ * Per-sprint rich meeting notes (WYSIWYG store). Loads on mount + when sprintId changes.
+ * Pass null to skip loading. CONTRACTS.md §4.27 v1.41, ADR-051.
+ */
+export function useMeetingNotes(sprintId: number | null): UseMeetingNotesState {
+  const [data, setData] = useState<MeetingNotesData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<McpError | null>(null);
+
+  const run = useCallback(() => {
+    if (sprintId === null) return;
+    setLoading(true);
+    setError(null);
+    getMeetingNotes(sprintId)
+      .then((notes) => { setData(notes); setLoading(false); })
+      .catch((err: unknown) => { setError(toMcpError(err)); setLoading(false); });
+  }, [sprintId]);
+
+  useEffect(() => {
+    if (sprintId !== null) run();
+    else { setData(null); setError(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sprintId]);
+
+  const save = useCallback(
+    async (html: string) => {
+      if (sprintId === null) return;
+      const prev = data;
+      try {
+        const updated = await setMeetingNotes(sprintId, html);
         setData(updated);
       } catch (err: unknown) {
         setData(prev);

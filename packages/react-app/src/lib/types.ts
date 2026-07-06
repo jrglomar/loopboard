@@ -384,6 +384,8 @@ export interface AskRequest {
   question: string;
   boardId?: number;
   sprintId?: number;
+  /** v1.40 (ADR-050): prior Ask-mode turns (oldest first, ≤8) — gives the assistant memory. */
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
 }
 
 /** A write the assistant proposes (v1.19, ADR-030) — confirmed in a modal, not auto-run. */

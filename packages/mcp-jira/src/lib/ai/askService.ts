@@ -30,6 +30,12 @@ export const READ_TOOLS: ReadonlySet<string> = new Set([
   "get_ticket",
   "list_sprints",
   "get_linked_issues",
+  // v1.40 (ADR-050): dev-panel PRs + cross-sprint leaves + offset wallet.
+  "get_issue_pull_requests",
+  "get_all_leaves",
+  "get_offset_ledger",
+  // v1.41 (ADR-051): the Huddle's rich meeting notes (deployment notes, links).
+  "get_meeting_notes",
 ]);
 
 /**
@@ -44,14 +50,27 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set([
   "create_sprint",
   "set_sprint_goal",
   "assign_issue",
+  // v1.40 (ADR-050): "file my vacation Thu–Fri" — proposal-only, confirmed in the modal.
+  "set_leaves",
 ]);
 
 const MAX_TURNS = 5;
+
+/** One prior Ask-mode exchange turn (v1.40, ADR-050) — folded into the system prompt. */
+export interface AskHistoryTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+const MAX_HISTORY_TURNS = 8;
+const MAX_HISTORY_CHARS = 500; // per turn, when folded into the system prompt
 
 export interface AskContext {
   boardId?: number;
   sprintId?: number;
   today: string; // YYYY-MM-DD
+  /** Prior conversation turns, oldest first (optional — omitted = stateless). */
+  history?: AskHistoryTurn[];
 }
 
 export interface ProposedAction {
@@ -83,6 +102,20 @@ function buildToolSpecs(): { specs: AiToolSpec[]; readByName: Map<string, ToolDe
 }
 
 function buildSystem(ctx: AskContext): string {
+  // v1.40 (ADR-050): fold prior turns into the system prompt (provider-agnostic memory —
+  // no adapter changes needed). Capped turns + per-turn chars keep the prompt bounded.
+  const history = (ctx.history ?? []).slice(-MAX_HISTORY_TURNS);
+  const historyBlock =
+    history.length > 0
+      ? [
+          "",
+          "Conversation so far (oldest first) — use it to resolve references like 'it' or 'that ticket':",
+          ...history.map(
+            (t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.content.slice(0, MAX_HISTORY_CHARS)}`
+          ),
+        ]
+      : [];
+
   return [
     "You are Loopboard's Scrum assistant. Answer the user's question about the team's current",
     "sprint using ONLY the provided tools and their results — never invent data.",
@@ -96,10 +129,13 @@ function buildSystem(ctx: AskContext): string {
       ? `- Active sprint id: ${ctx.sprintId} — use this for any tool that needs a sprintId.`
       : "",
     "When a tool needs a sprintId/boardId the user didn't specify, use the active ids above.",
+    ...historyBlock,
     "",
     "You may also CHANGE things when asked — update points, set status, move a ticket to another",
-    "sprint, assign someone, set a sprint goal, or create a sprint — by calling the matching tool",
-    "with resolved arguments (read first if you need to resolve a name to an id, e.g. 'next sprint').",
+    "sprint, assign someone, set a sprint goal, create a sprint, or file leaves (set_leaves) — by",
+    "calling the matching tool with resolved arguments (read first if you need to resolve a name to",
+    "an id, e.g. 'next sprint'). set_leaves REPLACES that person's entries for the sprint, so read",
+    "get_leaves first and include their existing days plus the new ones.",
     "The user is shown a confirmation before any change is applied, so just propose the right call.",
   ]
     .filter(Boolean)

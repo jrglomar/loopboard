@@ -3,7 +3,27 @@ import {
   computeProgress,
   computeTimeline,
   computePace,
+  remainingByStatus,
 } from "./sprintMetrics";
+
+// ── remainingByStatus (v1.40, ADR-050) ────────────────────────────────────────
+
+describe("remainingByStatus", () => {
+  it("splits not-completed points into todo vs in-progress", () => {
+    const out = remainingByStatus([
+      { statusCategory: "todo", storyPoints: 3 },
+      { statusCategory: "todo", storyPoints: 2 },
+      { statusCategory: "inprogress", storyPoints: 5 },
+      { statusCategory: "inprogress", storyPoints: null }, // unestimated → 0
+    ]);
+    expect(out).toEqual({ todo: 5, inprogress: 5 });
+  });
+
+  it("returns zeros for an empty list and ignores unexpected categories", () => {
+    expect(remainingByStatus([])).toEqual({ todo: 0, inprogress: 0 });
+    expect(remainingByStatus([{ statusCategory: "done", storyPoints: 8 }])).toEqual({ todo: 0, inprogress: 0 });
+  });
+});
 
 // ── computeProgress ───────────────────────────────────────────────────────────
 

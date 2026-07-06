@@ -63,6 +63,54 @@ describe("askService allowlists (v1.18/v1.19)", () => {
   });
 });
 
+describe("askService v1.40 (ADR-050) — allowlist growth + conversation memory", () => {
+  it("READ_TOOLS gains dev-panel PRs, all-leaves, and the offset ledger; WRITE_TOOLS gains set_leaves", () => {
+    for (const r of ["get_issue_pull_requests", "get_all_leaves", "get_offset_ledger"]) {
+      expect(READ_TOOLS.has(r)).toBe(true);
+    }
+    expect(WRITE_TOOLS.has("set_leaves")).toBe(true);
+    expect(READ_TOOLS.has("set_leaves")).toBe(false);
+  });
+
+  it("folds prior history turns into the system prompt", async () => {
+    const systems: string[] = [];
+    const provider: AiProvider = {
+      name: "github",
+      model: "test-model",
+      complete: async () => ({ text: "" }),
+      chatWithTools: async (system: string) => {
+        systems.push(system);
+        return { type: "final", text: "ok" };
+      },
+    };
+    await askAssistant(provider, "and who owns it?", {
+      today: "2026-07-04",
+      history: [
+        { role: "user", content: "what is blocked?" },
+        { role: "assistant", content: "VRDB-2700 is blocked." },
+      ],
+    });
+    expect(systems[0]).toContain("Conversation so far");
+    expect(systems[0]).toContain("User: what is blocked?");
+    expect(systems[0]).toContain("Assistant: VRDB-2700 is blocked.");
+  });
+
+  it("omits the history block when no history is given", async () => {
+    const systems: string[] = [];
+    const provider: AiProvider = {
+      name: "github",
+      model: "test-model",
+      complete: async () => ({ text: "" }),
+      chatWithTools: async (system: string) => {
+        systems.push(system);
+        return { type: "final", text: "ok" };
+      },
+    };
+    await askAssistant(provider, "hello", { today: "2026-07-04" });
+    expect(systems[0]).not.toContain("Conversation so far");
+  });
+});
+
 describe("askService write-actions (v1.19, ADR-030)", () => {
   it("proposes a write action for confirmation instead of executing it", async () => {
     const provider = fakeProvider([

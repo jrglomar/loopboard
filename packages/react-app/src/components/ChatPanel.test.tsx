@@ -174,6 +174,30 @@ describe("ChatPanel", () => {
     expect(await screen.findByText(/infra is down/)).toBeTruthy();
   });
 
+  it("v1.40: the SECOND ask carries the first Q/A as history (conversation memory)", async () => {
+    const user = userEvent.setup();
+    const { aiAsk } = await import("../lib/aiClient");
+
+    render(<ChatPanel selectedSprintId={50} aiStatus={AI_ON} boardId={10} contextSprintId={50} />);
+    const input = screen.getByRole("textbox", { name: /sprint command/i });
+
+    // First ask — no history yet.
+    await user.type(input, "any impediments today?");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+    await waitFor(() => expect(aiAsk).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(aiAsk).mock.calls[0]![0].history).toBeUndefined();
+
+    // Second ask — includes the first question + the assistant's answer.
+    await user.type(input, "who owns it?");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+    await waitFor(() => expect(aiAsk).toHaveBeenCalledTimes(2));
+    const second = vi.mocked(aiAsk).mock.calls[1]![0];
+    expect(second.history).toBeDefined();
+    expect(second.history![0]).toEqual({ role: "user", content: "any impediments today?" });
+    expect(second.history![1]!.role).toBe("assistant");
+    expect(second.history![1]!.content.length).toBeGreaterThan(0);
+  });
+
   it("v1.19: a proposed write surfaces the confirm modal (does not auto-execute)", async () => {
     const user = userEvent.setup();
     const { aiAsk } = await import("../lib/aiClient");

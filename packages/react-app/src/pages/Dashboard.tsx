@@ -7,6 +7,7 @@ import { ImpedimentsCard } from "../components/ImpedimentsCard";
 import { LeaveStatusCard } from "../components/LeaveStatusCard";
 import { PullRequestsCard } from "../components/PullRequestsCard";
 import { MeetingGoalCard } from "../components/MeetingGoalCard";
+import { MeetingNotesCard } from "../components/MeetingNotesCard";
 import { FlyInCard, selectFlyIns, matchFlyIn } from "../components/FlyInCard";
 import {
   useActiveSprint,
@@ -15,6 +16,7 @@ import {
   useLinkedIssues,
 } from "../hooks/useJira";
 import { useBoards } from "../lib/boards";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import type { BoardKey, SharedSprintProps, LinkedIssue } from "../lib/types";
 
 // a11y: main landmark is provided by the App shell; Dashboard uses the slot.
@@ -61,6 +63,16 @@ export function Dashboard({
 
   const sprint = useActiveSprint(selectedBoardId, selectedSprintId);
   const huddle = useDailyHuddle(selectedBoardId, selectedSprintId);
+
+  // v1.40 (ADR-050): freshness — refetch every 5 minutes; stamp the last data arrival.
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  useEffect(() => {
+    if (sprint.data) setLastUpdated(new Date());
+  }, [sprint.data]);
+  useAutoRefresh(() => {
+    sprint.run();
+    huddle.run();
+  }, 5 * 60_000);
 
   // v1.27 (ADR-040): the OPPOSITE board's active sprint feeds the dual fly-in tracker
   // (default project on that side). One extra read; no-op when that board has no sprint.
@@ -156,6 +168,13 @@ export function Dashboard({
 
   return (
     <div className="space-y-4">
+      {/* v1.40 (ADR-050): freshness stamp — the page refetches itself every 5 minutes */}
+      {lastUpdated && (
+        <p className="text-[0.6875rem] text-muted-foreground text-right -mb-3" aria-live="polite">
+          Auto-refreshes every 5 min · Updated{" "}
+          {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+        </p>
+      )}
       {/* Two-column layout: board (flex-1) | sidebar (360px) at lg+; stacked below */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-5 items-start">
         {/* Sprint board — left / full-width on mobile */}
@@ -293,6 +312,11 @@ export function Dashboard({
           {/* v1.20 (ADR-031): today's meeting focus, above the daily widgets */}
           <section aria-label="Meeting goal">
             <MeetingGoalCard sprintId={effectiveSprintId} />
+          </section>
+
+          {/* v1.41 (ADR-051): rich meeting notes — deployment notes, links (WYSIWYG) */}
+          <section aria-label="Meeting notes">
+            <MeetingNotesCard sprintId={effectiveSprintId} />
           </section>
 
           {/* v1.16 (ADR-027): impediments log + pending-PR list for daily visibility.

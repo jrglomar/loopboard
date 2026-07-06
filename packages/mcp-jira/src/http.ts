@@ -147,6 +147,16 @@ const askInputSchema = z.object({
   question: z.string().min(1).max(2000),
   boardId: z.number().int().positive().optional(),
   sprintId: z.number().int().positive().optional(),
+  // v1.40 (ADR-050): prior Ask-mode turns, oldest first — folded into the system prompt.
+  history: z
+    .array(
+      z.object({
+        role: z.enum(["user", "assistant"]),
+        content: z.string().min(1).max(2000),
+      })
+    )
+    .max(8)
+    .optional(),
 });
 
 // ---- Input zod schema for sprint-summary AI endpoint (v1.4) ----
@@ -484,6 +494,7 @@ app.post("/api/ai/ask", async (req, res) => {
       boardId: parsed.data.boardId,
       sprintId: parsed.data.sprintId,
       today: new Date().toISOString().slice(0, 10),
+      history: parsed.data.history,
     });
     res.json({ ok: true, data: result });
   } catch (err) {

@@ -48,6 +48,7 @@ import { useBoards, usePolicy } from "../lib/boards";
 import { buildReportMarkdown, normalizeGoal } from "../lib/reportMarkdown";
 import { formatPoints } from "../lib/format";
 import { computeCapacity, possibleCommittedVelocity, sprintWorkingDays } from "../lib/capacity";
+import { remainingByStatus } from "../lib/sprintMetrics";
 import { LeavesCalendarCard } from "../components/LeavesCalendarCard";
 import { PrBadge } from "../components/PrBadge";
 import { SprintReviewExport } from "../components/SprintReviewExport";
@@ -204,6 +205,9 @@ function CompletionSummaryCard({ report }: CompletionSummaryCardProps) {
   const ratePct = Math.round(report.completionRate * 100);
   // perf: pure derivation — no state needed
   const carryoverPoints = report.committedPoints - report.completedPoints;
+  // v1.40 (ADR-050): what's still open, split by raw status (code review counts as completed).
+  const remaining = remainingByStatus(report.notCompleted);
+  const hasRemaining = remaining.todo > 0 || remaining.inprogress > 0;
 
   return (
     <Card className="shadow-sm h-full">
@@ -274,6 +278,26 @@ function CompletionSummaryCard({ report }: CompletionSummaryCardProps) {
             <p className="text-[0.6875rem] text-muted-foreground">pts</p>
           </div>
         </div>
+
+        {/* v1.40 (ADR-050): remaining points by status — fills the card with signal */}
+        {hasRemaining && (
+          <div className="grid grid-cols-2 gap-3" aria-label="Remaining points by status">
+            <div className="rounded-lg border border-[hsl(var(--status-todo-border))] bg-[hsl(var(--status-todo-bg))] p-3 text-center">
+              <p className="text-xs text-muted-foreground mb-0.5">Still To Do</p>
+              <p className="text-lg font-bold text-[hsl(var(--status-todo-text))] tabular-nums">
+                {formatPoints(remaining.todo)}
+              </p>
+              <p className="text-[0.6875rem] text-muted-foreground">pts</p>
+            </div>
+            <div className="rounded-lg border border-[hsl(var(--status-inprogress-border))] bg-[hsl(var(--status-inprogress-bg))] p-3 text-center">
+              <p className="text-xs text-muted-foreground mb-0.5">In Progress</p>
+              <p className="text-lg font-bold text-[hsl(var(--status-inprogress-text))] tabular-nums">
+                {formatPoints(remaining.inprogress)}
+              </p>
+              <p className="text-[0.6875rem] text-muted-foreground">pts</p>
+            </div>
+          </div>
+        )}
 
         {/* Blocked risk chip — optional impediment signal, not a metric (ADR-013) */}
         {report.blockedCount > 0 && (

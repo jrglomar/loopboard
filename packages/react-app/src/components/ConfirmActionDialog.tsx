@@ -19,9 +19,14 @@ const ACTION_TITLES: Record<string, string> = {
   create_sprint: "Create sprint",
   set_sprint_goal: "Set sprint goal",
   assign_issue: "Assign ticket",
+  set_leaves: "File leaves", // v1.40 (ADR-050)
 };
 
 const str = (v: unknown): string => (v == null ? "" : String(v));
+
+// v1.40: arrays/objects (e.g. set_leaves entries) render as JSON, not "[object Object]".
+const pretty = (v: unknown): string =>
+  v !== null && typeof v === "object" ? JSON.stringify(v) : str(v);
 
 interface ConfirmActionDialogProps {
   action: ProposedAction | null;
@@ -103,7 +108,7 @@ export function ConfirmActionDialog({ action, open, onOpenChange, onResult }: Co
             {Object.entries(action.args).map(([k, v]) => (
               <li key={k}>
                 <span className="text-muted-foreground">{k}:</span>{" "}
-                <span className="font-medium break-words">{str(v)}</span>
+                <span className="font-medium break-words">{pretty(v)}</span>
               </li>
             ))}
           </ul>

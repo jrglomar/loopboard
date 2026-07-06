@@ -143,3 +143,28 @@ export function computePace(
   if (delta < -10) return "behind";
   return "ahead";
 }
+
+// ── remainingByStatus (v1.40, ADR-050) ────────────────────────────────────────
+
+export interface RemainingByStatus {
+  todo: number;
+  inprogress: number;
+}
+
+/**
+ * Split the NOT-completed points of a sprint report by raw status category (v1.40, ADR-050).
+ * Feeds the Completion Summary's "remaining" row. Only todo/inprogress can appear here:
+ * per the DoD (ADR-014) code-review issues count as COMPLETED, and statusCategory is Jira's
+ * raw category. Unestimated issues count 0.
+ */
+export function remainingByStatus(
+  notCompleted: Array<{ statusCategory: string; storyPoints: number | null }>
+): RemainingByStatus {
+  const out: RemainingByStatus = { todo: 0, inprogress: 0 };
+  for (const issue of notCompleted) {
+    const pts = issue.storyPoints ?? 0;
+    if (issue.statusCategory === "todo") out.todo += pts;
+    else if (issue.statusCategory === "inprogress") out.inprogress += pts;
+  }
+  return out;
+}

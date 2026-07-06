@@ -31,6 +31,8 @@ import { getPostScrumTool } from "./getPostScrum.js";
 import { setPostScrumTool } from "./setPostScrum.js";
 import { getMeetingGoalTool } from "./getMeetingGoal.js";
 import { setMeetingGoalTool } from "./setMeetingGoal.js";
+import { getMeetingNotes } from "./getMeetingNotes.js";
+import { setMeetingNotes } from "./setMeetingNotes.js";
 import { getIssuePullRequestsTool } from "./getIssuePullRequests.js";
 import { getOffsetLedgerTool } from "./getOffsetLedger.js";
 import { setOffsetForSprintTool } from "./setOffsetForSprint.js";
@@ -69,6 +71,8 @@ export const tools: ToolDef[] = [
   setPostScrumTool,
   getMeetingGoalTool,
   setMeetingGoalTool,
+  getMeetingNotes,
+  setMeetingNotes,
   getIssuePullRequestsTool,
   getOffsetLedgerTool,
   setOffsetForSprintTool,

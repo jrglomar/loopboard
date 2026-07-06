@@ -1,6 +1,6 @@
 # Integration Contracts
 
-**Status: FINAL — AUTHORITATIVE (v1.39)**  
+**Status: FINAL — AUTHORITATIVE (v1.41)**  
 Builder agents implement exactly what this document says. If something here is
 ambiguous, file a note to the Architect agent; do NOT invent new surface area or
 prefer the spec over this document — this document supersedes the spec on all
@@ -118,7 +118,7 @@ so tests run with no `.env`.
 | `JIRA_PO_PROJECTS` | mcp-jira | optional | `""` — extra PO projects as `KEY:boardId,KEY2:boardId2` (v1.25). When empty, the single `JIRA_PO_PROJECT_KEY`+`JIRA_PO_BOARD_ID` is the only PO project. |
 | `JIRA_DEV_PROJECTS` | mcp-jira | optional | `""` — extra Dev projects as `KEY:boardId,…` (v1.25); falls back to `JIRA_DEV_PROJECT_KEY`+`JIRA_DEV_BOARD_ID`. |
 | `JIRA_STORY_POINTS_FIELD` | mcp-jira | optional | `"customfield_10016"` |
-| `JIRA_LINK_TYPE` | mcp-jira | optional | `"Depends"` (v1.36 — was `"Relates"`; PO story ↔ Dev task link. Must exist in the Jira instance. Direction: PO story **depends on** its Dev task(s) — PO is the outward side.) |
+| `JIRA_LINK_TYPE` | mcp-jira | optional | `"Depends"` (v1.36 — was `"Relates"`; PO story ↔ Dev task link. Must exist in the Jira instance — **instance names vary: live-verified 2026-07-04 that the team's Jira names it `"Depends on"`**, set in `.env`. Direction: PO story **depends on** its Dev task(s) — PO is the outward side; verified live: the PO reads "depends on VRDB-x".) |
 | `JIRA_FLAGGED_FIELD` | mcp-jira | optional | `""` (disabled) |
 | `JIRA_CODE_REVIEW_STATUSES` | mcp-jira | optional | `"code review,in review,peer review,review"` (v1.2) |
 | `JIRA_VELOCITY_SPRINTS` | mcp-jira | optional | `6` — closed sprints averaged for velocity/forecast (v1.4) |
@@ -508,15 +508,21 @@ export interface AiProvider {
   template client-side. The UI reviews/edits the plan before bulk-creating via `create_dev_ticket`.
 
 `POST /api/ai/ask` (v1.18 — in-app AI Q&A assistant; ADR-029)
-- **Input (zod):** `{ question: string (1..2000), boardId?: number, sprintId?: number }` — a
+- **Input (zod):** `{ question: string (1..2000), boardId?: number, sprintId?: number,
+  history?: Array<{ role: "user"|"assistant"; content: string (1..2000) }> (max 8) }` — a
   free-form question plus the Huddle's current context for the model to resolve ids.
+  **v1.40 (ADR-050):** `history` carries the prior Ask-mode turns; the service folds them into the
+  system prompt ("Conversation so far") so follow-up questions resolve references. Optional —
+  omitted = the previous stateless behavior.
 - **Behavior:** an **agentic tool-calling loop** (the first multi-step/tool use of the `AiProvider`
   port — prior endpoints do single calls). The system prompt states the assistant's role + the
   current context (boardId, active sprintId, **today's date**). The model is offered a **read-only
   allowlist** of mcp-jira tools (`get_active_sprint`, `get_daily_huddle`, `get_impediments`,
   `get_pull_requests`, `get_post_scrum`, `get_meeting_goal`, `get_leaves`, `get_sprint_report`,
   `get_velocity`, `get_team_members`,
-  `get_ticket`, `list_sprints`, `get_linked_issues`) as function specs (each tool's zod schema →
+  `get_ticket`, `list_sprints`, `get_linked_issues`; **v1.40 (ADR-050) adds
+  `get_issue_pull_requests`, `get_all_leaves`, `get_offset_ledger`; v1.41 (ADR-051) adds
+  `get_meeting_notes`**) as function specs (each tool's zod schema →
   JSON Schema). On each turn the model may request tool calls; the loop runs the matching
   `ToolDef.handler` **in-process** and feeds results back, **capped at ~5 turns**, until the model
   returns a final answer. **No write tools are ever exposed** — the assistant cannot mutate Jira.
@@ -524,7 +530,8 @@ export interface AiProvider {
   `chatWithTools` to the `AiProvider` port + both adapters.
 - **Write-actions (v1.19, ADR-030):** the loop ALSO offers a curated **WRITE_TOOLS** set
   (`update_ticket, transition_issue, move_issue_to_sprint, create_sprint, set_sprint_goal,
-  assign_issue`). Read calls run in-process as above, but a **write call is NEVER executed** — the
+  assign_issue`; **v1.40 (ADR-050) adds `set_leaves`** — "file my vacation Thu–Fri" becomes a
+  confirmable proposal). Read calls run in-process as above, but a **write call is NEVER executed** — the
   loop stops and returns the requested call as `proposedAction: { tool, args }`. The UI confirms it
   in a modal and only then executes the write (via the existing tool). The AI never mutates Jira.
 - **Output:** `{ answer: string; toolsUsed: string[]; provider: "anthropic" | "github"; model: string;
@@ -947,6 +954,24 @@ Per-developer offset-point tracking, backed by a bridge-side JSON store (`JIRA_O
   `JIRA_REQUIRED_POINTS` (N) + `JIRA_OFFSET_THRESHOLD` (N2)). The UI computes earned =
   `(donePoints + leaveDays) ≥ (N + N2) ? 1 : 0` (**max 1/sprint**).
 - Registered MCP tools. jira tools **32 → 35**. Tests use a temp store; keyless/offline.
+
+### 4.27 `get_meeting_notes` / `set_meeting_notes` (v1.41, ADR-051 — Huddle rich meeting notes)
+
+Free-form **rich-text meeting notes per sprint** (deployment notes, links, checklists) shown on the
+Huddle sidebar with a WYSIWYG editor. Same bridge-side JSON store pattern as §4.23/§4.24. The value
+is an **HTML string** (produced by the app's TipTap editor); the store is content-agnostic — the
+React app sanitizes with DOMPurify **both on save and on render** (the server does not parse HTML).
+
+- **`get_meeting_notes`** — **Input:** `{ sprintId: number (int > 0) }`. **Output:**
+  `{ sprintId, notes: { html: string, updatedAt: string } | null }` (`null` when never set/cleared).
+- **`set_meeting_notes`** — **Input:** `{ sprintId: number (int > 0), html: string (≤ 100000) }`.
+  An **empty/whitespace-only `html` clears the entry** (subsequent `get` → `notes: null`). The tool
+  stamps `updatedAt` (now). **Output:** same shape as `get_meeting_notes`.
+- Store shape: `{ [sprintId: string]: { html: string; updatedAt: string } }`.
+- Store path from `JIRA_MEETING_NOTES_FILE` (default `<mcp-jira>/.loopboard-meeting-notes.json`,
+  git-ignored).
+- Registered MCP tools; `get_meeting_notes` joins the AI Q&A read-allowlist (§4.9). jira tools
+  **36 → 38**. Tests use a temp file; keyless/offline.
 
 ## 5. mcp-github tools (Phase 2) — exact IO
 
@@ -2270,3 +2295,41 @@ All frontend/presentation; **no new tool, jira tools stay 36, IO shapes unchange
     (user: "too much blank white space"): the **leaves/capacity plotter, leave-planner, and offset-points
     CARDS are `w-fit max-w-full`** — each card shrink-wraps its content so the page background, not empty
     white card, fills the remaining width. Presentation-only; no behavior change.
+
+## Changelog v1.40 (2026-07-04 — P1 batch: live-verified writes + assistant upgrades + freshness; ADR-050)
+
+146. **Write paths LIVE-VERIFIED against real Jira (2026-07-04).** create_po_ticket, create_dev_ticket ×3
+    (link + storyPoints + assigneeAccountId — no warnings), update_ticket points, assign_issue, and the
+    PO→2-Dev breakdown all executed successfully. The dependency link required an env fix: the instance's
+    type is named **"Depends on"** (`JIRA_LINK_TYPE` in `.env` updated from the stale `Relates`); direction
+    confirmed in Jira — the PO story reads **"depends on VRDB-x"** (payload inward=dev/outward=po was
+    already correct). Test tickets VBPO-1551 / VRDB-2740..2742 left for the team to delete.
+147. **§4.9 — assistant read allowlist grows by 3.** `get_issue_pull_requests` (dev-panel PRs),
+    `get_all_leaves`, and `get_offset_ledger` join READ_TOOLS — the assistant can now answer PR-review
+    and offset/leave-balance questions.
+148. **§4.9 — assistant conversation memory.** `/api/ai/ask` input gains optional `history` (≤8 prior
+    `{role, content}` turns, content ≤2000), folded into the system prompt so follow-ups resolve
+    references. ChatPanel sends its recent Ask-mode turns automatically.
+149. **§4.9 — assistant may propose `set_leaves`.** Added to WRITE_TOOLS (proposal-only; same modal
+    confirmation; never auto-executed). ConfirmActionDialog renders non-primitive args as JSON so the
+    entries list is reviewable.
+150. **Huddle freshness (react-app).** The Dashboard auto-refreshes the sprint + huddle every 5 minutes
+    (pure `useAutoRefresh` hook) and shows an "Updated HH:MM" stamp; manual actions still refetch as before.
+151. **Reports Completion Summary — remaining-by-status row (react-app).** Under the Committed / Completed /
+    Carryover tiles, a compact row splits the not-completed points by raw status (To Do / In Progress —
+    code review counts as completed per the ADR-014 DoD) via a pure `remainingByStatus(notCompleted)`
+    helper — fills the card's dead space with signal.
+
+## Changelog v1.41 (2026-07-04 — Huddle rich meeting notes with WYSIWYG editor; ADR-051)
+
+152. **§4.27 (new) — `get_meeting_notes` / `set_meeting_notes`.** Per-sprint rich-text meeting notes
+    (deployment notes, links) as an HTML string in a bridge-side JSON store
+    (`JIRA_MEETING_NOTES_FILE`, default `<mcp-jira>/.loopboard-meeting-notes.json`). Empty html clears
+    the entry. jira tools **36 → 38**; smoke's expected-tool lists updated.
+153. **Huddle "Meeting notes" card (react-app).** New `MeetingNotesCard` on the Huddle sidebar (under
+    Meeting goal): renders the saved notes as sanitized HTML (links open in a new tab) and edits them in
+    a **TipTap WYSIWYG editor** (`@tiptap/react` + starter-kit + link extension — NEW deps, with
+    `dompurify` sanitizing **on save and on render**). Toolbar: bold, italic, strikethrough, H2,
+    bullet/ordered list, link/unlink. `useMeetingNotes(sprintId)` hook + `meetingNotesClient`.
+154. **§4.9 — `get_meeting_notes` joins the assistant read-allowlist** (17 read tools) so the chatbot can
+    answer "what are the deployment notes for this sprint?".

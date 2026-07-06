@@ -28,6 +28,9 @@ export const DEFAULT_POST_SCRUM_FILE = path.join(_packageDir, ".loopboard-post-s
 /** Default path for the meeting-goal JSON file — inside the mcp-jira package dir (v1.20). */
 export const DEFAULT_MEETING_GOAL_FILE = path.join(_packageDir, ".loopboard-meeting-goal.json");
 
+/** Default path for the meeting-notes JSON file — inside the mcp-jira package dir (v1.41). */
+export const DEFAULT_MEETING_NOTES_FILE = path.join(_packageDir, ".loopboard-meeting-notes.json");
+
 /** Default path for the offset-ledger JSON file — inside the mcp-jira package dir (v1.26). */
 export const DEFAULT_OFFSET_FILE = path.join(_packageDir, ".loopboard-offset.json");
 
@@ -68,6 +71,8 @@ const configSchema = z.object({
   // v1.20: optional post-scrum + meeting-goal store paths (Huddle daily sections).
   JIRA_POST_SCRUM_FILE: z.string().default(""),
   JIRA_MEETING_GOAL_FILE: z.string().default(""),
+  // v1.41: optional meeting-notes store path (Huddle rich notes, ADR-051).
+  JIRA_MEETING_NOTES_FILE: z.string().default(""),
   // v1.22: dev-status applicationType for linked-PR reads (GitHub | GitHubEnterprise | bitbucket).
   JIRA_DEV_STATUS_APP_TYPE: z.string().default("GitHub"),
   MCP_JIRA_HTTP_PORT: z.coerce.number().default(4001),
@@ -164,6 +169,12 @@ export function getPostScrumFilePath(): string {
 export function getMeetingGoalFilePath(): string {
   const cfg = getConfig();
   return cfg.JIRA_MEETING_GOAL_FILE || DEFAULT_MEETING_GOAL_FILE;
+}
+
+/** Resolved meeting-notes file path (v1.41, ADR-051) — JIRA_MEETING_NOTES_FILE or the default. */
+export function getMeetingNotesFilePath(): string {
+  const cfg = getConfig();
+  return cfg.JIRA_MEETING_NOTES_FILE || DEFAULT_MEETING_NOTES_FILE;
 }
 
 /** Resolved offset-ledger file path (v1.26) — JIRA_OFFSET_FILE or the default. */
