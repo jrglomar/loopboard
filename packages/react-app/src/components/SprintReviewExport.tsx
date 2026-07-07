@@ -20,15 +20,33 @@ import { formatPoints } from "../lib/format";
 import type { SprintReport } from "../lib/types";
 import type { LeavesMap } from "../lib/leavesClient";
 import type { OffsetLedger } from "../lib/offsetClient";
+import type { RetroFields } from "../lib/retroClient";
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
-function emptyForm(commitment: number): SprintReviewForm {
+// v1.42 (ADR-052): the retro fields are pre-filled from the persisted store when present,
+// so they don't have to be retyped at export time.
+function emptyForm(commitment: number, retro?: RetroFields | null): SprintReviewForm {
   return {
     teamName: "", scrumMaster: "", commitmentPoints: formatPoints(commitment),
-    reasonForDelays: "", whatWorkedWell: "", whatDidNotWork: "", plannedImprovements: "", kudos: "",
+    reasonForDelays: retro?.reasonForDelays ?? "",
+    whatWorkedWell: retro?.whatWorkedWell ?? "",
+    whatDidNotWork: retro?.whatDidNotWork ?? "",
+    plannedImprovements: retro?.plannedImprovements ?? "",
+    kudos: retro?.kudos ?? "",
+  };
+}
+
+/** The retro subset of the export form (persisted back to the store on export). */
+function retroFromForm(form: SprintReviewForm): RetroFields {
+  return {
+    reasonForDelays: form.reasonForDelays,
+    whatWorkedWell: form.whatWorkedWell,
+    whatDidNotWork: form.whatDidNotWork,
+    plannedImprovements: form.plannedImprovements,
+    kudos: form.kudos,
   };
 }
 
@@ -61,6 +79,8 @@ export function SprintReviewExport({
   ledger,
   requiredPoints,
   roster,
+  retro,
+  onPersistRetro,
 }: {
   report: SprintReport;
   leaves: LeavesMap | null;
@@ -69,15 +89,25 @@ export function SprintReviewExport({
   requiredPoints: number;
   /** v1.38: dev roster names — committed total = Σ capacity over the whole team. */
   roster: string[];
+  /** v1.42 (ADR-052): persisted retro to pre-fill the form (null = none saved yet). */
+  retro?: RetroFields | null;
+  /** v1.42: persist the typed retro fields back to the store on export (non-fatal). */
+  onPersistRetro?: (fields: RetroFields) => Promise<void>;
 }) {
   // Commitment (summary) = total developer capacity = Σ max(0, N − leave days) over the roster.
   const capacityCommitment = buildMemberReviewTable(report, leaves, ledger, requiredPoints, roster).totals.committedPoints;
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<SprintReviewForm>(() => emptyForm(capacityCommitment));
+  const [form, setForm] = useState<SprintReviewForm>(() => emptyForm(capacityCommitment, retro));
 
   function onOpenChange(o: boolean) {
-    if (o) setForm(emptyForm(capacityCommitment)); // reset + reseed capacity commitment each open
+    if (o) setForm(emptyForm(capacityCommitment, retro)); // reset + reseed capacity commitment + saved retro each open
     setOpen(o);
+  }
+
+  // Persist typed retro fields back to the store (non-fatal — never blocks the download).
+  function persistRetro() {
+    if (!onPersistRetro) return;
+    void onPersistRetro(retroFromForm(form)).catch(() => { /* best-effort */ });
   }
   const set =
     (k: keyof SprintReviewForm) =>
@@ -99,11 +129,13 @@ export function SprintReviewExport({
       }),
       `${base}.xlsx`
     );
+    persistRetro();
     setOpen(false);
   }
 
   function exportPrint() {
     printHtml(buildSprintReviewHtml(report, form, flyIns(), leaves, ledger, requiredPoints, roster));
+    persistRetro();
     setOpen(false);
   }
 

@@ -31,6 +31,9 @@ export const DEFAULT_MEETING_GOAL_FILE = path.join(_packageDir, ".loopboard-meet
 /** Default path for the meeting-notes JSON file — inside the mcp-jira package dir (v1.41). */
 export const DEFAULT_MEETING_NOTES_FILE = path.join(_packageDir, ".loopboard-meeting-notes.json");
 
+/** Default path for the retro JSON file — inside the mcp-jira package dir (v1.42). */
+export const DEFAULT_RETRO_FILE = path.join(_packageDir, ".loopboard-retro.json");
+
 /** Default path for the offset-ledger JSON file — inside the mcp-jira package dir (v1.26). */
 export const DEFAULT_OFFSET_FILE = path.join(_packageDir, ".loopboard-offset.json");
 
@@ -50,7 +53,7 @@ const configSchema = z.object({
   JIRA_PO_PROJECTS: z.string().default(""),
   JIRA_DEV_PROJECTS: z.string().default(""),
   JIRA_STORY_POINTS_FIELD: z.string().default("customfield_10016"),
-  JIRA_LINK_TYPE: z.string().default("Depends"), // v1.36 (ADR-046): PO story "depends on" its Dev task(s)
+  JIRA_LINK_TYPE: z.string().default("Depends on"), // v1.42 (ADR-046): PO story "depends on" its Dev task(s); exact link-type name
   JIRA_FLAGGED_FIELD: z.string().default(""),
   JIRA_CODE_REVIEW_STATUSES: z
     .string()
@@ -73,6 +76,8 @@ const configSchema = z.object({
   JIRA_MEETING_GOAL_FILE: z.string().default(""),
   // v1.41: optional meeting-notes store path (Huddle rich notes, ADR-051).
   JIRA_MEETING_NOTES_FILE: z.string().default(""),
+  // v1.42: optional retro store path (persisted retrospective, ADR-052).
+  JIRA_RETRO_FILE: z.string().default(""),
   // v1.22: dev-status applicationType for linked-PR reads (GitHub | GitHubEnterprise | bitbucket).
   JIRA_DEV_STATUS_APP_TYPE: z.string().default("GitHub"),
   MCP_JIRA_HTTP_PORT: z.coerce.number().default(4001),
@@ -175,6 +180,12 @@ export function getMeetingGoalFilePath(): string {
 export function getMeetingNotesFilePath(): string {
   const cfg = getConfig();
   return cfg.JIRA_MEETING_NOTES_FILE || DEFAULT_MEETING_NOTES_FILE;
+}
+
+/** Resolved retro file path (v1.42, ADR-052) — JIRA_RETRO_FILE or the default. */
+export function getRetroFilePath(): string {
+  const cfg = getConfig();
+  return cfg.JIRA_RETRO_FILE || DEFAULT_RETRO_FILE;
 }
 
 /** Resolved offset-ledger file path (v1.26) — JIRA_OFFSET_FILE or the default. */

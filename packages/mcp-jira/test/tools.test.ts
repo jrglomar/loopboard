@@ -196,6 +196,12 @@ describe("create_dev_ticket", () => {
 
     expect(result.linkedTo).toBe("PO-42");
     expect(result.linkWarning).toBeUndefined();
+    // v1.42 (ADR-046): PO must be the inward side so it reads "PO depends on Dev".
+    expect(client.createIssueLink).toHaveBeenCalledWith({
+      linkTypeName: "Relates", // env-set in this suite; direction is what matters here
+      inwardKey: "PO-42",
+      outwardKey: "DEV-99",
+    });
   });
 
   it("returns linkWarning when link fails, but still creates ticket", async () => {

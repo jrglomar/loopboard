@@ -110,7 +110,7 @@ describe("getConfig", () => {
     expect(cfg.JIRA_PO_PROJECT_KEY).toBe("PO");
     expect(cfg.JIRA_DEV_PROJECT_KEY).toBe("DEV");
     expect(cfg.JIRA_STORY_POINTS_FIELD).toBe("customfield_10016");
-    expect(cfg.JIRA_LINK_TYPE).toBe("Depends"); // v1.36 (ADR-046): PO "depends on" Dev
+    expect(cfg.JIRA_LINK_TYPE).toBe("Depends on"); // v1.42 (ADR-046): exact link-type name; PO "depends on" Dev
     expect(cfg.JIRA_FLAGGED_FIELD).toBe("");
     expect(cfg.MCP_JIRA_HTTP_PORT).toBe(4001);
   });

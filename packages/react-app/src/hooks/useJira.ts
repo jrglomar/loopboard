@@ -17,6 +17,7 @@ import { getPullRequests, setPullRequests, type PullRequestInput } from "../lib/
 import { getPostScrum, setPostScrum, type PostScrumInput } from "../lib/postScrumClient";
 import { getMeetingGoal, setMeetingGoal } from "../lib/meetingGoalClient";
 import { getMeetingNotes, setMeetingNotes, type MeetingNotesData } from "../lib/meetingNotesClient";
+import { getRetro, setRetro, type RetroData, type RetroFields } from "../lib/retroClient";
 import type { McpError } from "../lib/mcpClient";
 import {
   type GetActiveSprintOutput,
@@ -948,6 +949,60 @@ export function useMeetingNotes(sprintId: number | null): UseMeetingNotesState {
       const prev = data;
       try {
         const updated = await setMeetingNotes(sprintId, html);
+        setData(updated);
+      } catch (err: unknown) {
+        setData(prev);
+        throw err;
+      }
+    },
+    [sprintId, data]
+  );
+
+  return { data, loading, error, run, save };
+}
+
+// ── useRetro (v1.42, ADR-052) ─────────────────────────────────────────────────
+
+export interface UseRetroState {
+  /** The saved retro, or null when none exists yet. */
+  data: RetroData | null;
+  loading: boolean;
+  error: McpError | null;
+  run: () => void;
+  /** Replace the retro fields (all-empty clears); updates local state. */
+  save: (fields: RetroFields) => Promise<void>;
+}
+
+/**
+ * Per-sprint persisted retrospective. Loads on mount + when sprintId changes.
+ * Pass null to skip loading. CONTRACTS.md §4.28 v1.42, ADR-052.
+ */
+export function useRetro(sprintId: number | null): UseRetroState {
+  const [data, setData] = useState<RetroData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<McpError | null>(null);
+
+  const run = useCallback(() => {
+    if (sprintId === null) return;
+    setLoading(true);
+    setError(null);
+    getRetro(sprintId)
+      .then((retro) => { setData(retro); setLoading(false); })
+      .catch((err: unknown) => { setError(toMcpError(err)); setLoading(false); });
+  }, [sprintId]);
+
+  useEffect(() => {
+    if (sprintId !== null) run();
+    else { setData(null); setError(null); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sprintId]);
+
+  const save = useCallback(
+    async (fields: RetroFields) => {
+      if (sprintId === null) return;
+      const prev = data;
+      try {
+        const updated = await setRetro(sprintId, fields);
         setData(updated);
       } catch (err: unknown) {
         setData(prev);

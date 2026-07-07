@@ -99,6 +99,10 @@ export interface IssueSummary {
   issueType: string; // "Story", "Task", "Bug", ...
   url: string; // browse URL
   blocked: boolean;
+  /** v1.42 (ADR-052) — Jira resolutiondate (ISO) or null; burndown input. */
+  resolvedAt?: string | null;
+  /** v1.42 (ADR-052) — Jira updated (ISO) or null; staleness detection. */
+  updatedAt?: string | null;
 }
 
 export interface HuddleItem {

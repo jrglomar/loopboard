@@ -36,6 +36,8 @@ export const READ_TOOLS: ReadonlySet<string> = new Set([
   "get_offset_ledger",
   // v1.41 (ADR-051): the Huddle's rich meeting notes (deployment notes, links).
   "get_meeting_notes",
+  // v1.42 (ADR-052): the persisted retrospective.
+  "get_retro",
 ]);
 
 /**

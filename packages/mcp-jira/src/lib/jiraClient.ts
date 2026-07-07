@@ -106,6 +106,7 @@ interface JiraIssueRaw {
     reporter?: { displayName: string } | null;
     created: string;
     updated: string;
+    resolutiondate?: string | null; // v1.42 (ADR-052) — burndown input
     [key: string]: unknown;
   };
 }
@@ -193,6 +194,9 @@ export function mapIssue(
     issueType: raw.fields.issuetype.name,
     url: `${baseUrl}/browse/${raw.key}`,
     blocked: isBlocked(raw.fields, flaggedField),
+    // v1.42 (ADR-052): resolution + last-update timestamps (burndown / staleness).
+    resolvedAt: raw.fields.resolutiondate ?? null,
+    updatedAt: raw.fields.updated ?? null,
   };
 }
 

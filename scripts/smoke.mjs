@@ -116,6 +116,9 @@ const EXPECTED_JIRA_TOOLS = [
   // v1.41 — Huddle rich meeting notes (WYSIWYG, ADR-051)
   "get_meeting_notes",
   "set_meeting_notes",
+  // v1.42 — persisted retrospective (ADR-052)
+  "get_retro",
+  "set_retro",
   // v1.22 — multi-repo linked PRs from Jira Development Information
   "get_issue_pull_requests",
   // v1.26 — offset-points ledger
@@ -506,6 +509,8 @@ if (!jiraReady) {
     "get_post_scrum", "set_post_scrum", "get_meeting_goal", "set_meeting_goal",
     // v1.41 — meeting-notes store (validation precedes any file write)
     "get_meeting_notes", "set_meeting_notes",
+    // v1.42 — retro store (validation precedes any file write)
+    "get_retro", "set_retro",
     // v1.22 — linked PRs (validation precedes any Jira read)
     "get_issue_pull_requests",
     // v1.26 — offset writes reject empty input (validation precedes any file write)

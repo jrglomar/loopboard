@@ -42,7 +42,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
-import { useSprintList, useSprintReport, useVelocity, useIssuePullRequests, useLeaves, useOffsetLedger, useTeamMembers } from "../hooks/useJira";
+import { useSprintList, useSprintReport, useVelocity, useIssuePullRequests, useLeaves, useOffsetLedger, useTeamMembers, useRetro } from "../hooks/useJira";
 import { getAiStatus, aiSprintSummary } from "../lib/aiClient";
 import { useBoards, usePolicy } from "../lib/boards";
 import { buildReportMarkdown, normalizeGoal } from "../lib/reportMarkdown";
@@ -52,6 +52,8 @@ import { remainingByStatus } from "../lib/sprintMetrics";
 import { LeavesCalendarCard } from "../components/LeavesCalendarCard";
 import { PrBadge } from "../components/PrBadge";
 import { SprintReviewExport } from "../components/SprintReviewExport";
+import { BurndownCard } from "../components/BurndownCard";
+import { RetroCard } from "../components/RetroCard";
 import type {
   SprintRef,
   SprintReport,
@@ -943,9 +945,12 @@ interface ExportBarProps {
   requiredPoints: number;
   /** v1.38 (ADR-048): dev roster names — summary commitment = Σ capacity over the whole team */
   roster?: string[];
+  /** v1.42 (ADR-052): persisted retro to pre-fill the full report + persist typed values back */
+  retro?: import("../lib/retroClient").RetroFields | null;
+  onPersistRetro?: (fields: import("../lib/retroClient").RetroFields) => Promise<void>;
 }
 
-function ExportBar({ report, velocity, aiSummary, leavesCapacity, leaves, ledger, requiredPoints, roster }: ExportBarProps) {
+function ExportBar({ report, velocity, aiSummary, leavesCapacity, leaves, ledger, requiredPoints, roster, retro, onPersistRetro }: ExportBarProps) {
   const [copied, setCopied] = useState(false);
 
   function getMarkdown(): string {
@@ -1000,7 +1005,7 @@ function ExportBar({ report, velocity, aiSummary, leavesCapacity, leaves, ledger
 
       {/* v1.39: .md/.csv downloads removed — the toolbar is Copy · Full report · Print/PDF */}
       {/* v1.35 (ADR-045) + v1.38 (ADR-048): full sprint review — styled download + PDF with per-member table */}
-      <SprintReviewExport report={report} leaves={leaves ?? null} ledger={ledger ?? null} requiredPoints={requiredPoints} roster={roster ?? []} />
+      <SprintReviewExport report={report} leaves={leaves ?? null} ledger={ledger ?? null} requiredPoints={requiredPoints} roster={roster ?? []} retro={retro ?? null} onPersistRetro={onPersistRetro} />
 
       <Button
         variant="outline"
@@ -1112,6 +1117,8 @@ function SprintReportView({
   const { requiredPoints } = usePolicy();
   const { data: team } = useTeamMembers(report.sprint.boardId ?? null);
   const roster = React.useMemo(() => (team ?? []).map((m) => m.displayName), [team]);
+  // v1.42 (ADR-052): persisted retro — the card writes it, the full-report export pre-fills from it.
+  const retro = useRetro(selectedSprintId);
   return (
     // a11y: main report region, labeled for screen readers
     <article aria-label={`Sprint report: ${report.sprint.name}`} className="space-y-4">
@@ -1143,6 +1150,8 @@ function SprintReportView({
               ledger={offsetLedger}
               requiredPoints={requiredPoints}
               roster={roster}
+              retro={retro.data}
+              onPersistRetro={retro.save}
               leavesCapacity={
                 Object.keys(byAssigneeLeaveDays).length > 0 || workingDays.length > 0
                   ? {
@@ -1229,6 +1238,9 @@ function SprintReportView({
         )}
       </div>
 
+      {/* ── Burndown (v1.42, ADR-052) — full-width between the summary row and by-assignee ── */}
+      <BurndownCard report={report} />
+
       {/* ── Row 2: By-assignee + Leaves calendar (v1.5 ADR-016) ───────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* (4) By assignee — v1.5: passes leaves map for the Leaves column */}
@@ -1266,6 +1278,16 @@ function SprintReportView({
           prsByKey={prsByKey}
         />
       </div>
+
+      <Separator />
+
+      {/* ── Retrospective (v1.42, ADR-052) — persisted, pre-fills the full report ── */}
+      <RetroCard
+        retro={retro.data}
+        onSave={retro.save}
+        loading={retro.loading}
+        disabled={selectedSprintId === null}
+      />
 
       <Separator />
 

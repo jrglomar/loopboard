@@ -45,7 +45,7 @@ All variables are loaded from `packages/mcp-jira/.env` (package wins) then the r
 | `JIRA_PO_PROJECT_KEY` | optional | `PO` | Project key for PO stories |
 | `JIRA_DEV_PROJECT_KEY` | optional | `DEV` | Project key for Dev tasks |
 | `JIRA_STORY_POINTS_FIELD` | optional | `customfield_10016` | Custom field ID for story points |
-| `JIRA_LINK_TYPE` | optional | `Relates` | Issue link type name (see ADR-003) |
+| `JIRA_LINK_TYPE` | optional | `Depends on` | Issue link type name; PO story "depends on" its Dev task(s) (ADR-046). Must match a link type in your Jira. |
 | `JIRA_FLAGGED_FIELD` | optional | `""` (disabled) | Custom field ID for flagged/impediment detection |
 | `MCP_JIRA_HTTP_PORT` | optional | `4001` | Port for the HTTP bridge |
 

@@ -268,9 +268,11 @@ describe("Reports page — per-sprint report", () => {
 
   it("renders the completion summary card with committed/completed/carryover points", async () => {
     await renderReports();
-    // 40 committed, 32 completed (formatPoints renders integers without decimals)
-    expect(screen.getByText("40")).toBeTruthy();
-    expect(screen.getByText("32")).toBeTruthy();
+    // 40 committed, 32 completed (formatPoints renders integers without decimals).
+    // v1.42: the burndown chart also labels committed (40) on its y-axis, so these numbers
+    // can appear in more than one place — assert presence, not uniqueness.
+    expect(screen.getAllByText("40").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("32").length).toBeGreaterThanOrEqual(1);
     // Carryover = 40 - 32 = 8; may appear in multiple places (tile + assignee table)
     expect(screen.getAllByText("8").length).toBeGreaterThanOrEqual(1);
   });

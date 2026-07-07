@@ -92,4 +92,38 @@ describe("SprintReviewExport", () => {
     expect(html).toContain("Per-member");
     expect(html).toContain("Al"); // the member row rendered
   });
+
+  // v1.42 (ADR-052): the retro pre-fills the form + typed values persist back on export.
+  it("v1.42: prefills the retro fields from the persisted retro prop", () => {
+    render(
+      <SprintReviewExport
+        report={REPORT} leaves={LEAVES} ledger={LEDGER} requiredPoints={8} roster={["Al"]}
+        retro={{
+          reasonForDelays: "late scope", whatWorkedWell: "pairing",
+          whatDidNotWork: "flaky CI", plannedImprovements: "stabilize CI", kudos: "Al",
+        }}
+      />
+    );
+    openForm();
+    expect((screen.getByLabelText(/Reason for delays/i) as HTMLTextAreaElement).value).toBe("late scope");
+    expect((screen.getByLabelText(/What worked well/i) as HTMLTextAreaElement).value).toBe("pairing");
+    expect((screen.getByLabelText(/Kudos/i) as HTMLTextAreaElement).value).toBe("Al");
+  });
+
+  it("v1.42: persists typed retro fields back to the store on export", () => {
+    const onPersistRetro = vi.fn().mockResolvedValue(undefined);
+    render(
+      <SprintReviewExport
+        report={REPORT} leaves={LEAVES} ledger={LEDGER} requiredPoints={8} roster={["Al"]}
+        retro={null} onPersistRetro={onPersistRetro}
+      />
+    );
+    openForm();
+    fireEvent.change(screen.getByLabelText(/What worked well/i), { target: { value: "shipped early" } });
+    fireEvent.click(screen.getByRole("button", { name: /Download as CSV \(Styled Format\)/i }));
+
+    expect(onPersistRetro).toHaveBeenCalledWith(
+      expect.objectContaining({ whatWorkedWell: "shipped early" })
+    );
+  });
 });

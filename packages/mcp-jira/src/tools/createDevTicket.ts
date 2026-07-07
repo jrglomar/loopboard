@@ -45,10 +45,14 @@ async function handler(input: unknown): Promise<CreateDevTicketOutput> {
 
   if (args.linkedPoTicketKey !== undefined) {
     try {
+      // v1.42 (ADR-046 amended): the PO story must read "depends on" its Dev task(s).
+      // Empirically, in this Jira the inwardIssue displays the link type's OUTWARD
+      // description ("depends on"), so the PO (dependent) goes on inwardKey and the
+      // Dev (depended-upon) on outwardKey → "PO depends on Dev".
       await createIssueLink({
         linkTypeName: cfg.JIRA_LINK_TYPE,
-        inwardKey: key,
-        outwardKey: args.linkedPoTicketKey,
+        inwardKey: args.linkedPoTicketKey,
+        outwardKey: key,
       });
       result.linkedTo = args.linkedPoTicketKey;
     } catch (err) {

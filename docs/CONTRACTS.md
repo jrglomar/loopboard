@@ -1,6 +1,6 @@
 # Integration Contracts
 
-**Status: FINAL — AUTHORITATIVE (v1.41)**  
+**Status: FINAL — AUTHORITATIVE (v1.42)**  
 Builder agents implement exactly what this document says. If something here is
 ambiguous, file a note to the Architect agent; do NOT invent new surface area or
 prefer the spec over this document — this document supersedes the spec on all
@@ -118,7 +118,7 @@ so tests run with no `.env`.
 | `JIRA_PO_PROJECTS` | mcp-jira | optional | `""` — extra PO projects as `KEY:boardId,KEY2:boardId2` (v1.25). When empty, the single `JIRA_PO_PROJECT_KEY`+`JIRA_PO_BOARD_ID` is the only PO project. |
 | `JIRA_DEV_PROJECTS` | mcp-jira | optional | `""` — extra Dev projects as `KEY:boardId,…` (v1.25); falls back to `JIRA_DEV_PROJECT_KEY`+`JIRA_DEV_BOARD_ID`. |
 | `JIRA_STORY_POINTS_FIELD` | mcp-jira | optional | `"customfield_10016"` |
-| `JIRA_LINK_TYPE` | mcp-jira | optional | `"Depends"` (v1.36 — was `"Relates"`; PO story ↔ Dev task link. Must exist in the Jira instance — **instance names vary: live-verified 2026-07-04 that the team's Jira names it `"Depends on"`**, set in `.env`. Direction: PO story **depends on** its Dev task(s) — PO is the outward side; verified live: the PO reads "depends on VRDB-x".) |
+| `JIRA_LINK_TYPE` | mcp-jira | optional | `"Depends on"` (v1.42 — default is now the exact link-type name in the team's Jira; was `"Depends"`/`"Relates"`. Must exist in the Jira instance. Direction: PO story **depends on** its Dev task(s) — **PO is the inward side, Dev the outward side** (§4.2). The team's `"Depends on"` type has outward = "depends on"; live-verified the PO reads "depends on VRDB-x". Pre-v1.42 payload read backwards and was swapped.) |
 | `JIRA_FLAGGED_FIELD` | mcp-jira | optional | `""` (disabled) |
 | `JIRA_CODE_REVIEW_STATUSES` | mcp-jira | optional | `"code review,in review,peer review,review"` (v1.2) |
 | `JIRA_VELOCITY_SPRINTS` | mcp-jira | optional | `6` — closed sprints averaged for velocity/forecast (v1.4) |
@@ -169,6 +169,8 @@ export interface IssueSummary {
   issueType: string;                    // "Story", "Task", "Bug", ...
   url: string;                          // browse URL
   blocked: boolean;
+  resolvedAt?: string | null;           // v1.42 (ADR-052) — Jira resolutiondate; burndown input
+  updatedAt?: string | null;            // v1.42 (ADR-052) — Jira updated; staleness detection
 }
 
 export interface HuddleItem {
@@ -223,11 +225,15 @@ case.
   `linkedPoTicketKey` is present, call `POST /rest/api/3/issueLink` with payload:
   ```json
   { "type": { "name": "<JIRA_LINK_TYPE>" },
-    "inwardIssue": { "key": "<dev-key>" },
-    "outwardIssue": { "key": "<linkedPoTicketKey>" } }
+    "inwardIssue": { "key": "<linkedPoTicketKey>" },
+    "outwardIssue": { "key": "<dev-key>" } }
   ```
-  (See ADR-003 for the deliberate deviation from spec §4.3 "parent/child". With the default
-  `JIRA_LINK_TYPE="Depends"` this reads **"PO story depends on Dev task"** — PO is the outward side.)
+  (See ADR-003 for the deliberate deviation from spec §4.3 "parent/child". v1.42, ADR-046: the
+  **PO is the inward side**, the Dev task the outward side. Empirically, in the team's Jira the
+  inward issue displays the link type's OUTWARD description, so with `JIRA_LINK_TYPE="Depends on"`
+  (outward = "depends on") this reads **"PO story depends on Dev task"** — live-verified on the
+  PO issue itself. This is a **swap** from the pre-v1.42 payload, which read backwards
+  ("Dev depends on PO").)
   Link failure must NOT fail the creation: return the ticket and include
   `linkWarning: "<error message>"` in the output. On success with linking,
   `linkedTo` is the value of `linkedPoTicketKey`. If `sprintId` is present, apply the
@@ -972,6 +978,23 @@ React app sanitizes with DOMPurify **both on save and on render** (the server do
   git-ignored).
 - Registered MCP tools; `get_meeting_notes` joins the AI Q&A read-allowlist (§4.9). jira tools
   **36 → 38**. Tests use a temp file; keyless/offline.
+
+### 4.28 `get_retro` / `set_retro` (v1.42, ADR-052 — persisted retrospective)
+
+The sprint retrospective, written once on the Reports page and **pre-filled into the Full-report
+export** (no more retyping at export time). Same bridge-side JSON store pattern.
+
+- **`get_retro`** — **Input:** `{ sprintId: number (int > 0) }`. **Output:**
+  `{ sprintId, retro: { reasonForDelays, whatWorkedWell, whatDidNotWork, plannedImprovements,
+  kudos, updatedAt } | null }`.
+- **`set_retro`** — **Input:** `{ sprintId, reasonForDelays?, whatWorkedWell?, whatDidNotWork?,
+  plannedImprovements?, kudos? }` (each string ≤ 4000, defaults `""`; values are trimmed).
+  **All-empty fields clear the entry** (subsequent `get` → `retro: null`). Stamps `updatedAt`.
+  **Output:** same shape as `get_retro`.
+- Store shape: `{ [sprintId: string]: RetroEntry }`; path from `JIRA_RETRO_FILE` (default
+  `<mcp-jira>/.loopboard-retro.json`, git-ignored).
+- Registered MCP tools; `get_retro` joins the AI Q&A read-allowlist (§4.9, 18 read tools).
+  jira tools **38 → 40**. Tests use a temp file; keyless/offline.
 
 ## 5. mcp-github tools (Phase 2) — exact IO
 
@@ -2220,8 +2243,10 @@ Changes made by the Architect agent during finalization:
 ## Changelog v1.36 (2026-07-01 — dependency link + assignable Dev create; ADR-046 Phase A, mcp-jira)
 
 134. **§2 — `JIRA_LINK_TYPE` default `"Relates"` → `"Depends"`.** The PO↔Dev link now expresses a real
-    dependency. Direction unchanged in code (`inwardIssue: dev, outwardIssue: po`) → with an asymmetric
-    `Depends` type this reads **"PO story depends on Dev task"**. The type must exist in the Jira instance.
+    dependency. Direction in code (`inwardIssue: dev, outwardIssue: po`) → with an asymmetric
+    `Depends` type this was believed to read **"PO story depends on Dev task"**. The type must exist in the
+    Jira instance. **⚠ Corrected in v1.42 (item 159): that payload actually read backwards ("Dev depends on
+    PO"); the inward/outward keys were swapped and the default set to the exact name `"Depends on"`.**
 135. **§4.2 — `create_dev_ticket` gains `assigneeAccountId?`.** After create (+ link + sprint), when
     present, the shared `assignIssue` (PUT assignee) is called **non-fatally** — a failure returns
     `assignWarning` and does not fail the creation; the output echoes `assigneeAccountId`. Enables a Dev
@@ -2301,9 +2326,10 @@ All frontend/presentation; **no new tool, jira tools stay 36, IO shapes unchange
 146. **Write paths LIVE-VERIFIED against real Jira (2026-07-04).** create_po_ticket, create_dev_ticket ×3
     (link + storyPoints + assigneeAccountId — no warnings), update_ticket points, assign_issue, and the
     PO→2-Dev breakdown all executed successfully. The dependency link required an env fix: the instance's
-    type is named **"Depends on"** (`JIRA_LINK_TYPE` in `.env` updated from the stale `Relates`); direction
-    confirmed in Jira — the PO story reads **"depends on VRDB-x"** (payload inward=dev/outward=po was
-    already correct). Test tickets VBPO-1551 / VRDB-2740..2742 left for the team to delete.
+    type is named **"Depends on"** (`JIRA_LINK_TYPE` in `.env` updated from the stale `Relates`).
+    **⚠ The direction was misread here: with payload inward=dev/outward=po the PO actually read "is depended
+    upon by VRDB-x" (i.e. Dev depends on PO — backwards). Corrected in v1.42 (item 159) by swapping the keys.**
+    Test tickets VBPO-1551 / VRDB-2740..2742 left for the team to delete.
 147. **§4.9 — assistant read allowlist grows by 3.** `get_issue_pull_requests` (dev-panel PRs),
     `get_all_leaves`, and `get_offset_ledger` join READ_TOOLS — the assistant can now answer PR-review
     and offset/leave-balance questions.
@@ -2333,3 +2359,35 @@ All frontend/presentation; **no new tool, jira tools stay 36, IO shapes unchange
     bullet/ordered list, link/unlink. `useMeetingNotes(sprintId)` hook + `meetingNotesClient`.
 154. **§4.9 — `get_meeting_notes` joins the assistant read-allowlist** (17 read tools) so the chatbot can
     answer "what are the deployment notes for this sprint?".
+
+## Changelog v1.42 (2026-07-06 — P2 batch: burndown + persisted retro + attention nudges; ADR-052)
+
+155. **§3 — `IssueSummary` gains `resolvedAt?` and `updatedAt?`** (Jira `resolutiondate` / `updated`,
+    both `string | null`). Additive — the sprint-issue endpoint already returns these fields; only the
+    mapper and types change. Feeds the burndown (resolution dates) and staleness detection (updated).
+156. **Reports — Burndown chart (react-app).** Pure `lib/burndown.ts` `computeBurndown(committedPoints,
+    completedIssues, workingDays, today)`: per working day, `remaining = committed − Σ points of issues
+    with resolvedAt ≤ that day`; days after "today" are omitted (active sprints show a partial line);
+    plus the ideal committed→0 line. Rendered as a dependency-free SVG line chart (`BurndownCard`) on the
+    Reports page. Known limits (documented): baseline = CURRENT committed (scope creep not re-based);
+    code-review-complete issues burn only when Jira marks them resolved.
+157. **§4.28 (new) — `get_retro` / `set_retro` (persisted retrospective).** Per-sprint retro fields
+    `{ reasonForDelays, whatWorkedWell, whatDidNotWork, plannedImprovements, kudos }` (each ≤ 4000) in a
+    bridge-side JSON store (`JIRA_RETRO_FILE`, default `<mcp-jira>/.loopboard-retro.json`); `set_retro`
+    stamps `updatedAt`; all-empty fields clear the entry. jira tools **38 → 40**; smoke lists updated.
+    Reports gains a **Retrospective card** (inline editable, saved to the store) and the Full-report
+    dialog **pre-fills from the store** (and saves typed values back on export) — the retro is written
+    once, not retyped at export time. `get_retro` joins the assistant read-allowlist (18).
+158. **Huddle — Attention card (react-app).** Pure `lib/attention.ts` `buildAttention({ issues, prsByKey,
+    today, staleDays=3 })` → prioritized nudges: **stale in-progress** (in-progress + no `updatedAt` in
+    ≥ staleDays calendar days; not double-flagged when unassigned), **unassigned** unfinished tickets, and
+    **PRs awaiting review** (`status==="open" && decision==="review_required"`). `today` is injected so the
+    function is pure. Rendered as a compact sidebar card at the top of the Huddle's widgets (reuses the
+    already-lifted `sprintIssues` + `issuePrs`); empty state = "All clear".
+159. **§2 / §4.2 — PO↔Dev dependency link direction FIXED (was backwards).** `create_dev_ticket` swapped
+    the `issueLink` payload to `inwardIssue = PO, outwardIssue = Dev` so the story reads **"PO depends on
+    Dev"** (previously `inwardIssue = Dev` made it read "Dev depends on PO"). Root cause: in the team's
+    Jira the **inward** issue displays the link type's **outward** description ("depends on"), the opposite
+    of the assumption in v1.36/v1.40. Also: `JIRA_LINK_TYPE` default `"Depends"` → **`"Depends on"`** (the
+    exact link-type name in the instance, so a missing `.env` no longer produces an invalid type). Verified
+    live against real Jira on the test tickets. `.env.example` / README updated off the stale `Relates`.

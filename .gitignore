@@ -28,6 +28,12 @@ coverage/
 # Offset-ledger store (v1.26 — host-local JSON, never committed)
 .loopboard-offset.json
 *.loopboard-offset.json
+# Huddle meeting-notes store (v1.41 — host-local JSON, never committed)
+.loopboard-meeting-notes.json
+*.loopboard-meeting-notes.json
+# Retro store (v1.42 — host-local JSON, never committed)
+.loopboard-retro.json
+*.loopboard-retro.json
 
 # Editor / OS
 .DS_Store

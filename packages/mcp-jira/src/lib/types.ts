@@ -35,6 +35,8 @@ export interface IssueSummary {
   issueType: string; // "Story", "Task", "Bug", ...
   url: string; // browse URL
   blocked: boolean;
+  resolvedAt?: string | null; // v1.42 (ADR-052) — Jira resolutiondate; burndown input
+  updatedAt?: string | null; // v1.42 (ADR-052) — Jira updated; staleness detection
 }
 
 export interface HuddleItem {
