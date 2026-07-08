@@ -5,6 +5,8 @@ import { CalendarOff } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { useAllLeaves } from "../hooks/useJira";
+import { useCollapse } from "../hooks/useCollapse";
+import { CollapseToggle } from "./CollapseToggle";
 import { summarizeLeaveStatus } from "../lib/leaveStatus";
 import type { LeaveType } from "../lib/types";
 
@@ -32,18 +34,22 @@ export function LeaveStatusCard({ today }: { today?: string }) {
   const { data, loading } = useAllLeaves();
   const todayIso = today ?? new Date().toISOString().slice(0, 10);
   const status = summarizeLeaveStatus(data, { today: todayIso, horizonDays: 7 });
+  const [collapsed, toggleCollapsed] = useCollapse("onLeave");
 
   return (
     <Card className="shadow-sm">
       <CardHeader className="px-3 pt-3 pb-1.5">
-        <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-          <CalendarOff className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-          On leave
-          {status.today.length > 0 && (
-            <span className="text-xs font-normal text-muted-foreground">({status.today.length} out today)</span>
-          )}
+        <h3 className="text-sm font-semibold text-foreground">
+          <CollapseToggle collapsed={collapsed} onToggle={toggleCollapsed} className="w-full">
+            <CalendarOff className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
+            On leave
+            {status.today.length > 0 && (
+              <span className="text-xs font-normal text-muted-foreground">({status.today.length} out today)</span>
+            )}
+          </CollapseToggle>
         </h3>
       </CardHeader>
+      {!collapsed && (
       <CardContent className="px-3 pb-3 space-y-2">
         {/* Out today */}
         <div>
@@ -82,6 +88,7 @@ export function LeaveStatusCard({ today }: { today?: string }) {
           )}
         </div>
       </CardContent>
+      )}
     </Card>
   );
 }

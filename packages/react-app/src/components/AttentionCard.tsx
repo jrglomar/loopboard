@@ -5,6 +5,8 @@
 import { AlertTriangle, Clock, UserX, GitPullRequest, CheckCircle2 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { buildAttention, type AttentionKind } from "../lib/attention";
+import { useCollapse } from "../hooks/useCollapse";
+import { CollapseToggle } from "./CollapseToggle";
 import type { IssueSummary, LinkedPr } from "../lib/types";
 
 const KIND_ICON: Record<AttentionKind, typeof Clock> = {
@@ -26,6 +28,7 @@ export function AttentionCard({
 }) {
   const today = new Date().toISOString().slice(0, 10);
   const { items } = buildAttention({ issues, prsByKey, today, staleDays });
+  const [collapsed, toggleCollapsed] = useCollapse("attention");
 
   const shown = items.slice(0, MAX_SHOWN);
   const extra = items.length - shown.length;
@@ -33,16 +36,19 @@ export function AttentionCard({
   return (
     <Card className="shadow-sm">
       <CardHeader className="px-3 pt-3 pb-1.5">
-        <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-          <AlertTriangle className="h-3.5 w-3.5 text-amber-500" aria-hidden="true" />
-          Needs attention
-          {items.length > 0 && (
-            <span className="ml-auto inline-flex items-center justify-center rounded-full bg-amber-100 text-amber-700 text-[0.6875rem] font-semibold h-5 min-w-5 px-1.5">
-              {items.length}
-            </span>
-          )}
+        <h3 className="text-sm font-semibold text-foreground">
+          <CollapseToggle collapsed={collapsed} onToggle={toggleCollapsed} className="w-full">
+            <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" aria-hidden="true" />
+            Needs attention
+            {items.length > 0 && (
+              <span className="ml-auto inline-flex items-center justify-center rounded-full bg-amber-100 text-amber-700 text-[0.6875rem] font-semibold h-5 min-w-5 px-1.5">
+                {items.length}
+              </span>
+            )}
+          </CollapseToggle>
         </h3>
       </CardHeader>
+      {!collapsed && (
       <CardContent className="px-3 pb-3">
         {items.length === 0 ? (
           <p className="text-sm text-muted-foreground flex items-center gap-1.5">
@@ -76,6 +82,7 @@ export function AttentionCard({
           </ul>
         )}
       </CardContent>
+      )}
     </Card>
   );
 }

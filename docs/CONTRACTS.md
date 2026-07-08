@@ -1,6 +1,6 @@
 # Integration Contracts
 
-**Status: FINAL — AUTHORITATIVE (v1.42)**  
+**Status: FINAL — AUTHORITATIVE (v1.43)**  
 Builder agents implement exactly what this document says. If something here is
 ambiguous, file a note to the Architect agent; do NOT invent new surface area or
 prefer the spec over this document — this document supersedes the spec on all
@@ -2391,3 +2391,12 @@ All frontend/presentation; **no new tool, jira tools stay 36, IO shapes unchange
     of the assumption in v1.36/v1.40. Also: `JIRA_LINK_TYPE` default `"Depends"` → **`"Depends on"`** (the
     exact link-type name in the instance, so a missing `.env` no longer produces an invalid type). Verified
     live against real Jira on the test tickets. `.env.example` / README updated off the stale `Relates`.
+
+## Changelog v1.43 (2026-07-07 — collapsible Huddle sidebar cards; ADR-053)
+
+160. **§6 — Huddle sidebar cards are collapsible (react-app, presentation-only).** Each right-column
+    card (Needs attention, Meeting goal, Meeting notes, Impediments, On leave, Code review, and the Daily
+    Huddle digest) gets a chevron in its header that collapses/expands the card body independently. State
+    is remembered per browser in `localStorage` (`loopboard.collapse.<key>`, default expanded). Shared
+    `hooks/useCollapse.ts` + `components/CollapseToggle.tsx`; no tool/HTTP/IO change. react-app pill
+    **1.42.0 → 1.43.0**. Live-verified: toggle hides the body and the choice survives a reload.

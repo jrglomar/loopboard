@@ -10,6 +10,8 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { usePullRequests, useIssuePullRequests } from "../hooks/useJira";
+import { useCollapse } from "../hooks/useCollapse";
+import { CollapseToggle } from "./CollapseToggle";
 import type { PullRequestInput } from "../lib/prsClient";
 import type { LinkedPr } from "../lib/types";
 
@@ -92,6 +94,7 @@ export function PullRequestsCard({
   const [url, setUrl] = useState("");
   const [ticketKey, setTicketKey] = useState("");
   const [busy, setBusy] = useState(false);
+  const [collapsed, toggleCollapsed] = useCollapse("codeReview");
 
   const items = data ?? [];
 
@@ -135,14 +138,17 @@ export function PullRequestsCard({
   return (
     <Card className="shadow-sm">
       <CardHeader className="px-3 pt-3 pb-1.5">
-        <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-          <GitPullRequest className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-          Code review
-          {totalCount > 0 && (
-            <span className="text-xs font-normal text-muted-foreground">({totalCount})</span>
-          )}
+        <h3 className="text-sm font-semibold text-foreground">
+          <CollapseToggle collapsed={collapsed} onToggle={toggleCollapsed} className="w-full">
+            <GitPullRequest className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
+            Code review
+            {totalCount > 0 && (
+              <span className="text-xs font-normal text-muted-foreground">({totalCount})</span>
+            )}
+          </CollapseToggle>
         </h3>
       </CardHeader>
+      {!collapsed && (
       <CardContent className="px-3 pb-3 space-y-2">
         {sprintId === null ? (
           <p className="text-sm text-muted-foreground">Select a sprint to track pending PRs.</p>
@@ -248,6 +254,7 @@ export function PullRequestsCard({
           </>
         )}
       </CardContent>
+      )}
     </Card>
   );
 }

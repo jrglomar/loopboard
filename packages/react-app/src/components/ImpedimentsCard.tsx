@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useImpediments } from "../hooks/useJira";
+import { useCollapse } from "../hooks/useCollapse";
+import { CollapseToggle } from "./CollapseToggle";
 import type { ImpedimentInput } from "../lib/impedimentsClient";
 
 export function ImpedimentsCard({ sprintId }: { sprintId: number | null }) {
@@ -14,6 +16,7 @@ export function ImpedimentsCard({ sprintId }: { sprintId: number | null }) {
   const [text, setText] = useState("");
   const [ticketKey, setTicketKey] = useState("");
   const [busy, setBusy] = useState(false);
+  const [collapsed, toggleCollapsed] = useCollapse("impediments");
 
   const items = data ?? [];
 
@@ -41,16 +44,19 @@ export function ImpedimentsCard({ sprintId }: { sprintId: number | null }) {
   return (
     <Card className="shadow-sm">
       <CardHeader className="px-3 pt-3 pb-1.5">
-        <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-          <AlertTriangle className="h-3.5 w-3.5 text-warning" aria-hidden="true" />
-          Impediments
-          {items.length > 0 && (
-            <span className="text-xs font-normal text-muted-foreground">
-              ({items.filter((i) => !i.resolved).length} open)
-            </span>
-          )}
+        <h3 className="text-sm font-semibold text-foreground">
+          <CollapseToggle collapsed={collapsed} onToggle={toggleCollapsed} className="w-full">
+            <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0" aria-hidden="true" />
+            Impediments
+            {items.length > 0 && (
+              <span className="text-xs font-normal text-muted-foreground">
+                ({items.filter((i) => !i.resolved).length} open)
+              </span>
+            )}
+          </CollapseToggle>
         </h3>
       </CardHeader>
+      {!collapsed && (
       <CardContent className="px-3 pb-3 space-y-2">
         {sprintId === null ? (
           <p className="text-sm text-muted-foreground">Select a sprint to track impediments.</p>
@@ -126,6 +132,7 @@ export function ImpedimentsCard({ sprintId }: { sprintId: number | null }) {
           </>
         )}
       </CardContent>
+      )}
     </Card>
   );
 }

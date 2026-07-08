@@ -1,8 +1,8 @@
 // AttentionCard tests — v1.42, ADR-052. Presentational; keyless/offline.
 // Uses today-independent nudges (unassigned + PR review) so no clock stubbing is needed.
 
-import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { AttentionCard } from "./AttentionCard";
 import type { IssueSummary, LinkedPr } from "../lib/types";
 
@@ -21,6 +21,7 @@ const REVIEW_PR: LinkedPr = {
   status: "open", decision: "review_required", approvals: 0, reviewers: [],
 };
 
+beforeEach(() => { try { localStorage.clear(); } catch { /* ignore */ } });
 afterEach(() => cleanup());
 
 describe("AttentionCard (v1.42)", () => {
@@ -58,5 +59,26 @@ describe("AttentionCard (v1.42)", () => {
     const link = screen.getByRole("link", { name: /D-1/ });
     expect(link.getAttribute("href")).toBe("https://jira/browse/D-1");
     expect(link.getAttribute("target")).toBe("_blank");
+  });
+
+  // v1.43: per-card collapse toggle in the header hides/shows the body.
+  it("collapses and expands when the header toggle is clicked", () => {
+    render(
+      <AttentionCard
+        issues={[issue({ key: "D-1", statusCategory: "todo", assignee: null, summary: "Wire the form" })]}
+        prsByKey={{}}
+      />
+    );
+    // expanded by default → body visible
+    expect(screen.getByText("Wire the form")).toBeTruthy();
+    const toggle = screen.getByRole("button", { name: /Needs attention/i });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.click(toggle);
+    expect(screen.queryByText("Wire the form")).toBeNull(); // body hidden
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(toggle);
+    expect(screen.getByText("Wire the form")).toBeTruthy(); // body back
   });
 });

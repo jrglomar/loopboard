@@ -7,6 +7,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { useCollapse } from "../hooks/useCollapse";
+import { CollapseToggle } from "./CollapseToggle";
 import {
   regroupByPerson,
   buildByPersonClipboardText,
@@ -249,6 +251,8 @@ export function HuddleDigest({ data, loading, error, onRefresh }: HuddleDigestPr
   // v1.3: By Status / By Person toggle
   // v1.3.1: By Person is the default huddle view (walk-the-board-by-person standup)
   const [view, setView] = useState<HuddleView>("by_person");
+  // v1.43: collapsible (hook must precede the early returns below — rules of hooks)
+  const [collapsed, toggleCollapsed] = useCollapse("huddleDigest");
 
   const handleCopy = async () => {
     if (!data) return;
@@ -376,10 +380,13 @@ export function HuddleDigest({ data, loading, error, onRefresh }: HuddleDigestPr
       {/* a11y: labelled region with heading */}
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <h3 className="text-base font-semibold text-foreground leading-snug">
-            Daily Huddle — {data.sprintName}
+          <h3 className="text-base font-semibold text-foreground leading-snug min-w-0 flex-1">
+            <CollapseToggle collapsed={collapsed} onToggle={toggleCollapsed} className="w-full">
+              <span className="truncate">Daily Huddle — {data.sprintName}</span>
+            </CollapseToggle>
           </h3>
 
+          {!collapsed && (
           <div className="flex items-center gap-2 flex-shrink-0">
             {/* v1.3: By Status / By Person segmented toggle */}
             <ViewToggle view={view} onChange={setView} />
@@ -396,14 +403,18 @@ export function HuddleDigest({ data, loading, error, onRefresh }: HuddleDigestPr
               {copied ? "✓ Copied!" : "Copy"}
             </Button>
           </div>
+          )}
         </div>
 
         {/* Summary — shown in both views; summaryText unchanged (contract) */}
+        {!collapsed && (
         <div className="mt-2.5 text-sm text-foreground leading-relaxed px-3 py-2.5 bg-muted rounded-md border-l-4 border-primary">
           {data.summaryText}
         </div>
+        )}
       </CardHeader>
 
+      {!collapsed && (
       <CardContent className="pt-1">
         <Separator className="mb-3" />
 
@@ -458,6 +469,7 @@ export function HuddleDigest({ data, loading, error, onRefresh }: HuddleDigestPr
           Updated {new Date(data.generatedAt).toLocaleString()}
         </p>
       </CardContent>
+      )}
     </Card>
   );
 }

@@ -9,6 +9,8 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { RichTextEditor } from "./RichTextEditor";
 import { useMeetingNotes } from "../hooks/useJira";
+import { useCollapse } from "../hooks/useCollapse";
+import { CollapseToggle } from "./CollapseToggle";
 import { cn } from "@/lib/utils";
 
 // Links in saved notes always open in a new tab, safely.
@@ -37,6 +39,7 @@ export function MeetingNotesCard({ sprintId }: { sprintId: number | null }) {
   const [saveError, setSaveError] = useState<string | null>(null);
   // The editor's latest HTML — a ref, so keystrokes never re-render the card.
   const draftRef = useRef("");
+  const [collapsed, toggleCollapsed] = useCollapse("meetingNotes");
 
   function startEdit() {
     draftRef.current = data?.html ?? "";
@@ -69,26 +72,31 @@ export function MeetingNotesCard({ sprintId }: { sprintId: number | null }) {
   return (
     <Card className="shadow-sm">
       <CardHeader className="px-3 pt-3 pb-1.5">
-        <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-          <NotebookPen className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-          Meeting notes
-          {loading && (
-            <span className="text-[0.6875rem] font-normal text-muted-foreground animate-pulse ml-1">
-              Loading…
-            </span>
-          )}
-          {!editing && (
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-foreground min-w-0 flex-1">
+            <CollapseToggle collapsed={collapsed} onToggle={toggleCollapsed} className="w-full">
+              <NotebookPen className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
+              Meeting notes
+              {loading && (
+                <span className="text-[0.6875rem] font-normal text-muted-foreground animate-pulse ml-1">
+                  Loading…
+                </span>
+              )}
+            </CollapseToggle>
+          </h3>
+          {!editing && !collapsed && (
             <Button
               type="button" variant="ghost" size="sm"
-              className="ml-auto h-6 px-2 text-xs"
+              className="h-6 px-2 text-xs shrink-0"
               onClick={startEdit}
               disabled={sprintId === null}
             >
               {data ? "Edit" : "Add notes"}
             </Button>
           )}
-        </h3>
+        </div>
       </CardHeader>
+      {!collapsed && (
       <CardContent className="px-3 pb-3 space-y-2">
         {sprintId === null ? (
           <p className="text-sm text-muted-foreground">Select a sprint to keep meeting notes.</p>
@@ -137,6 +145,7 @@ export function MeetingNotesCard({ sprintId }: { sprintId: number | null }) {
           </p>
         )}
       </CardContent>
+      )}
     </Card>
   );
 }
