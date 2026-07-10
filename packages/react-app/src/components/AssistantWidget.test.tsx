@@ -44,4 +44,16 @@ describe("AssistantWidget (v1.19)", () => {
     const panel = screen.getByRole("dialog", { name: /sprint assistant/i });
     expect(panel.className).toContain("hidden");
   });
+
+  // v1.48 (UI review A11Y-01): the modal must close on Escape.
+  it("closes the panel when Escape is pressed inside it", () => {
+    render(<AssistantWidget />);
+    fireEvent.click(screen.getByRole("button", { name: /open sprint assistant/i }));
+    const panel = screen.getByRole("dialog", { name: /sprint assistant/i });
+    expect(panel.className).not.toContain("hidden");
+
+    fireEvent.keyDown(panel, { key: "Escape" });
+    expect(panel.className).toContain("hidden");
+    expect(screen.getByRole("button", { name: /open sprint assistant/i })).toBeTruthy();
+  });
 });

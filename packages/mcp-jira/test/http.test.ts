@@ -292,6 +292,25 @@ describe("CORS headers", () => {
       "http://localhost:5173"
     );
   });
+
+  // v1.47: a browser preflights PATCH/DELETE. Any verb the app uses must be advertised here or
+  // the browser blocks the call even though the route exists (same-origin tests never preflight).
+  it.each(["GET", "POST", "PUT", "PATCH", "DELETE"])(
+    "allows %s in the preflight response",
+    async (method) => {
+      const res = await fetch(`${baseUrl}/api/me/journal/todos/abc`, {
+        method: "OPTIONS",
+        headers: {
+          Origin: "http://localhost:5173",
+          "Access-Control-Request-Method": method,
+          "Access-Control-Request-Headers": "content-type",
+        },
+      });
+      expect(res.status).toBeLessThan(300);
+      expect(res.headers.get("access-control-allow-methods")).toContain(method);
+      expect(res.headers.get("access-control-allow-credentials")).toBe("true");
+    }
+  );
 });
 
 describe("parseCorsOrigins (CORS_ORIGINS env, deploy config)", () => {

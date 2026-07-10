@@ -628,7 +628,9 @@ describe("GitHub 401 error mapping", () => {
     expect(res.status).toBe(502);
     const body = (await res.json()) as { error: { code: string; message: string } };
     expect(body.error.code).toBe("UPSTREAM");
-    expect(body.error.message).toContain("authentication failed");
+    // v1.44.2: surface GitHub's ACTUAL reason (not a misleading "models:read" hint).
+    expect(body.error.message).toContain("rejected the token");
+    expect(body.error.message).toContain("Bad credentials"); // the real detail from GitHub
     expect(body.error.message).toContain("GITHUB_MODELS_TOKEN");
   });
 });

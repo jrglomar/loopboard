@@ -29,7 +29,9 @@
     --secondary-foreground: 221 39% 11%;
 
     --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
+    /* v1.48 (UI review A11Y-04): 47%→43% L so secondary text clears WCAG AA (4.5:1) on the
+       cool app background, not just on white cards. */
+    --muted-foreground: 215 16% 43%;
 
     /* Accent = violet hsl(258 90% 66%) — AI / code review */
     --accent: 258 90% 66%;
@@ -46,7 +48,9 @@
     --radius: 0.75rem;
 
     /* ── Semantic tokens: success ─────────────────────────────────────────── */
-    --success: 142 71% 45%;
+    /* v1.48 (UI review A11Y-02): darkened 45%→30% L so `text-success` clears WCAG AA (4.5:1)
+       as body text (was 2.30:1). Still reads as success on the one solid fill (DoD progress bar). */
+    --success: 142 66% 30%;
     --success-foreground: 0 0% 100%;
     --success-bg: 142 71% 93%;       /* ~12% tint */
     --success-border: 142 71% 80%;
@@ -190,6 +194,20 @@
     --status-blocked-bg: 0 60% 15%;
     --status-blocked-text: 0 70% 65%;
     --status-blocked-border: 0 60% 35%;
+  }
+}
+
+/* ── Reduced motion (v1.48, UI review A11Y-06) ───────────────────────────────
+   Users who ask for less motion get near-instant animations/transitions instead of
+   spinners, fades and slide-ins. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }
 

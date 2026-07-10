@@ -5,9 +5,16 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { App } from "./App";
 
 // ── Mocks — stub all pages to avoid pulling in their full dependency trees ────
+
+// v1.45 (ADR-055): bypass the app-wide login/connections gate so these nav tests exercise the
+// shell directly (the gate itself is tested separately). The AuthProvider still mounts harmlessly.
+vi.mock("./components/AppGate", () => ({
+  AppGate: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
 
 vi.mock("./pages/Dashboard", () => ({
   Dashboard: () => <div data-testid="page-dashboard">Dashboard</div>,

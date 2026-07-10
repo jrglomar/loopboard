@@ -52,7 +52,6 @@ import { remainingByStatus } from "../lib/sprintMetrics";
 import { LeavesCalendarCard } from "../components/LeavesCalendarCard";
 import { PrBadge } from "../components/PrBadge";
 import { SprintReviewExport } from "../components/SprintReviewExport";
-import { BurndownCard } from "../components/BurndownCard";
 import { RetroCard } from "../components/RetroCard";
 import type {
   SprintRef,
@@ -1237,9 +1236,6 @@ function SprintReportView({
           </Card>
         )}
       </div>
-
-      {/* ── Burndown (v1.42, ADR-052) — full-width between the summary row and by-assignee ── */}
-      <BurndownCard report={report} />
 
       {/* ── Row 2: By-assignee + Leaves calendar (v1.5 ADR-016) ───────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">

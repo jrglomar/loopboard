@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ConfigError } from "./errors.js";
+import { getRequestConfig, getRequestStoreUserId } from "./requestContext.js";
 import * as dotenv from "dotenv";
 import * as path from "path";
 import * as fs from "fs";
@@ -9,6 +10,25 @@ import { fileURLToPath } from "url";
 // src/lib/config.ts → ../../  = packages/mcp-jira/
 const _thisDir = path.dirname(fileURLToPath(import.meta.url));
 const _packageDir = path.resolve(_thisDir, "../..");
+
+/**
+ * Per-user store root (v1.45, ADR-055). When a request runs in a user context, the local
+ * JSON stores live under `<usersDir>/<userId>/…` so board-id keys can't collide across users.
+ */
+export const USER_STORES_DIR = path.join(_packageDir, ".loopboard-user-stores");
+
+/**
+ * Resolve a store file path. In a per-user request context → that user's directory; otherwise the
+ * override (env) or the shared default (back-compat / stdio / tests).
+ *
+ * v1.46 (ADR-056): the id is the STORE user — a user on shared credentials resolves to the
+ * credential owner's directory, so they see the same team leaves/retro/notes/offset.
+ */
+function resolveStorePath(perUserBasename: string, override: string, sharedDefault: string): string {
+  const uid = getRequestStoreUserId();
+  if (uid) return path.join(USER_STORES_DIR, uid, perUserBasename);
+  return override || sharedDefault;
+}
 
 /** Default path for the leaves JSON file — inside the mcp-jira package dir. */
 export const DEFAULT_LEAVES_FILE = path.join(_packageDir, ".loopboard-leaves.json");
@@ -36,6 +56,9 @@ export const DEFAULT_RETRO_FILE = path.join(_packageDir, ".loopboard-retro.json"
 
 /** Default path for the offset-ledger JSON file — inside the mcp-jira package dir (v1.26). */
 export const DEFAULT_OFFSET_FILE = path.join(_packageDir, ".loopboard-offset.json");
+
+/** Default path for the Task Helper user store (v1.44) — users + encrypted connections. */
+export const DEFAULT_TASK_HELPER_FILE = path.join(_packageDir, ".loopboard-users.json");
 
 // Config schema — validated lazily on first call to getConfig().
 // All env reads happen inside getConfig(), never at module-import time,
@@ -78,6 +101,13 @@ const configSchema = z.object({
   JIRA_MEETING_NOTES_FILE: z.string().default(""),
   // v1.42: optional retro store path (persisted retrospective, ADR-052).
   JIRA_RETRO_FILE: z.string().default(""),
+  // v1.44 (ADR-054): Task Helper — per-user accounts + encrypted Jira/GitHub connections.
+  // All optional; the Task Helper is DISABLED (clear 503) unless BOTH secrets are set.
+  TOKEN_ENC_KEY: z.string().default(""), // base64 32 bytes — AES-256-GCM key for tokens at rest
+  SESSION_SECRET: z.string().default(""), // HMAC key for signing session cookies
+  TASK_HELPER_FILE: z.string().default(""), // user store path; default resolved from package dir
+  // v1.45 (ADR-055): comma-separated emails that get the "admin" role on signup (super-admin).
+  ADMIN_EMAILS: z.string().default(""),
   // v1.22: dev-status applicationType for linked-PR reads (GitHub | GitHubEnterprise | bitbucket).
   JIRA_DEV_STATUS_APP_TYPE: z.string().default("GitHub"),
   MCP_JIRA_HTTP_PORT: z.coerce.number().default(4001),
@@ -101,6 +131,12 @@ let cachedConfig: Config | null = null;
  * Safe to call multiple times — re-uses the cached result.
  */
 export function getConfig(): Config {
+  // v1.45 (ADR-055): a per-user request context (AsyncLocalStorage) wins over the global
+  // config, so every tool/jiraClient/AI call runs on that user's Jira/GitHub/AI. No context
+  // (stdio/Copilot, keyless tests) → the global `.env` config below, exactly as before.
+  const reqCfg = getRequestConfig();
+  if (reqCfg) return reqCfg;
+
   if (cachedConfig !== null) return cachedConfig;
 
   loadDotenv();
@@ -138,7 +174,7 @@ export function resetConfigCache(): void {
  */
 export function getLeavesFilePath(): string {
   const cfg = getConfig();
-  return cfg.JIRA_LEAVES_FILE || DEFAULT_LEAVES_FILE;
+  return resolveStorePath("leaves.json", cfg.JIRA_LEAVES_FILE, DEFAULT_LEAVES_FILE);
 }
 
 /**
@@ -149,49 +185,83 @@ export function getLeavesFilePath(): string {
  */
 export function getTeamFilePath(): string {
   const cfg = getConfig();
-  return cfg.JIRA_TEAM_FILE || DEFAULT_TEAM_FILE;
+  return resolveStorePath("team.json", cfg.JIRA_TEAM_FILE, DEFAULT_TEAM_FILE);
 }
 
 /** Resolved impediments file path (v1.16) — JIRA_IMPEDIMENTS_FILE or the default. */
 export function getImpedimentsFilePath(): string {
   const cfg = getConfig();
-  return cfg.JIRA_IMPEDIMENTS_FILE || DEFAULT_IMPEDIMENTS_FILE;
+  return resolveStorePath("impediments.json", cfg.JIRA_IMPEDIMENTS_FILE, DEFAULT_IMPEDIMENTS_FILE);
 }
 
 /** Resolved pull-requests file path (v1.16) — JIRA_PRS_FILE or the default. */
 export function getPrsFilePath(): string {
   const cfg = getConfig();
-  return cfg.JIRA_PRS_FILE || DEFAULT_PRS_FILE;
+  return resolveStorePath("prs.json", cfg.JIRA_PRS_FILE, DEFAULT_PRS_FILE);
 }
 
 /** Resolved post-scrum file path (v1.20) — JIRA_POST_SCRUM_FILE or the default. */
 export function getPostScrumFilePath(): string {
   const cfg = getConfig();
-  return cfg.JIRA_POST_SCRUM_FILE || DEFAULT_POST_SCRUM_FILE;
+  return resolveStorePath("post-scrum.json", cfg.JIRA_POST_SCRUM_FILE, DEFAULT_POST_SCRUM_FILE);
 }
 
 /** Resolved meeting-goal file path (v1.20) — JIRA_MEETING_GOAL_FILE or the default. */
 export function getMeetingGoalFilePath(): string {
   const cfg = getConfig();
-  return cfg.JIRA_MEETING_GOAL_FILE || DEFAULT_MEETING_GOAL_FILE;
+  return resolveStorePath("meeting-goal.json", cfg.JIRA_MEETING_GOAL_FILE, DEFAULT_MEETING_GOAL_FILE);
 }
 
 /** Resolved meeting-notes file path (v1.41, ADR-051) — JIRA_MEETING_NOTES_FILE or the default. */
 export function getMeetingNotesFilePath(): string {
   const cfg = getConfig();
-  return cfg.JIRA_MEETING_NOTES_FILE || DEFAULT_MEETING_NOTES_FILE;
+  return resolveStorePath("meeting-notes.json", cfg.JIRA_MEETING_NOTES_FILE, DEFAULT_MEETING_NOTES_FILE);
 }
 
 /** Resolved retro file path (v1.42, ADR-052) — JIRA_RETRO_FILE or the default. */
 export function getRetroFilePath(): string {
   const cfg = getConfig();
-  return cfg.JIRA_RETRO_FILE || DEFAULT_RETRO_FILE;
+  return resolveStorePath("retro.json", cfg.JIRA_RETRO_FILE, DEFAULT_RETRO_FILE);
 }
 
 /** Resolved offset-ledger file path (v1.26) — JIRA_OFFSET_FILE or the default. */
 export function getOffsetFilePath(): string {
   const cfg = getConfig();
-  return cfg.JIRA_OFFSET_FILE || DEFAULT_OFFSET_FILE;
+  return resolveStorePath("offset.json", cfg.JIRA_OFFSET_FILE, DEFAULT_OFFSET_FILE);
+}
+
+/** Resolved Task Helper user-store path (v1.44) — TASK_HELPER_FILE or the default. */
+export function getTaskHelperFilePath(): string {
+  const cfg = getConfig();
+  return cfg.TASK_HELPER_FILE || DEFAULT_TASK_HELPER_FILE;
+}
+
+/**
+ * Task Helper secrets (v1.44, ADR-054). Returns the raw enc key + session secret.
+ * The feature is only enabled when BOTH are present; callers use `isTaskHelperConfigured`.
+ */
+export function getTaskHelperSecrets(): { encKey: string; sessionSecret: string } {
+  const cfg = getConfig();
+  return { encKey: cfg.TOKEN_ENC_KEY.trim(), sessionSecret: cfg.SESSION_SECRET.trim() };
+}
+
+/** True when BOTH Task Helper secrets are configured (else the feature returns 503). */
+export function isTaskHelperConfigured(): boolean {
+  const { encKey, sessionSecret } = getTaskHelperSecrets();
+  return encKey !== "" && sessionSecret !== "";
+}
+
+/**
+ * v1.45 (ADR-055) — is this email bootstrapped to the "admin" role via ADMIN_EMAILS?
+ * ADMIN_EMAILS is a comma-separated allowlist; matching is case-insensitive. This is the
+ * super-admin bootstrap and is AUTHORITATIVE (an ADMIN_EMAILS account is always admin).
+ */
+export function isAdminEmail(email: string): boolean {
+  const list = getConfig()
+    .ADMIN_EMAILS.split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  return list.includes(email.trim().toLowerCase());
 }
 
 /** Offset policy (v1.26, ADR-038) — N required points + N2 surplus threshold. */

@@ -44,6 +44,7 @@ async function postAi<T>(path: string, body: unknown): Promise<T> {
     response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include", // v1.45 (ADR-055): run AI on the signed-in user's own token
       body: JSON.stringify(body),
     });
   } catch {

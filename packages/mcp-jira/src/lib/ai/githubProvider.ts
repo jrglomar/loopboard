@@ -37,7 +37,10 @@ export class GithubProvider implements AiProvider {
     messages: Array<{ role: "user" | "assistant"; content: string }>,
     options: { maxTokens: number }
   ): Promise<AiCompletion> {
-    const text = await this.fetchCompletion(system, messages, options.maxTokens);
+    // Free-form text (e.g. the Task Helper's Markdown). NOT JSON mode: GitHub Models rejects
+    // response_format:json_object unless the messages literally contain the word "json", and
+    // these callers want prose/Markdown, not a JSON object. JSON mode is completeWithSchema's job.
+    const text = await this.fetchCompletion(system, messages, options.maxTokens, false);
     return { text };
   }
 
@@ -51,7 +54,7 @@ export class GithubProvider implements AiProvider {
     schema: T
   ): Promise<z.output<T>> {
     const maxTokens = 4096;
-    const text = await this.fetchCompletion(system, messages, maxTokens);
+    const text = await this.fetchCompletion(system, messages, maxTokens, true);
 
     // Attempt to parse
     const first = tryParse(text, schema);
@@ -63,7 +66,7 @@ export class GithubProvider implements AiProvider {
       { role: "assistant", content: text },
       { role: "user", content: RE_ASK_MESSAGE },
     ];
-    const retryText = await this.fetchCompletion(system, retryMessages, maxTokens);
+    const retryText = await this.fetchCompletion(system, retryMessages, maxTokens, true);
     const second = tryParse(retryText, schema);
     if (second !== null) return second;
 
@@ -137,17 +140,21 @@ export class GithubProvider implements AiProvider {
   private async fetchCompletion(
     system: string,
     messages: Array<{ role: "user" | "assistant"; content: string }>,
-    maxTokens: number
+    maxTokens: number,
+    jsonMode: boolean
   ): Promise<string> {
-    const body = {
+    // GitHub Models (OpenAI-compatible) 400s on response_format:json_object unless the messages
+    // literally contain the word "json" — guarantee it in the system prompt when in JSON mode.
+    const sys = jsonMode ? ensureJsonMention(system) : system;
+    const body: Record<string, unknown> = {
       model: this.model,
       messages: [
-        { role: "system" as const, content: system },
+        { role: "system" as const, content: sys },
         ...messages,
       ],
       max_tokens: maxTokens,
-      response_format: { type: "json_object" as const },
     };
+    if (jsonMode) body.response_format = { type: "json_object" as const };
 
     let response: Response;
     try {
@@ -166,31 +173,7 @@ export class GithubProvider implements AiProvider {
       throw new UpstreamError(`GitHub Models request failed: ${msg}`, 502);
     }
 
-    if (!response.ok) {
-      const status = response.status;
-      if (status === 401 || status === 403) {
-        throw new UpstreamError(
-          "GitHub Models authentication failed — check GITHUB_MODELS_TOKEN / GITHUB_TOKEN (PAT needs models:read)",
-          status
-        );
-      }
-      if (status === 404) {
-        throw new UpstreamError(
-          "GitHub Models endpoint not found — check GITHUB_MODELS_BASE_URL",
-          404
-        );
-      }
-      let detail = "";
-      try {
-        detail = await response.text();
-      } catch {
-        // ignore
-      }
-      throw new UpstreamError(
-        `GitHub Models error (${status}): ${detail}`,
-        status
-      );
-    }
+    if (!response.ok) throw await mapGithubHttpError(response);
 
     let data: unknown;
     try {
@@ -201,6 +184,11 @@ export class GithubProvider implements AiProvider {
 
     return extractChoiceText(data);
   }
+}
+
+/** GitHub Models requires the word "json" in the messages when response_format is json_object. */
+function ensureJsonMention(system: string): string {
+  return /json/i.test(system) ? system : `${system}\n\nRespond with a single JSON object.`;
 }
 
 function tryParse<T extends z.ZodObject<z.ZodRawShape>>(
@@ -293,20 +281,24 @@ function safeJsonParse(text: string): unknown {
 
 async function mapGithubHttpError(response: Response): Promise<UpstreamError> {
   const status = response.status;
+  let detail = "";
+  try {
+    detail = (await response.text()).slice(0, 200).replace(/\s+/g, " ").trim();
+  } catch {
+    /* ignore */
+  }
   if (status === 401 || status === 403) {
+    // Surface GitHub's actual reason. "Bad credentials" ⇒ the token is invalid/expired, NOT a
+    // scope problem; a genuine scope/permission issue reads differently. Don't mislead the user.
     return new UpstreamError(
-      "GitHub Models authentication failed — check GITHUB_MODELS_TOKEN / GITHUB_TOKEN (PAT needs models:read)",
+      `GitHub Models rejected the token (${status}${detail ? `: ${detail}` : ""}). ` +
+        "Use a valid, unexpired GitHub token with Models access — a fine-grained PAT with the " +
+        "'Models: read' account permission, or a classic PAT. Set it as GITHUB_MODELS_TOKEN.",
       status
     );
   }
   if (status === 404) {
     return new UpstreamError("GitHub Models endpoint not found — check GITHUB_MODELS_BASE_URL", 404);
-  }
-  let detail = "";
-  try {
-    detail = await response.text();
-  } catch {
-    /* ignore */
   }
   return new UpstreamError(`GitHub Models error (${status}): ${detail}`, status);
 }

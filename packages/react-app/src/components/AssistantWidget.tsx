@@ -2,8 +2,7 @@
 // A fixed FAB at the lower-right that pops the AI Sprint Assistant (ChatPanel) on click.
 // Rendered once in App.tsx so it's available on every tab.
 
-import { useState } from "react";
-import { useEffect } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { MessageCircle, X } from "lucide-react";
 import { ChatPanel } from "./ChatPanel";
 import { getAiStatus } from "../lib/aiClient";
@@ -42,14 +41,58 @@ function AssistantPanel() {
   );
 }
 
+/** Focusable elements inside `root`, in DOM order, skipping hidden ones. */
+function focusablesIn(root: HTMLElement): HTMLElement[] {
+  const sel = 'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
+  return Array.from(root.querySelectorAll<HTMLElement>(sel)).filter((el) => el.offsetParent !== null);
+}
+
 export function AssistantWidget() {
   const [open, setOpen] = useState(false);
   const [everOpened, setEverOpened] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const toggle = () => {
     setEverOpened(true);
     setOpen((v) => !v);
   };
+
+  // v1.48 (UI review A11Y-01): make the aria-modal dialog behave like one — move focus into the
+  // panel on open, restore it to the trigger on close.
+  useEffect(() => {
+    if (open) {
+      const panel = panelRef.current;
+      if (panel) (focusablesIn(panel)[0] ?? panel).focus();
+    } else if (everOpened) {
+      triggerRef.current?.focus();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Escape closes; Tab is trapped inside the panel while it's open.
+  function onPanelKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      setOpen(false);
+      return;
+    }
+    if (e.key !== "Tab" || !panelRef.current) return;
+    const items = focusablesIn(panelRef.current);
+    if (items.length === 0) {
+      e.preventDefault();
+      return;
+    }
+    const first = items[0]!;
+    const last = items[items.length - 1]!;
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
 
   return (
     <>
@@ -65,9 +108,12 @@ export function AssistantWidget() {
       {/* Popup panel — mounted after first open, hidden (not unmounted) when closed */}
       {everOpened && (
         <div
+          ref={panelRef}
+          tabIndex={-1}
+          onKeyDown={onPanelKeyDown}
           className={cn(
             "fixed bottom-[5.5rem] right-4 sm:right-5 z-50 w-[750px] max-w-[calc(100vw-2rem)]",
-            "rounded-lg shadow-2xl ring-1 ring-black/5",
+            "rounded-lg shadow-2xl ring-1 ring-black/5 focus:outline-none",
             !open && "hidden"
           )}
           role="dialog"
@@ -80,6 +126,7 @@ export function AssistantWidget() {
 
       {/* Floating action button */}
       <button
+        ref={triggerRef}
         type="button"
         onClick={toggle}
         aria-label={open ? "Close sprint assistant" : "Open sprint assistant"}

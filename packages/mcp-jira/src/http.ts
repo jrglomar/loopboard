@@ -27,6 +27,11 @@ import { ZodError } from "zod";
 import { getAiProvider, getAiStatus } from "./lib/ai/provider.js";
 import { draftTickets, enhanceTicket, draftSprintSummary, planDevTickets } from "./lib/ai/draftService.js";
 import { askAssistant } from "./lib/ai/askService.js";
+import { taskHelperRouter } from "./routes/taskHelper.js";
+import { adminRouter } from "./routes/admin.js";
+import { perUserContext } from "./lib/auth/perUserContext.js";
+import { canWriteJira } from "./lib/requestContext.js";
+import { JIRA_WRITE_TOOLS } from "./lib/delegation.js";
 
 // ---- Read package version at startup ----
 const _require = createRequire(import.meta.url);
@@ -67,10 +72,28 @@ app.use(
       }
       callback(null, false);
     },
-    methods: ["GET", "POST"],
+    // v1.44 (ADR-054): the Task Helper session cookie needs credentialed CORS. The origin
+    // callback above reflects the SPECIFIC request origin (never "*"), which credentials require.
+    credentials: true,
+    // v1.47 (ADR-057): PATCH is required by the journal to-do toggle. Omitting a verb here makes
+    // the browser's preflight reject the call even though the route exists (same-process tests
+    // never preflight, so this only ever fails in a real browser).
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     allowedHeaders: ["Content-Type"],
   })
 );
+
+// v1.44 (ADR-054): Task Helper routes (auth + per-user connections + AI ticket→prompt).
+// Mounted here only — never in the MCP tool registry or the stdio server.
+app.use(taskHelperRouter);
+
+// v1.45 (ADR-055 Phase B): super-admin console API (/api/admin/*), guarded by requireAdmin.
+app.use(adminRouter);
+
+// v1.45 (ADR-055): per-user request scoping. When authenticated, tool + AI calls run on the
+// signed-in user's own Jira/GitHub/AI (via AsyncLocalStorage in getConfig); unauthenticated
+// requests fall back to the global .env (stdio/Copilot + keyless smoke unaffected).
+app.use(["/api/tools", "/api/ai"], perUserContext);
 
 // ---- Error envelope helper ----
 
@@ -243,6 +266,18 @@ app.post("/api/tools/:name", async (req, res) => {
 
   if (!tool) {
     errorResponse(res, 404, "UNKNOWN_TOOL", `Tool '${toolName}' not found`);
+    return;
+  }
+
+  // v1.46 (ADR-056): a user on SHARED Jira credentials may not mutate Jira unless an admin
+  // granted writes — the change would be recorded under the token owner's name.
+  if (JIRA_WRITE_TOOLS.has(tool.name) && !canWriteJira()) {
+    errorResponse(
+      res,
+      403,
+      "READ_ONLY_USER",
+      "You're using shared Jira credentials, so you can't change Jira. Ask an admin to enable writes for your account, or connect your own Jira token."
+    );
     return;
   }
 

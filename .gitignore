@@ -34,6 +34,11 @@ coverage/
 # Retro store (v1.42 — host-local JSON, never committed)
 .loopboard-retro.json
 *.loopboard-retro.json
+# Task Helper user store (v1.44 — accounts + ENCRYPTED connections, NEVER committed)
+.loopboard-users.json
+*.loopboard-users.json
+# Per-user store dir (v1.45 — each user's leaves/team/retro/etc. JSON, NEVER committed)
+.loopboard-user-stores/
 
 # Editor / OS
 .DS_Store

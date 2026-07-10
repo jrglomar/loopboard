@@ -56,6 +56,9 @@ export async function callTool<T>(
     response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      // v1.45 (ADR-055): send the session cookie so the bridge scopes tools to the signed-in
+      // user's own Jira/GitHub. Unauthenticated → the bridge falls back to the shared .env.
+      credentials: "include",
       body: JSON.stringify(input),
     });
   } catch {

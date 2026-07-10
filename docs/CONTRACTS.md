@@ -1,6 +1,6 @@
 # Integration Contracts
 
-**Status: FINAL — AUTHORITATIVE (v1.43)**  
+**Status: FINAL — AUTHORITATIVE (v1.44)**  
 Builder agents implement exactly what this document says. If something here is
 ambiguous, file a note to the Architect agent; do NOT invent new surface area or
 prefer the spec over this document — this document supersedes the spec on all
@@ -451,9 +451,10 @@ export interface AiProvider {
   `choices[0].message.content`. Parse with the zod schema; on parse failure retry ONCE
   with an appended user message `"Your previous reply was not valid JSON matching the
   required schema. Reply with ONLY the JSON object."`; second failure → `UpstreamError`
-  "AI returned an unparseable response". 401/403 → `UpstreamError` "GitHub Models
-  authentication failed — check GITHUB_MODELS_TOKEN / GITHUB_TOKEN (PAT needs models:read)".
-  404 → include hint "check GITHUB_MODELS_BASE_URL".
+  "AI returned an unparseable response". 401/403 → `UpstreamError` that **surfaces GitHub's
+  actual response detail** (e.g. "GitHub Models rejected the token (401: … Bad credentials …).
+  Use a valid, unexpired GitHub token with Models access…") — v1.44.2, so a plain invalid/expired
+  token isn't mis-reported as a scope problem. 404 → include hint "check GITHUB_MODELS_BASE_URL".
 
 **Endpoints (mcp-jira `src/http.ts`):**
 
@@ -1519,6 +1520,252 @@ average, burndown chart, retro board, sprint report generator.
 
 ---
 
+## 8. Task Helper — per-user accounts + AI ticket→prompt (v1.44, ADR-054)
+
+An **additive, team-internal** section on the mcp-jira bridge (`:4001`): a teammate signs up, connects
+**their own** Jira/GitHub (pasted tokens, encrypted at rest), fetches **their** sprint tickets, and the AI
+produces a **refined ticket** + a **ready-to-paste coding-agent prompt**. The existing single-tenant board
+is untouched. New modules are imported **only by the bridge/router**, never by the MCP tool registry or the
+stdio entry — the tool set stays at 40.
+
+### 8.1 Enablement + env (§3 additions)
+
+| Var | Required | Purpose |
+|---|---|---|
+| `TOKEN_ENC_KEY` | for Task Helper | base64 **32 bytes** — AES-256-GCM key encrypting connection tokens at rest |
+| `SESSION_SECRET` | for Task Helper | HMAC key signing the session cookie |
+| `TASK_HELPER_FILE` | optional | user-store path (default `<mcp-jira>/.loopboard-users.json`, git-ignored) |
+
+The feature is **enabled only when BOTH secrets are set** (`isTaskHelperConfigured()`); otherwise every
+Task Helper route returns **503 `TASK_HELPER_UNAVAILABLE`**. AI steps reuse the existing `AI_PROVIDER` + key
+(no per-user AI key). CORS for these routes uses `credentials: true` + a specific origin (never `*`).
+
+### 8.2 Store (host-local JSON, encrypted)
+
+`{ users: { [id]: { id, email, passwordHash, createdAt } }, connections: { [userId]: { jira?, github? } } }`.
+A connection = `{ enc: { ciphertext, iv, tag }, meta: {…masked…}, updatedAt }`. **Raw tokens never leave the
+store decrypted** except in-memory, per request, to build a client. Passwords hashed with **scrypt** (salted,
+timing-safe verify). No native deps (Node `crypto` + JSON store, mirroring §4 store pattern).
+
+### 8.3 Auth endpoints
+
+- `POST /api/auth/signup` `{ email, password(≥8) }` → sets httpOnly session cookie; `{ ok, data:{ email } }`.
+  `409 EMAIL_TAKEN` if the email exists.
+- `POST /api/auth/login` `{ email, password }` → sets cookie; `{ email }`. `401 BAD_CREDENTIALS` on mismatch.
+- `POST /api/auth/logout` → clears cookie. `GET /api/auth/me` → `{ email }` or `401 UNAUTHENTICATED`.
+
+### 8.4 Connections (all require auth; tokens NEVER returned)
+
+- `GET /api/me/connections` → `{ jira: { connected, baseUrl, email, hint } | null, github: { connected, login, hint } | null }`.
+- `PUT /api/me/connections/jira` `{ baseUrl, email, token }` — validates via `GET /rest/api/3/myself`, then
+  encrypts + stores. `400 INVALID_CONNECTION` if validation fails. Returns the masked status.
+- `PUT /api/me/connections/github` `{ token }` — validates via `GET /user`. Same shape.
+- `DELETE /api/me/connections/:provider` (`jira|github`) → removes it.
+
+### 8.5 Task Helper (require auth + a Jira connection)
+
+- `GET /api/me/tasks/issues[?sprintId=<id>]` → `{ issues: [{ key, summary, status, url }] }` — the user's
+  assigned issues. **v1.46 (ADR-055 Phase F):** with `sprintId` the JQL is
+  `assignee = currentUser() AND sprint = <id>` (the sprint selected on the board); without it, it falls
+  back to `sprint in openSprints()`. `400 VALIDATION` if `sprintId` isn't a positive integer;
+  `409 NO_JIRA_CONNECTION` if unset.
+- `POST /api/me/tasks/help` `{ ticketKey, extraContext? }` → `{ refinedText, prompt }`. Fetches the ticket via
+  the user's connection, then runs the AI pipeline (refine → technical plan → prompt-engineer). `503
+  AI_UNAVAILABLE` when AI is off.
+
+### 8.6 Personal sprint journal (v1.48, ADR-057/058) — require auth
+
+A notes **feed** + a to-do checklist for the signed-in user, scoped to one sprint. **Personal**:
+stored under the user's REAL id (`.loopboard-user-stores/<userId>/journal.json`), never the credential
+source's (§9.8) — a shared-credential viewer keeps their own journal.
+
+- `GET /api/me/journal?sprintId=<id>` → `{ notes: JournalNote[] (newest first), todos: JournalTodo[] (oldest first) }`.
+  `400 VALIDATION` unless `sprintId` is a positive integer.
+- `POST /api/me/journal/notes` `{ sprintId, text(1..5000) }` → `201` + the new note.
+- `DELETE /api/me/journal/notes/:id` → `{ deleted: true }`; `404 NOT_FOUND` when unknown.
+- `POST /api/me/journal/todos` `{ sprintId, text(1..500), ticketKey? }` → `201` + the new to-do.
+- `PATCH /api/me/journal/todos/:id` `{ text?, done?, ticketKey?(null clears) }` → the updated to-do.
+  Toggling `done` stamps/clears `doneAt`. `404 NOT_FOUND` when unknown.
+- `DELETE /api/me/journal/todos/:id` → `{ deleted: true }`; `404 NOT_FOUND` when unknown.
+
+```
+JournalNote = { id, sprintId, text, createdAt }
+JournalTodo = { id, sprintId, text, done, ticketKey?, createdAt, doneAt? }
+```
+
+**Migration:** v1.47 stored `notes` as `{ [sprintId]: { [YYYY-MM-DD]: text } }`. The store converts each
+day's note into a feed entry on first read and **persists** the result, so entry ids are stable.
+
+⚠ **CORS:** `PATCH` is the only verb used by the journal's to-do toggle. Every verb the app uses must be
+listed in the bridge's `cors({ methods })` or the browser's preflight rejects the call even though the
+route exists. Same-process tests never preflight, so `http.test.ts` asserts the preflight explicitly.
+
+### 8.7 Quality
+
+Keyless/offline tests: crypto/scrypt/session round-trips; `requireAuth` 401; store never exposes a raw
+token; `userJira`/`userGithub` validate+fetch (mock axios); pipeline (mock provider) → `{refinedText,prompt}`;
+frontend auth gate + connections + TaskHelper (mock fetch). Smoke: unauth `/api/me/*` → 401; no-secrets → 503.
+
+---
+
+## 9. Multi-tenancy — per-user Jira/GitHub/AI + super-admin (v1.45, ADR-055)
+
+Extends §8 from an additive tab into a **multi-tenant app**: login is required to enter, and every feature
+runs on the signed-in user's OWN Jira/GitHub/AI token. A super-admin configures the non-secret board/env
+block and supervises users. Secrets stay AES-256-GCM at rest, decrypted only in-memory per request.
+
+### 9.1 Request-scoped config (the backbone)
+
+`getConfig()` is the single funnel every tool + `jiraClient` + the AI layer read. `lib/requestContext.ts`
+holds an `AsyncLocalStorage<{ userId, config }>`; `getConfig()` returns the context config when present,
+else the global `.env` (stdio/Copilot + keyless tests unchanged). Bridge middleware `perUserContext` on
+`/api/tools` + `/api/ai` resolves session → the user's merged config → `runWithUser(...)`, so **all 40 tools
+run on the user's own Jira with zero tool changes**. `jiraClient` caches its axios client **per credential
+set**. Per-user JSON stores live under `.loopboard-user-stores/<userId>/…json`.
+
+### 9.2 Per-user config = merge
+
+`resolveUserConfig(userId)` builds a full `Config`, later wins:
+**.env base ← admin global defaults ← admin per-user overrides ← the user's Jira creds ← the user's AI**.
+Admin config is the NON-secret subset (`adminConfigSchema`): base url/email, PO/Dev board ids + project keys
++ project lists, story-points field, link type, flagged field, code-review statuses, dev-status app type,
+velocity sprints, required points, offset threshold. Tokens are the user's own encrypted connections —
+never admin-settable, never returned.
+
+### 9.3 Roles + ADMIN_EMAILS (§3 addition)
+
+The user record gains `role: "admin" | "user"`. `ADMIN_EMAILS` (comma-separated) bootstraps the admin role
+at signup and is AUTHORITATIVE (a listed email is always admin and can't be demoted via the API).
+`GET /api/auth/me` + `GET /api/me/context` include `role`.
+
+### 9.4 Per-user AI connection (fixes the shared-token failure)
+
+`PUT /api/me/connections/ai` `{ provider: "anthropic"|"github", token, model? }` — `validateAi` does a tiny
+live call at connect so a bad/expired token is caught then, clearly. Folds into the merged config so
+`getAiProvider()` is per-user. `connectionStatus` includes `ai: { connected, provider, model, hint } | null`;
+`DELETE /api/me/connections/ai` removes it.
+
+### 9.5 Context + app-wide gate
+
+`GET /api/me/context` → `{ connections, ready, boards, role }`, `ready = !!jira && !!github`. Frontend
+`AuthProvider` + `AppGate`: not signed in → login; signed in but not ready → onboarding (connect accounts);
+ready → the app. `callTool` + the AI client send `credentials: "include"`.
+
+### 9.6 Admin console API (all require an admin session → else 401 / 403)
+
+- `GET /api/admin/users` → `{ users: [{ id, email, role, bootstrapAdmin, createdAt, connections:{jira,github,ai}, config }], globalConfig }`.
+- `GET /api/admin/config` → `{ globalConfig }`; `PUT /api/admin/config` (body = `adminConfigSchema`) → replaces the global defaults.
+- `PUT /api/admin/users/:id/config` (body = `adminConfigSchema`) → replaces that user's overrides; `404 NOT_FOUND` if unknown.
+- `PUT /api/admin/users/:id/role` `{ role }` → promote/demote; `409 BOOTSTRAP_ADMIN` when demoting an ADMIN_EMAILS account.
+- Enablement: `/api/admin/*` returns **503 TASK_HELPER_UNAVAILABLE** unless both Task Helper secrets are set.
+
+### 9.7 Quality
+
+Keyless/offline: ALS context vs `.env` fallback; per-user store isolation; config merge
+(global←override←creds); admin authz (401/403); role bootstrap + demote guard; per-user AI validation
+(mock). Existing suites stay green via the `.env` fallback + an `AppGate` pass-through mock in `App.test`.
+
+---
+
+## 9.8 Shared credentials + user CRUD (v1.46, ADR-056)
+
+A teammate can be onboarded with **no tokens at all**. An admin points their account at a *credential
+source* user (typically the admin); the account then borrows that user's Jira/GitHub/AI connections and
+sees the same board point-of-view.
+
+### 9.8.1 Model
+
+`StoredUser` gains `credentialSourceUserId?: string | null`, `allowWrites?: boolean`, `disabled?: boolean`.
+
+- **Effective connection** = the user's OWN connection for a provider, else the source's
+  (`getEffectiveConnection`). Exactly **one hop** — a source must own its credentials, so resolution
+  never cycles. A user's own connection always wins over the borrowed one.
+- **Stores**: a borrower's per-user JSON stores resolve to the **source's** directory
+  (`RequestContext.storeUserId`), so they share the team's leaves/retro/meeting-notes/offset.
+- **Config merge** becomes: `.env` ← admin global ← **source's overrides** ← the user's own overrides ←
+  effective Jira creds ← effective AI creds.
+- **Readiness**: `/api/me/context.ready` uses effective connections, so a borrower passes the app gate
+  with no tokens of their own.
+
+### 9.8.2 Write safety
+
+A Jira mutation made on a borrowed token is recorded in Jira under the **token owner's** name. So a
+borrower is **read-only against Jira** unless an admin sets `allowWrites`. `RequestContext.canWriteJira`
+carries this; `POST /api/tools/:name` rejects the eight **Jira-mutating** tools with **403
+`READ_ONLY_USER`**:
+
+`create_po_ticket`, `create_dev_ticket`, `update_ticket`, `create_sprint`, `set_sprint_goal`,
+`assign_issue`, `transition_issue`, `move_issue_to_sprint` (`JIRA_WRITE_TOOLS` in `lib/delegation.ts`;
+a new Jira-mutating tool MUST be added there).
+
+The other `set_*` tools write **local team JSON** (leaves, retro, notes, impediments, offset) — not Jira —
+and stay available. Users on their **own** token are unaffected.
+
+### 9.8.3 Connection status + context additions
+
+`connectionStatus` entries gain `inherited: boolean` and `via: string` (the source's email). A borrower
+never sees the owner's masked token `hint` (it is `""`). `/api/me/context` gains `readOnly: boolean` and
+`sharedFrom: string | null`.
+
+### 9.8.4 Admin user CRUD (all require an admin session)
+
+- `POST /api/admin/users` `{ email, password(≥8), role?, credentialSourceUserId?, allowWrites? }` → `201` + user view.
+  `409 EMAIL_TAKEN`; `400 INVALID_CREDENTIAL_SOURCE` when the source is missing, is the target, borrows
+  credentials itself, or has no Jira connection to share.
+- `PUT /api/admin/users/:id` `{ email?, password?, credentialSourceUserId?(null clears), allowWrites?, disabled? }`.
+  `409 CANNOT_DISABLE_SELF`; `409 BOOTSTRAP_ADMIN` (ADMIN_EMAILS accounts can't be disabled);
+  `409 IN_USE` when making a lender into a borrower; `409 EMAIL_TAKEN`.
+- `DELETE /api/admin/users/:id` → removes the account, its encrypted connections and config overrides.
+  `409 CANNOT_DELETE_SELF`; `409 BOOTSTRAP_ADMIN`; `409 IN_USE` when other users borrow its credentials.
+- The admin user view adds `credentialSourceUserId`, `sharedFrom`, `allowWrites`, `disabled`, `readOnly`,
+  `canBeSource`. `connections` reports the user's **own** connections (not the borrowed ones).
+
+**Disabled accounts**: `POST /api/auth/login` → `403 ACCOUNT_DISABLED`; `requireAuth` rejects an existing
+session with `403 ACCOUNT_DISABLED` (a deleted account's session → `401 UNAUTHENTICATED`).
+
+### 9.8.5 Quality
+
+Keyless/offline: effective-connection resolution (own vs borrowed, own-wins); store path points at the
+source; config inheritance (source ← own); `canWriteJira` false→true on `allowWrites`; disabled → no
+resolve/no login; admin CRUD happy paths + every guard; `403 READ_ONLY_USER` on a Jira-write tool and
+**no** 403 on a local-store tool. Frontend: create-with-sharing, source list filtered to `canBeSource`,
+read-only badge, grant-writes, disable, two-step delete, password reset.
+
+---
+
+## 9.9 Reusable config templates (v1.47, ADR-057) — admin only
+
+A named bundle of `adminConfigSchema` values, saved once and applied to any user's overrides or to the
+global defaults. Stored in the user store as `configTemplates`.
+
+`ConfigTemplate = { id, name, config: AdminConfig, createdAt, updatedAt }`.
+
+- `GET /api/admin/templates` → `{ templates }` (sorted by name).
+- `POST /api/admin/templates` `{ name(1..80), config }` → `201`. `409 NAME_TAKEN`; `400 VALIDATION` on a bad config.
+- `PUT /api/admin/templates/:id` `{ name?, config? }` → the updated template. `404 NOT_FOUND`; `409 NAME_TAKEN`.
+- `DELETE /api/admin/templates/:id` → `{ deleted: true }`; `404 NOT_FOUND`.
+- `POST /api/admin/users/:id/config/apply-template` `{ templateId, merge? }` → the updated user view.
+- `POST /api/admin/config/apply-template` `{ templateId, merge? }` → `{ globalConfig }`.
+
+`merge: true` layers the template **over** what's already set; the default **replaces** the target's config.
+Applying is just a config write — the §9.2 merge order is unchanged.
+
+### 9.9.1 Quality
+
+Keyless/offline: template CRUD + `409 NAME_TAKEN` + `400 VALIDATION`; apply replace vs merge, to a user
+and to the global defaults; `404` on an unknown template; `403` for non-admins. Frontend: empty state,
+create, field-count, two-step delete, and scoped apply (a user's picker never touches the globals).
+
+---
+
+## 10. UI surfaces (v1.47, ADR-057)
+
+**Connections** is its own tab (`pages/Connections.tsx`) — the Task Helper no longer embeds the
+connections panel. **Task Helper** = sprint ticket picker → AI prompt, plus the §8.6 personal journal.
+**Admin** = users + templates + global defaults. Board selector is hidden on Linking, Connections and Admin.
+
+---
+
 ## Changelog (from DRAFT to FINAL)
 
 Changes made by the Architect agent during finalization:
@@ -2400,3 +2647,18 @@ All frontend/presentation; **no new tool, jira tools stay 36, IO shapes unchange
     is remembered per browser in `localStorage` (`loopboard.collapse.<key>`, default expanded). Shared
     `hooks/useCollapse.ts` + `components/CollapseToggle.tsx`; no tool/HTTP/IO change. react-app pill
     **1.42.0 → 1.43.0**. Live-verified: toggle hides the body and the choice survives a reload.
+
+## Changelog v1.44 (2026-07-09 — Task Helper: per-user accounts + AI ticket→prompt; ADR-054)
+
+161. **§8 (new) — Task Helper.** Additive, team-internal section on the mcp-jira bridge: signup/login,
+    encrypted per-user Jira/GitHub connections, fetch-my-sprint-tickets, and an AI pipeline
+    (refine → technical plan → prompt-engineer) producing `{ refinedText, prompt }`. New env
+    `TOKEN_ENC_KEY` / `SESSION_SECRET` / `TASK_HELPER_FILE`; feature 503s unless both secrets set. New
+    endpoints `/api/auth/*`, `/api/me/connections*`, `/api/me/tasks/*` (auth-gated). **Zero new deps** —
+    Node `crypto` (AES-256-GCM tokens, HMAC sessions, scrypt passwords) + a git-ignored JSON user store
+    (mirrors §4 stores). Tokens **never returned to the client or logged**. The MCP tool registry (40),
+    stdio server, and shared board are untouched. react-app gains a login-gated **Task Helper** tab.
+162. **v1.44.1 bugfix — §8.5 fetch-my-issues uses `/rest/api/3/search/jql`.** Atlassian **removed** the
+    classic `GET /rest/api/3/search` (now **410 Gone**); `userJira.fetchMySprintIssues` migrated to the
+    replacement `/rest/api/3/search/jql` (same issue shape; `fields` explicit; first page). The 40 MCP
+    tools were unaffected (they read sprint issues via the Agile API). Verified live against real Jira.

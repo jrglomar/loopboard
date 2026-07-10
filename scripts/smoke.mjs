@@ -452,6 +452,24 @@ if (!jiraReady) {
     fail("[JIRA] POST get_all_leaves {} → 200", String(e));
   }
 
+  // JIRA v1.44 (ADR-054): Task Helper routes must SAFELY REFUSE an unauthenticated request —
+  // 503 TASK_HELPER_UNAVAILABLE when the secrets aren't set, or 401 UNAUTHENTICATED when they
+  // are (a developer .env may carry them). Either is fine; a 200/500/token-leak is not.
+  try {
+    const { status, body } = await httpGet(`http://127.0.0.1:${JIRA_PORT}/api/me/connections`);
+    const safe =
+      body.ok === false &&
+      ((status === 503 && body.error?.code === "TASK_HELPER_UNAVAILABLE") ||
+        (status === 401 && body.error?.code === "UNAUTHENTICATED"));
+    if (safe) {
+      pass(`[JIRA] GET /api/me/connections (no session) → ${status} ${body.error?.code} (safely refuses)`);
+    } else {
+      fail("[JIRA] GET /api/me/connections → 401/503", `status=${status} code=${body.error?.code}`);
+    }
+  } catch (e) {
+    fail("[JIRA] GET /api/me/connections → 401/503", String(e));
+  }
+
   // JIRA v1.5: set_leaves {} → 400 VALIDATION (sprintId/assignee required) — no Jira, no real file write
   try {
     const { status, body } = await httpPost(`http://127.0.0.1:${JIRA_PORT}/api/tools/set_leaves`, {});
