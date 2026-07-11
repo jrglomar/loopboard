@@ -28,6 +28,10 @@ vi.mock("./pages/Reports", () => ({
   Reports: () => <div data-testid="page-reports">Reports</div>,
 }));
 
+vi.mock("./pages/Guide", () => ({
+  Guide: () => <div data-testid="page-guide">Guide</div>,
+}));
+
 // ── Setup/teardown ────────────────────────────────────────────────────────────
 
 beforeEach(() => {
@@ -109,5 +113,14 @@ describe("App — tab nav (v1.7, ADR-018)", () => {
   it("nav has accessible label 'Main navigation'", () => {
     render(<App />);
     expect(screen.getByRole("navigation", { name: /main navigation/i })).toBeTruthy();
+  });
+
+  // v1.49 (ADR-060): the guide is opened from a header button, not a tab.
+  it("opens the Guide page from the header button (and it's not a tab)", () => {
+    render(<App />);
+    expect(screen.queryByRole("tab", { name: /guide/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /user guide/i }));
+    expect(screen.getByTestId("page-guide")).toBeTruthy();
+    expect(screen.queryByTestId("page-dashboard")).toBeNull();
   });
 });

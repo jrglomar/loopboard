@@ -1,6 +1,6 @@
 {
   "name": "@loopboard/react-app",
-  "version": "1.48.0",
+  "version": "1.49.0",
   "private": true,
   "type": "module",
   "description": "Loopboard dashboard — sprint board, daily huddle digest, ticket generator, chat panel",

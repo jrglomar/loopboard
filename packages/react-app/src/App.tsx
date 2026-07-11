@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LayoutDashboard, CalendarRange, CalendarDays, Link2, BarChart3, Sparkles, Plug, ShieldCheck, LogOut } from "lucide-react";
+import { LayoutDashboard, CalendarRange, CalendarDays, Link2, BarChart3, Sparkles, Plug, ShieldCheck, BookOpen, LogOut } from "lucide-react";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { AppGate } from "./components/AppGate";
 import { Dashboard } from "./pages/Dashboard";
@@ -10,6 +10,7 @@ import { Reports } from "./pages/Reports";
 import { TaskHelper } from "./pages/TaskHelper";
 import { Connections } from "./pages/Connections";
 import { Admin } from "./pages/Admin";
+import { Guide } from "./pages/Guide";
 import { AssistantWidget } from "./components/AssistantWidget";
 import { BoardToggle } from "./components/BoardToggle";
 import { useBoards } from "./lib/boards";
@@ -23,7 +24,9 @@ import { cn } from "@/lib/utils";
 // v1.44 (ADR-054): "Task Helper" tab added (login-gated, per-user Jira/GitHub + AI prompt).
 // v1.45 (ADR-055): "Admin" tab added (admin-only super-admin console).
 // v1.47 (ADR-057): "Connections" tab added — account setup split out of the Task Helper.
-type Tab = "dashboard" | "planning" | "leaves" | "linking" | "reports" | "taskhelper" | "connections" | "admin";
+// v1.49 (ADR-060): "guide" — an in-app user guide, reached from a header button (not a tab, to
+// avoid crowding the tab bar per the v1.48 UI review).
+type Tab = "dashboard" | "planning" | "leaves" | "linking" | "reports" | "taskhelper" | "connections" | "admin" | "guide";
 
 const TABS: { id: Tab; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "dashboard", label: "Huddle", icon: LayoutDashboard },
@@ -126,7 +129,7 @@ function AppShell() {
 
           {/* Right side: board selection (hidden where there's no shared board) + version */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            {activeTab !== "linking" && activeTab !== "admin" && activeTab !== "connections" && (
+            {activeTab !== "linking" && activeTab !== "admin" && activeTab !== "connections" && activeTab !== "guide" && (
               <>
                 <span className="hidden md:inline text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide">
                   Board
@@ -156,6 +159,23 @@ function AppShell() {
                 Read-only
               </span>
             )}
+            {/* v1.49 (ADR-060): in-app user guide — a header button, not a tab (keeps the nav lean) */}
+            <button
+              type="button"
+              onClick={() => setActiveTab("guide")}
+              aria-label="User guide"
+              aria-current={activeTab === "guide" ? "page" : undefined}
+              className={cn(
+                "flex items-center gap-1.5 px-2 py-1 rounded-md text-[0.8125rem] font-medium transition-colors whitespace-nowrap",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+                activeTab === "guide"
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+              )}
+            >
+              <BookOpen className="h-4 w-4 flex-shrink-0" aria-hidden="true" />
+              <span className="hidden sm:inline">Guide</span>
+            </button>
             <span
               className="text-[0.625rem] font-semibold px-1.5 py-0.5 bg-primary/10 text-primary rounded-full whitespace-nowrap"
               aria-label="Product version"
@@ -188,6 +208,7 @@ function AppShell() {
         {activeTab === "taskhelper" && <TaskHelper {...shared} />}
         {activeTab === "connections" && <Connections />}
         {activeTab === "admin" && <Admin />}
+        {activeTab === "guide" && <Guide />}
       </main>
 
       {/* v1.19 (ADR-030): global floating AI assistant (FAB lower-right) */}

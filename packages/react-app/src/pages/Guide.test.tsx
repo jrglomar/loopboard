@@ -1,0 +1,35 @@
+// Guide page — v1.49, ADR-060. Static content; renders offline with no mocks.
+
+import { describe, it, expect, afterEach } from "vitest";
+import { render, screen, cleanup, within } from "@testing-library/react";
+import { Guide } from "./Guide";
+
+afterEach(() => cleanup());
+
+describe("Guide page (v1.49)", () => {
+  it("renders the title and a getting-started section", () => {
+    render(<Guide />);
+    expect(screen.getByRole("heading", { level: 1, name: /using loopboard/i })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: /getting started/i })).toBeTruthy();
+  });
+
+  it("has a table of contents that anchors to every section", () => {
+    render(<Guide />);
+    const toc = screen.getByRole("navigation", { name: /guide contents/i });
+    const links = within(toc).getAllByRole("link");
+    // one TOC link per section, each pointing at an in-page anchor that exists
+    expect(links.length).toBeGreaterThanOrEqual(10);
+    for (const link of links) {
+      const href = link.getAttribute("href") ?? "";
+      expect(href.startsWith("#")).toBe(true);
+      expect(document.getElementById(href.slice(1))).toBeTruthy();
+    }
+  });
+
+  it("covers the key surfaces users need to learn", () => {
+    render(<Guide />);
+    for (const name of [/huddle/i, /planning/i, /task helper/i, /connections/i, /admin/i, /ai assistant/i]) {
+      expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
+    }
+  });
+});
