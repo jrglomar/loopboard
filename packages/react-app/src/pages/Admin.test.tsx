@@ -63,7 +63,7 @@ beforeEach(() => {
   api.putUserRole.mockImplementation((id: string, role: "admin" | "user") =>
     Promise.resolve({ ...(id === "u1" ? boss : dev), role })
   );
-  api.putUserConfig.mockImplementation((_id: string, config: unknown) => Promise.resolve({ ...dev, config }));
+  api.putUserConfig.mockImplementation((id: string, config: unknown) => Promise.resolve({ ...dev, id, config }));
   api.createUser.mockResolvedValue(viewer);
   api.updateUser.mockImplementation((id: string, patch: Record<string, unknown>) =>
     Promise.resolve({ ...dev, id, ...patch })
@@ -113,13 +113,18 @@ describe("Admin console (v1.45)", () => {
     );
   });
 
-  it("edits a user's per-user config override", async () => {
+  it("edits a user's per-user board override (board ID) with one Save changes", async () => {
     render(<Admin />);
     await waitFor(() => screen.getByText("dev@team.com"));
     openManage(1);
-    await waitFor(() => screen.getByRole("button", { name: /save user config/i }));
-    fireEvent.click(screen.getByRole("button", { name: /save user config/i }));
-    await waitFor(() => expect(api.putUserConfig).toHaveBeenCalledWith("u2", { JIRA_PO_BOARD_ID: "999" }));
+    await waitFor(() => screen.getByRole("button", { name: /save changes/i }));
+    // Changing the Dev board ID is what actually switches the board; row-scoped input id disambiguates.
+    fireEvent.change(document.getElementById("u-u2-JIRA_DEV_BOARD_ID") as HTMLInputElement, { target: { value: "1038" } });
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    await waitFor(() =>
+      expect(api.putUserConfig).toHaveBeenCalledWith("u2", { JIRA_PO_BOARD_ID: "999", JIRA_DEV_BOARD_ID: "1038" })
+    );
+    expect(api.updateUser).not.toHaveBeenCalled(); // access unchanged → config-only save
   });
 });
 
@@ -162,17 +167,18 @@ describe("Admin user CRUD + shared credentials (v1.46)", () => {
     expect(screen.getByText("read-only")).toBeTruthy();
   });
 
-  it("grants Jira writes to a shared-credential user", async () => {
+  it("grants Jira writes to a shared-credential user via the combined save", async () => {
     api.getAdminUsers.mockResolvedValue({ users: [boss, viewer], globalConfig: {} });
     render(<Admin />);
     await waitFor(() => screen.getByText("viewer@team.com"));
     openManage(1);
-    await waitFor(() => screen.getByRole("button", { name: /save access/i }));
+    await waitFor(() => screen.getByRole("button", { name: /save changes/i }));
     fireEvent.click(screen.getByLabelText(/allow jira changes/i));
-    fireEvent.click(screen.getByRole("button", { name: /save access/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
     await waitFor(() =>
       expect(api.updateUser).toHaveBeenCalledWith("u3", { credentialSourceUserId: "u1", allowWrites: true })
     );
+    expect(api.putUserConfig).not.toHaveBeenCalled(); // board overrides unchanged → access-only save
   });
 
   it("disables an account", async () => {
@@ -206,6 +212,63 @@ describe("Admin user CRUD + shared credentials (v1.46)", () => {
     fireEvent.change(screen.getByLabelText("New password"), { target: { value: "brand-new-pass" } });
     fireEvent.click(screen.getByRole("button", { name: /set password/i }));
     await waitFor(() => expect(api.updateUser).toHaveBeenCalledWith("u2", { password: "brand-new-pass" }));
+  });
+});
+
+describe("Admin user setup — combined save + unsaved guard (v1.52, ADR-063)", () => {
+  it("saves access AND board overrides in one click when both changed", async () => {
+    api.getAdminUsers.mockResolvedValue({ users: [boss, viewer], globalConfig: {} });
+    render(<Admin />);
+    await waitFor(() => screen.getByText("viewer@team.com"));
+    openManage(1);
+    await waitFor(() => screen.getByRole("button", { name: /save changes/i }));
+    fireEvent.click(screen.getByLabelText(/allow jira changes/i));
+    fireEvent.change(document.getElementById("u-u3-JIRA_DEV_BOARD_ID") as HTMLInputElement, { target: { value: "1038" } });
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    await waitFor(() =>
+      expect(api.updateUser).toHaveBeenCalledWith("u3", { credentialSourceUserId: "u1", allowWrites: true })
+    );
+    await waitFor(() => expect(api.putUserConfig).toHaveBeenCalledWith("u3", { JIRA_DEV_BOARD_ID: "1038" }));
+  });
+
+  it("keeps Save changes disabled until something changes", async () => {
+    render(<Admin />);
+    await waitFor(() => screen.getByText("dev@team.com"));
+    openManage(1);
+    const save = await waitFor(() => screen.getByRole("button", { name: /save changes/i }));
+    expect(save.hasAttribute("disabled")).toBe(true);
+    fireEvent.change(document.getElementById("u-u2-JIRA_DEV_BOARD_ID") as HTMLInputElement, { target: { value: "1038" } });
+    expect(screen.getByRole("button", { name: /save changes/i }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("warns before discarding unsaved edits when closing the panel", async () => {
+    render(<Admin />);
+    await waitFor(() => screen.getByText("dev@team.com"));
+    openManage(1);
+    await waitFor(() => screen.getByRole("button", { name: /save changes/i }));
+    fireEvent.change(document.getElementById("u-u2-JIRA_DEV_BOARD_ID") as HTMLInputElement, { target: { value: "1038" } });
+    expect(screen.getByText("unsaved")).toBeTruthy(); // header indicator
+
+    // Closing with unsaved edits arms a discard confirm instead of collapsing.
+    fireEvent.click(screen.getByRole("button", { name: /^close$/i }));
+    expect(screen.getByText(/discard unsaved changes/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /keep editing/i }));
+    expect(screen.queryByText(/discard unsaved changes/i)).toBeNull();
+
+    // Discard actually collapses the panel; nothing was saved.
+    fireEvent.click(screen.getByRole("button", { name: /^close$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^discard$/i }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull());
+    expect(api.putUserConfig).not.toHaveBeenCalled();
+    expect(api.updateUser).not.toHaveBeenCalled();
+  });
+
+  it("spells out that the board ID (not the project key) switches the board", async () => {
+    render(<Admin />);
+    await waitFor(() => screen.getByText("dev@team.com"));
+    openManage(1);
+    await waitFor(() => screen.getByRole("button", { name: /save changes/i }));
+    expect(screen.getAllByText(/the board id selects which board loads/i).length).toBeGreaterThan(0);
   });
 });
 

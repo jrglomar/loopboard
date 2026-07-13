@@ -10,7 +10,7 @@
 // Only NON-secret config is settable here — Jira/GitHub/AI tokens stay each user's own encrypted
 // connection and are never shown.
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   ShieldCheck, User as UserIcon, Loader2, AlertCircle, CheckCircle2, Settings2, RefreshCw,
   UserPlus, Trash2, Ban, Undo2, Share2, Layers, Plus,
@@ -34,7 +34,7 @@ function errMsg(err: unknown): string {
 
 // The admin-settable fields, grouped for a legible form. Order/labels mirror adminConfigSchema.
 type FieldDef = { key: keyof AdminConfig; label: string; placeholder?: string; numeric?: boolean };
-const FIELD_GROUPS: { title: string; fields: FieldDef[] }[] = [
+const FIELD_GROUPS: { title: string; hint?: string; fields: FieldDef[] }[] = [
   {
     title: "Connection defaults",
     fields: [
@@ -44,11 +44,14 @@ const FIELD_GROUPS: { title: string; fields: FieldDef[] }[] = [
   },
   {
     title: "Boards & projects",
+    // The board *ID* is what selects which board's data loads (getProjects keys off it, ADR-062);
+    // the project key is only a display label. Spell this out — changing the key alone is a no-op.
+    hint: "The board ID selects which board loads — set this to switch boards. The project key is only a label.",
     fields: [
-      { key: "JIRA_PO_BOARD_ID", label: "PO board ID", placeholder: "10001" },
-      { key: "JIRA_DEV_BOARD_ID", label: "Dev board ID", placeholder: "10002" },
-      { key: "JIRA_PO_PROJECT_KEY", label: "PO project key", placeholder: "PO" },
-      { key: "JIRA_DEV_PROJECT_KEY", label: "Dev project key", placeholder: "DEV" },
+      { key: "JIRA_PO_BOARD_ID", label: "PO board ID (switches board)", placeholder: "10001" },
+      { key: "JIRA_DEV_BOARD_ID", label: "Dev board ID (switches board)", placeholder: "10002" },
+      { key: "JIRA_PO_PROJECT_KEY", label: "PO project key (label only)", placeholder: "PO" },
+      { key: "JIRA_DEV_PROJECT_KEY", label: "Dev project key (label only)", placeholder: "DEV" },
       { key: "JIRA_PO_PROJECTS", label: "PO projects (KEY:boardId,…)" },
       { key: "JIRA_DEV_PROJECTS", label: "Dev projects (KEY:boardId,…)" },
     ],
@@ -84,42 +87,43 @@ function toStringMap(cfg: AdminConfig): Record<string, string> {
   return out;
 }
 
-/**
- * A reusable form over the admin-settable config. Empty fields are OMITTED (clears the override).
- * `idPrefix` keeps DOM ids unique when several of these render on the page at once.
- */
-function ConfigForm({
-  initial, saving, submitLabel, onSave, idPrefix = "cfg",
-}: {
-  initial: AdminConfig;
-  saving: boolean;
-  submitLabel: string;
-  onSave: (cfg: AdminConfig) => void;
-  idPrefix?: string;
-}) {
-  const [values, setValues] = useState<Record<string, string>>(() => toStringMap(initial));
-  const set = (k: string, v: string) => setValues((prev) => ({ ...prev, [k]: v }));
-
-  function submit(e: FormEvent) {
-    e.preventDefault();
-    const out: Record<string, string | number> = {};
-    for (const group of FIELD_GROUPS) {
-      for (const f of group.fields) {
-        const raw = (values[f.key] ?? "").trim();
-        if (raw === "") continue; // omit → the server drops this override
-        out[f.key] = f.numeric ? Number(raw) : raw;
-      }
+/** Collect the config form's string map into an AdminConfig — empty fields OMITTED (clears the override). */
+function collectConfig(values: Record<string, string>): AdminConfig {
+  const out: Record<string, string | number> = {};
+  for (const group of FIELD_GROUPS) {
+    for (const f of group.fields) {
+      const raw = (values[f.key] ?? "").trim();
+      if (raw === "") continue; // omit → the server drops this override
+      out[f.key] = f.numeric ? Number(raw) : raw;
     }
-    onSave(out as AdminConfig);
   }
+  return out as AdminConfig;
+}
 
+/** True when the config a form currently holds differs from the user/global's saved config. */
+function configDiffers(values: Record<string, string>, saved: AdminConfig): boolean {
+  return JSON.stringify(collectConfig(values)) !== JSON.stringify(collectConfig(toStringMap(saved)));
+}
+
+/**
+ * The grouped config fields (shared by the global-defaults form and the per-user setup form).
+ * A group may carry a `hint` — used to spell out that the board ID (not the key) switches boards.
+ */
+function ConfigFields({
+  values, set, idPrefix,
+}: {
+  values: Record<string, string>;
+  set: (k: string, v: string) => void;
+  idPrefix: string;
+}) {
   return (
-    <form onSubmit={submit} className="space-y-4">
+    <>
       {FIELD_GROUPS.map((group) => (
         <div key={group.title}>
-          <p className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
+          <p className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground mb-0.5">
             {group.title}
           </p>
+          {group.hint && <p className="text-xs text-muted-foreground mb-1.5">{group.hint}</p>}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {group.fields.map((f) => (
               <div key={f.key}>
@@ -136,6 +140,35 @@ function ConfigForm({
           </div>
         </div>
       ))}
+    </>
+  );
+}
+
+/**
+ * A reusable form over the admin-settable config (used for the GLOBAL defaults + template creation).
+ * Per-user config is edited via UserSetupForm, which folds this together with access in one save.
+ * Empty fields are OMITTED (clears the override). `idPrefix` keeps DOM ids unique across instances.
+ */
+function ConfigForm({
+  initial, saving, submitLabel, onSave, idPrefix = "cfg",
+}: {
+  initial: AdminConfig;
+  saving: boolean;
+  submitLabel: string;
+  onSave: (cfg: AdminConfig) => void;
+  idPrefix?: string;
+}) {
+  const [values, setValues] = useState<Record<string, string>>(() => toStringMap(initial));
+  const set = (k: string, v: string) => setValues((prev) => ({ ...prev, [k]: v }));
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    onSave(collectConfig(values));
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <ConfigFields values={values} set={set} idPrefix={idPrefix} />
       <Button type="submit" size="sm" disabled={saving}>
         {saving ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" aria-hidden="true" /> : null}
         {submitLabel}
@@ -392,49 +425,92 @@ function AddUserCard({
   );
 }
 
-// ── Access (shared credentials) panel ─────────────────────────────────────────
+// ── User setup: access (shared credentials) + board/env overrides, saved together ─────────────
 
-function AccessForm({
-  user, sources, busy, onSave,
+/** What UserSetupForm hands back on save — only the parts that actually changed are flagged. */
+interface UserSetupInput {
+  accessChanged: boolean;
+  configChanged: boolean;
+  access: { credentialSourceUserId: string | null; allowWrites: boolean };
+  config: AdminConfig;
+}
+
+/**
+ * v1.52 (ADR-063) — one form for a user's access AND board/env overrides with a SINGLE save, so an
+ * admin can't set a shared connection and forget to save the board (the v1.51 field-report bug). It
+ * reports its dirty state up (onDirtyChange) so the row can warn before discarding unsaved edits.
+ */
+function UserSetupForm({
+  user, sources, busy, idPrefix, onSave, onDirtyChange,
 }: {
   user: AdminUser;
   sources: AdminUser[];
   busy: boolean;
-  onSave: (input: { credentialSourceUserId: string | null; allowWrites: boolean }) => void;
+  idPrefix: string;
+  onSave: (input: UserSetupInput) => void;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const [sourceId, setSourceId] = useState(user.credentialSourceUserId ?? "");
-  const [allowWrites, setAllowWrites] = useState(user.allowWrites);
+  const [allowWrites, setAllowWrites] = useState(!!user.allowWrites);
+  const [values, setValues] = useState<Record<string, string>>(() => toStringMap(user.config));
+  const set = (k: string, v: string) => setValues((prev) => ({ ...prev, [k]: v }));
   const options = sources.filter((s) => s.id !== user.id);
+
+  // Dirty = differs from what's currently saved on the user (props update after a save → auto-clears).
+  const accessDirty =
+    (sourceId || null) !== (user.credentialSourceUserId ?? null) || allowWrites !== !!user.allowWrites;
+  const configDirty = useMemo(() => configDiffers(values, user.config), [values, user.config]);
+  const dirty = accessDirty || configDirty;
+
+  useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    onSave({ credentialSourceUserId: sourceId || null, allowWrites });
+    if (!dirty) return;
+    onSave({
+      accessChanged: accessDirty,
+      configChanged: configDirty,
+      access: { credentialSourceUserId: sourceId || null, allowWrites },
+      config: collectConfig(values),
+    });
   }
 
   return (
-    <form onSubmit={submit} className="space-y-2">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        <div>
-          <Label htmlFor={`src-${user.id}`} className="text-xs font-medium">Credentials</Label>
-          <select id={`src-${user.id}`} value={sourceId} onChange={(e) => setSourceId(e.target.value)}
-            className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
-            <option value="">Their own tokens</option>
-            {options.map((s) => (
-              <option key={s.id} value={s.id}>Share from {s.email}</option>
-            ))}
-          </select>
+    <form onSubmit={submit} className="space-y-4">
+      {/* Access & credentials */}
+      <div className="space-y-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div>
+            <Label htmlFor={`src-${user.id}`} className="text-xs font-medium">Credentials</Label>
+            <select id={`src-${user.id}`} value={sourceId} onChange={(e) => setSourceId(e.target.value)}
+              className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm">
+              <option value="">Their own tokens</option>
+              {options.map((s) => (
+                <option key={s.id} value={s.id}>Share from {s.email}</option>
+              ))}
+            </select>
+          </div>
         </div>
+        {sourceId && (
+          <label className="flex items-center gap-2 text-xs text-foreground">
+            <input type="checkbox" checked={allowWrites} onChange={(e) => setAllowWrites(e.target.checked)} />
+            Allow Jira changes (writes are attributed to the token owner)
+          </label>
+        )}
       </div>
-      {sourceId && (
-        <label className="flex items-center gap-2 text-xs text-foreground">
-          <input type="checkbox" checked={allowWrites} onChange={(e) => setAllowWrites(e.target.checked)} />
-          Allow Jira changes (writes are attributed to the token owner)
-        </label>
-      )}
-      <Button type="submit" size="sm" variant="outline" disabled={busy}>
-        {busy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" aria-hidden="true" /> : null}
-        Save access
-      </Button>
+
+      {/* Board & env overrides */}
+      <ConfigFields values={values} set={set} idPrefix={idPrefix} />
+
+      <div className="flex items-center gap-2">
+        <Button type="submit" size="sm" disabled={busy || !dirty}>
+          {busy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" aria-hidden="true" /> : null}
+          Save changes
+        </Button>
+        {dirty && !busy && (
+          <span className="text-xs text-warning" role="status">Unsaved changes</span>
+        )}
+      </div>
     </form>
   );
 }
@@ -443,7 +519,7 @@ function AccessForm({
 
 function UserRow({
   user, sources, templates, formEpoch, busy, expanded, confirmingDelete,
-  onToggleRole, onToggleExpand, onSaveConfig, onSaveAccess, onSetPassword, onToggleDisabled, onDelete,
+  onToggleRole, onToggleExpand, onSaveSetup, onSetPassword, onToggleDisabled, onDelete,
   onRequestDelete, onApplyTemplate,
 }: {
   user: AdminUser;
@@ -455,8 +531,7 @@ function UserRow({
   confirmingDelete: boolean;
   onToggleRole: (u: AdminUser) => void;
   onToggleExpand: () => void;
-  onSaveConfig: (userId: string, cfg: AdminConfig) => void;
-  onSaveAccess: (userId: string, input: { credentialSourceUserId: string | null; allowWrites: boolean }) => void;
+  onSaveSetup: (userId: string, input: UserSetupInput) => void;
   onSetPassword: (userId: string, password: string) => void;
   onToggleDisabled: (u: AdminUser) => void;
   onDelete: (u: AdminUser) => void;
@@ -465,6 +540,15 @@ function UserRow({
 }) {
   const isAdmin = user.role === "admin";
   const [password, setPassword] = useState("");
+  // v1.52 — track unsaved edits in the setup form so we can warn before the panel is closed.
+  const [dirty, setDirty] = useState(false);
+  const [confirmingClose, setConfirmingClose] = useState(false);
+
+  // Closing the panel while there are unsaved edits arms an inline "discard?" confirm instead.
+  function handleToggle() {
+    if (expanded && dirty) { setConfirmingClose(true); return; }
+    onToggleExpand();
+  }
 
   return (
     <div className={cn("border rounded-lg", user.disabled ? "border-destructive/30 bg-destructive/[0.03]" : "border-border")}>
@@ -484,6 +568,7 @@ function UserRow({
           )}
           {user.readOnly && <Pill tone="muted">read-only</Pill>}
           {user.disabled && <Pill tone="danger">disabled</Pill>}
+          {expanded && dirty && <Pill tone="warn">unsaved</Pill>}
         </div>
         <div className="flex items-center gap-1">
           <ConnBadge label="Jira" on={user.connections.jira} />
@@ -491,7 +576,7 @@ function UserRow({
           <ConnBadge label="AI" on={user.connections.ai} />
         </div>
         <div className="flex items-center gap-1.5">
-          <Button type="button" variant="outline" size="sm" onClick={onToggleExpand}>
+          <Button type="button" variant="outline" size="sm" onClick={handleToggle}>
             <Settings2 className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
             {expanded ? "Close" : "Manage"}
           </Button>
@@ -511,13 +596,45 @@ function UserRow({
 
       {expanded && (
         <div className="border-t border-border px-3 py-3 bg-muted/30 space-y-5">
-          {/* Access & credentials */}
+          {/* Unsaved-changes guard (v1.52) — closing the panel with edits arms this discard confirm. */}
+          {confirmingClose && dirty && (
+            <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-foreground">
+              <span className="font-medium">Discard unsaved changes?</span>
+              <Button type="button" size="sm" variant="destructive"
+                onClick={() => { setConfirmingClose(false); setDirty(false); onToggleExpand(); }}>
+                Discard
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setConfirmingClose(false)}>
+                Keep editing
+              </Button>
+            </div>
+          )}
+
+          {/* User setup: access + board/env overrides, saved together in ONE action (v1.52, ADR-063). */}
           <section>
             <p className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
-              Access & credentials
+              User setup — access &amp; board overrides
             </p>
-            <AccessForm user={user} sources={sources} busy={busy}
-              onSave={(input) => onSaveAccess(user.id, input)} />
+            <p className="text-xs text-muted-foreground mb-2">
+              Blank board/env fields fall back to {user.sharedFrom ? "the shared user's overrides, then " : ""}the global defaults.
+              A single <strong className="font-medium text-foreground">Save changes</strong> saves both access and overrides.
+            </p>
+            <TemplatePicker
+              templates={templates}
+              busy={busy}
+              id={user.id}
+              scope={user.email}
+              onApply={(templateId, merge) => onApplyTemplate(user.id, templateId, merge)}
+            />
+            <UserSetupForm
+              key={`${user.id}-${formEpoch}`} // remount so applied template values show up
+              user={user}
+              sources={sources}
+              busy={busy}
+              idPrefix={`u-${user.id}`}
+              onSave={(input) => onSaveSetup(user.id, input)}
+              onDirtyChange={setDirty}
+            />
           </section>
 
           {/* Password */}
@@ -536,31 +653,6 @@ function UserRow({
               </div>
               <Button type="submit" size="sm" variant="outline" disabled={busy}>Set password</Button>
             </form>
-          </section>
-
-          {/* Per-user config */}
-          <section>
-            <p className="text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
-              Board & env overrides
-            </p>
-            <p className="text-xs text-muted-foreground mb-2">
-              Blank fields fall back to {user.sharedFrom ? "the shared user's overrides, then " : ""}the global defaults.
-            </p>
-            <TemplatePicker
-              templates={templates}
-              busy={busy}
-              id={user.id}
-              scope={user.email}
-              onApply={(templateId, merge) => onApplyTemplate(user.id, templateId, merge)}
-            />
-            <ConfigForm
-              key={`${user.id}-${formEpoch}`} // remount so applied template values show up
-              idPrefix={`u-${user.id}`}
-              initial={user.config}
-              saving={busy}
-              submitLabel="Save user config"
-              onSave={(cfg) => onSaveConfig(user.id, cfg)}
-            />
           </section>
 
           {/* Danger zone */}
@@ -662,11 +754,16 @@ export function Admin() {
     finally { setSavingGlobal(false); }
   };
 
-  const saveUserConfig = (userId: string, cfg: AdminConfig) =>
-    withUser(userId, async () => { replaceUser(await putUserConfig(userId, cfg)); setExpandedId(null); }, "User config saved.");
-
-  const saveAccess = (userId: string, input: { credentialSourceUserId: string | null; allowWrites: boolean }) =>
-    withUser(userId, async () => { replaceUser(await updateUser(userId, input)); }, "Access updated.");
+  // v1.52 — one save for a user's access + board/env overrides. They're two endpoints, so fire only
+  // the parts that changed; config last so its response reflects the access change too. The panel stays
+  // open — the form's dirty state clears once the updated user props flow back, confirming the save.
+  const saveUserSetup = (userId: string, input: UserSetupInput) =>
+    withUser(userId, async () => {
+      let updated: AdminUser | undefined;
+      if (input.accessChanged) updated = await updateUser(userId, input.access);
+      if (input.configChanged) updated = await putUserConfig(userId, input.config);
+      if (updated) replaceUser(updated);
+    }, "User settings saved.");
 
   const setPassword = (userId: string, password: string) =>
     withUser(userId, async () => { replaceUser(await updateUser(userId, { password })); }, "Password updated.");
@@ -785,8 +882,7 @@ export function Admin() {
                     confirmingDelete={deletingId === u.id}
                     onToggleRole={toggleRole}
                     onToggleExpand={() => setExpandedId((cur) => (cur === u.id ? null : u.id))}
-                    onSaveConfig={saveUserConfig}
-                    onSaveAccess={saveAccess}
+                    onSaveSetup={saveUserSetup}
                     onSetPassword={setPassword}
                     onToggleDisabled={toggleDisabled}
                     onDelete={removeUser}

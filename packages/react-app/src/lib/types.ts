@@ -2,14 +2,16 @@
 
 // ── Board context types (CONTRACTS.md §2, ADR-017, v1.6) ─────────────────────
 
-/** A single board reference from GET /api/health .boards (ADR-017) */
+/** A single board reference (ADR-017; per-user via /api/me/context .boards since v1.51). */
 export interface BoardRef {
   id: number;
   projectKey: string;
 }
 
 /**
- * Boards config from GET /api/health .boards — dev + po (ADR-017).
+ * Boards config — dev + po (ADR-017). v1.51 (ADR-062): sourced from the signed-in user's
+ * context (/api/me/context .boards), which reflects per-user/admin overrides — NOT the global
+ * GET /api/health.
  * v1.25 (ADR-037): each side is a LIST of projects (multi-project); element 0 = default.
  */
 export interface Boards {
@@ -207,7 +209,11 @@ export interface GetDailyHuddleOutput {
 
 // ── AI drafting types (CONTRACTS.md §4.9 v1.1) ───────────────────────────────
 
-/** AI status from GET /api/health .ai field */
+/**
+ * AI status. v1.53 (ADR-064): the UI reads this PER-USER from /api/me/context .ai (via AuthContext) so a
+ * user on their own AI token — with no global .env AI — is correctly shown as enabled. The global
+ * GET /api/health .ai still exists for keyless smoke/health, but is no longer the UI's source.
+ */
 export interface AiStatus {
   enabled: boolean;
   provider: string | null;
@@ -541,11 +547,13 @@ export type AssigneeLeaves = Record<string, LeaveType>;
 export interface OffsetSummary {
   earned: number;
   spent: number;
-  manualAdjust: number;
+  manualAdjust: number; // the manual/opening balance (surfaced as "Opening balance" in the UI)
   balance: number;
+  /** v1.50 (ADR-061): per-sprint banked earned/spent — lets the UI show if a sprint is banked. */
+  bySprint?: Record<string, { earned: number; spent: number }>;
 }
 
-/** Offset policy from GET /api/health .policy. */
+/** Offset policy (per-user via /api/me/context .policy since v1.51; global default otherwise). */
 export interface OffsetPolicy {
   requiredPoints: number; // N
   offsetThreshold: number; // N2

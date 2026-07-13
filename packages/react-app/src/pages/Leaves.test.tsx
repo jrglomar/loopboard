@@ -1,15 +1,16 @@
 // Leaves page tests — v1.26 (ADR-038) + forward planner v1.29 (ADR-041). Keyless/offline (hooks mocked).
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { Leaves } from "./Leaves";
 
-// Hoisted so the vi.mock factories below (also hoisted) can reference it.
-const { SPRINT } = vi.hoisted(() => ({
+// Hoisted so the vi.mock factories below (also hoisted) can reference them.
+const { SPRINT, recordSprintMock } = vi.hoisted(() => ({
   SPRINT: {
     id: 1, name: "Sprint 1", state: "active",
     startDate: "2026-06-01", endDate: "2026-06-05", completeDate: null, goal: null, boardId: 10,
   },
+  recordSprintMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../lib/boards", () => ({
@@ -41,7 +42,7 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
     }),
     useOffsetLedger: vi.fn().mockReturnValue({
       data: { Alice: { earned: 1, spent: 1, manualAdjust: 0, balance: 0 } },
-      loading: false, error: null, run: vi.fn(), recordSprint: vi.fn(), adjust: vi.fn(),
+      loading: false, error: null, run: vi.fn(), recordSprint: recordSprintMock, adjust: vi.fn(),
     }),
   };
 });
@@ -78,5 +79,19 @@ describe("Leaves page (v1.26)", () => {
     const wallet = screen.getByRole("list", { name: /Offset balances/i });
     expect(wallet.textContent).toContain("Alice");
     expect(wallet.textContent).toMatch(/earned 1 · used 1/);
+  });
+
+  // v1.50 (ADR-061): banking is a confirmed action, not automatic on view.
+  it("does NOT auto-bank on view; banks only when the button is confirmed", async () => {
+    render(<Leaves />);
+    expect(recordSprintMock).not.toHaveBeenCalled(); // no auto-bank on mount
+
+    fireEvent.click(screen.getByRole("button", { name: /bank earned offsets/i }));
+    await screen.findByText(/Bank offsets — Sprint 1/i); // confirm dialog opened
+    fireEvent.click(screen.getByRole("button", { name: /^bank offsets$/i }));
+
+    await waitFor(() =>
+      expect(recordSprintMock).toHaveBeenCalledWith(1, [{ assignee: "Alice", earned: 1, spent: 0 }])
+    );
   });
 });

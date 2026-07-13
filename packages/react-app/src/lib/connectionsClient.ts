@@ -44,6 +44,10 @@ export interface MyContext {
   /** True when the required accounts (Jira + GitHub) are connected — gates app access. */
   ready: boolean;
   boards: { dev: UserBoardRef[]; po: UserBoardRef[] };
+  /** v1.51 (ADR-062): the user's EFFECTIVE offset policy (per-user config, not global .env). */
+  policy?: { requiredPoints: number; offsetThreshold: number };
+  /** v1.53 (ADR-064): the user's EFFECTIVE AI status (own token OR inherited/global), not global .env. */
+  ai?: { enabled: boolean; provider: string | null; model: string | null };
   /** v1.45 (ADR-055) — "admin" unlocks the Admin console tab. */
   role: "admin" | "user";
   /** v1.46 (ADR-056) — true when borrowing Jira credentials without admin-granted writes. */

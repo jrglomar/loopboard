@@ -34,7 +34,7 @@ export function OffsetWalletCard({
         <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
           <Wallet className="h-4 w-4 text-primary" aria-hidden="true" />
           Offset balances
-          <span className="text-xs font-normal text-muted-foreground">(earned − used + manual)</span>
+          <span className="text-xs font-normal text-muted-foreground">(earned − used + opening)</span>
         </h3>
       </CardHeader>
       <CardContent className="px-4 pb-3 pt-0">
@@ -54,7 +54,7 @@ export function OffsetWalletCard({
                     <p className="text-sm font-medium text-foreground truncate" title={name}>{name}</p>
                     <p className="text-[0.6875rem] text-muted-foreground">
                       earned {w.earned} · used {w.spent}
-                      {w.manual !== 0 ? ` · manual ${w.manual > 0 ? "+" : ""}${w.manual}` : ""}
+                      {w.manual !== 0 ? ` · opening ${w.manual > 0 ? "+" : ""}${w.manual}` : ""}
                     </p>
                   </div>
                   <div className="text-right flex-shrink-0">

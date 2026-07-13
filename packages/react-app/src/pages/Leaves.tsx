@@ -1,15 +1,19 @@
 // Leaves & offset page (v1.26, ADR-038; forward multi-sprint planner v1.29, ADR-041).
 // Plot typed leaves (VL/EL/Holiday/Offset) across a forward, multi-sprint calendar and track
-// per-developer offset points (auto earned/spent + a manual adjustment). Board-scoped (shared context).
+// per-developer offset points. v1.50 (ADR-061): earned offsets are BANKED on confirm (a button +
+// dialog), not automatically on view; the manual field is the developer's "opening balance".
+// Board-scoped (shared context).
 
-import { useState, useMemo, useEffect, useRef } from "react";
-import { CalendarDays } from "lucide-react";
+import { useState, useMemo } from "react";
+import { CalendarDays, Wallet } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { BoardToggle } from "../components/BoardToggle";
 import { LeavesPlannerCard } from "../components/LeavesPlannerCard";
 import { OffsetWalletCard } from "../components/OffsetWalletCard";
 import { OffsetHistoryDialog } from "../components/OffsetHistoryDialog";
+import { BankOffsetsDialog, type BankRow } from "../components/BankOffsetsDialog";
 import { useBoards, usePolicy } from "../lib/boards";
 import {
   useSprintList,
@@ -125,22 +129,32 @@ export function Leaves({
     ? buildOffsetHistory(historyFor, ledger.data, allLeaves.data, sprintNameById)
     : null;
 
-  // Auto-bank the selected sprint's earned offsets (idempotent) once its report + leaves load.
-  // Guarded by a signature of {assignee: earned} so it only writes when the earned values change
-  // (never loops — the signature is independent of the ledger the write refreshes).
-  const recordEntries = useMemo(
-    () => rows.map((r) => ({ assignee: r.name, earned: r.earnedThisSprint, spent: 0 })),
-    [rows]
+  // v1.50 (ADR-061): banking earned offsets is a deliberate, confirmed action (was auto-on-view).
+  // Build the per-developer rows for the confirm dialog: computed earned + what's already banked.
+  const [bankOpen, setBankOpen] = useState(false);
+  const bankRows: BankRow[] = useMemo(
+    () =>
+      rows.map((r) => ({
+        name: r.name,
+        earned: r.earnedThisSprint,
+        banked:
+          selectedSprintId !== null
+            ? (ledger.data?.[r.name]?.bySprint?.[String(selectedSprintId)]?.earned ?? null)
+            : null,
+      })),
+    [rows, ledger.data, selectedSprintId]
   );
-  const bankedSig = useRef<string>("");
-  useEffect(() => {
-    if (selectedSprintId === null || !report.data || recordEntries.length === 0) return;
-    const sig = `${selectedSprintId}:` + recordEntries.map((e) => `${e.assignee}=${e.earned}`).join(",");
-    if (sig === bankedSig.current) return;
-    bankedSig.current = sig;
-    void ledger.recordSprint(selectedSprintId, recordEntries);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSprintId, report.data, recordEntries]);
+  const canBank = selectedSprintId !== null && !!report.data && rows.length > 0;
+  // True when every developer's computed earned already matches what's banked for this sprint.
+  const allBanked = bankRows.every((r) => r.earned === (r.banked ?? 0));
+
+  async function bankSprint() {
+    if (selectedSprintId === null) return;
+    await ledger.recordSprint(
+      selectedSprintId,
+      rows.map((r) => ({ assignee: r.name, earned: r.earnedThisSprint, spent: 0 }))
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -199,10 +213,21 @@ export function Leaves({
       {/* Offset table — w-fit: the card hugs the table instead of leaving white space (v1.39) */}
       <Card className="shadow-sm">
         <CardHeader className="px-4 pt-3 pb-2">
-          <h3 className="text-sm font-semibold text-foreground">
-            Offset points — this sprint
-            <span className="ml-2 text-xs font-normal text-muted-foreground">earned auto-banks; balance is the running wallet</span>
-          </h3>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-sm font-semibold text-foreground">
+              Offset points — this sprint
+              <span className="ml-2 text-xs font-normal text-muted-foreground">review, then bank earned into the wallet</span>
+            </h3>
+            {/* v1.50 (ADR-061): banking is a confirmed action, not automatic */}
+            <Button
+              type="button" size="sm" variant={allBanked ? "outline" : "default"} className="ml-auto"
+              disabled={!canBank}
+              onClick={() => setBankOpen(true)}
+            >
+              <Wallet className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+              {allBanked ? "Banked ✓" : "Bank earned offsets"}
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="px-4 pb-3 pt-0 overflow-x-auto">
           {rows.length === 0 ? (
@@ -219,7 +244,7 @@ export function Leaves({
                   <th className="text-right font-medium px-2">OF</th>
                   <th className="text-right font-medium px-2">Total</th>
                   <th className="text-right font-medium px-2">Earned</th>
-                  <th className="text-right font-medium px-2">Manual</th>
+                  <th className="text-right font-medium px-2">Opening</th>
                   <th className="text-right font-medium px-2">Balance</th>
                 </tr>
               </thead>
@@ -237,7 +262,7 @@ export function Leaves({
                       {r.earnedThisSprint > 0 ? `+${r.earnedThisSprint}` : "0"}
                     </td>
                     <td className="text-right px-2">
-                      <label className="sr-only" htmlFor={`adj-${r.name}`}>Manual adjustment for {r.name}</label>
+                      <label className="sr-only" htmlFor={`adj-${r.name}`}>Opening balance for {r.name}</label>
                       <Input
                         id={`adj-${r.name}`}
                         type="number"
@@ -247,7 +272,7 @@ export function Leaves({
                           if (v !== r.manualAdjust) void ledger.adjust(r.name, v);
                         }}
                         className="h-7 w-16 text-right ml-auto"
-                        aria-label={`Manual adjustment for ${r.name}`}
+                        aria-label={`Opening balance for ${r.name}`}
                       />
                     </td>
                     <td className="text-right px-2 font-semibold text-primary tabular-nums">{wallet[r.name]?.balance ?? 0}</td>
@@ -257,11 +282,21 @@ export function Leaves({
             </table>
           )}
           <p className="mt-2 text-[0.6875rem] text-muted-foreground">
-            Earned = (done + leave days) ≥ N + N2 ? 1 : 0 (max 1 / sprint) — auto-banked when you open the sprint.
-            Balance is the running wallet: Σ earned − Σ Offset leaves plotted + manual.
+            Earned = (done + leave days) ≥ N + N2 ? 1 : 0 (max 1 / sprint) — click <b className="font-medium text-foreground">Bank earned offsets</b> to add it to the wallet.
+            <br />
+            <b className="font-medium text-foreground">Opening</b> is each developer's prior/carry-in balance — set it so the wallet total matches. Balance = Σ banked earned − Σ Offset leaves plotted + opening.
           </p>
         </CardContent>
       </Card>
+
+      {/* v1.50 (ADR-061): confirm banking the sprint's earned offsets into the wallet */}
+      <BankOffsetsDialog
+        open={bankOpen}
+        onOpenChange={setBankOpen}
+        sprintName={selectedSprint?.name ?? "this sprint"}
+        rows={bankRows}
+        onConfirm={bankSprint}
+      />
 
       {/* v1.33 (ADR-044, Phase 2): per-developer offset usage history */}
       <OffsetHistoryDialog

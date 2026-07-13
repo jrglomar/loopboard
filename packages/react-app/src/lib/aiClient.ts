@@ -4,6 +4,7 @@
 // can branch to the deterministic fallback.
 
 import { type McpError } from "./mcpClient";
+import { getMyContext } from "./connectionsClient";
 import type {
   AiStatus,
   DraftRequest,
@@ -96,31 +97,23 @@ async function postAi<T>(path: string, body: unknown): Promise<T> {
 }
 
 /**
- * Fetch AI status from GET /api/health → .ai field.
- * If the field is absent, the fetch fails (bridge down), or any other error occurs,
- * returns { enabled: false, provider: null, model: null } — health failure must NOT crash the page.
+ * The signed-in user's EFFECTIVE AI status, from GET /api/me/context → .ai (v1.53, ADR-064).
+ * Per-user: a user on their OWN AI token — with no global .env AI — is correctly reported enabled,
+ * fixing the old bug where this read the global, unauthenticated GET /api/health .ai and showed
+ * "AI disabled" for them. Any failure (not signed in, bridge down, missing field) → disabled, so
+ * the page never crashes.
  *
- * CONTRACTS.md §2, §4.9 v1.1
+ * CONTRACTS.md §9.5
  */
 export async function getAiStatus(): Promise<AiStatus> {
-  const url = `${JIRA_BASE}/api/health`;
   try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      return { enabled: false, provider: null, model: null };
-    }
-    const body = await response.json() as Record<string, unknown>;
-    const ai = body.ai as AiStatus | undefined;
+    const ai = (await getMyContext()).ai;
     if (!ai || typeof ai.enabled !== "boolean") {
       return { enabled: false, provider: null, model: null };
     }
-    return {
-      enabled: ai.enabled,
-      provider: (ai.provider as string | null) ?? null,
-      model: (ai.model as string | null) ?? null,
-    };
+    return { enabled: ai.enabled, provider: ai.provider ?? null, model: ai.model ?? null };
   } catch {
-    // Any fetch or parse failure → disabled (safe default)
+    // Not signed in, bridge down, or malformed → disabled (safe default)
     return { enabled: false, provider: null, model: null };
   }
 }

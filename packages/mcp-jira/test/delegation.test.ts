@@ -6,12 +6,13 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { resetConfigCache, getLeavesFilePath, USER_STORES_DIR } from "../src/lib/config.js";
+import { resetConfigCache, getLeavesFilePath, getProjects, USER_STORES_DIR } from "../src/lib/config.js";
 import { runWithUser } from "../src/lib/requestContext.js";
 import { resolveUser } from "../src/lib/userConfig.js";
 import { getEffectiveConnection, canUserWriteJira, isDelegated } from "../src/lib/delegation.js";
 import { createUser, updateUser, upsertConnection, setUserConfig, findUserById } from "../src/lib/userStore.js";
 import { seal } from "../src/lib/crypto/secretBox.js";
+import { getAiStatus } from "../src/lib/ai/provider.js";
 
 let dir: string;
 let ownerId: string;
@@ -119,5 +120,64 @@ describe("shared credentials (ADR-056)", () => {
   it("resolveUser returns null when there is nothing to borrow", () => {
     const orphan = createUser("orphan@team.com", "hash");
     expect(resolveUser(orphan.id)).toBeNull();
+  });
+});
+
+// v1.51 (ADR-062) — a per-user board override must survive all the way to getProjects(), which is
+// what GET /api/me/context runs inside runWithUser() to tell the UI which board to show. Reproduces
+// the reported bug: a shared-connection viewer set a different Dev board but still saw the .env board.
+describe("per-user board override reaches getProjects() (the /api/me/context path)", () => {
+  it("globally (no request context) getProjects() uses the .env board ids", () => {
+    expect(getProjects().dev[0]).toEqual({ id: 10002, projectKey: "DEV" });
+    expect(getProjects().po[0]).toEqual({ id: 10001, projectKey: "PO" });
+  });
+
+  it("a viewer's Dev board ID override changes the board getProjects() resolves IN their context", () => {
+    // The admin points this borrower at a different Dev board — the id is what selects the board.
+    setUserConfig(viewerId, { JIRA_DEV_BOARD_ID: "9999", JIRA_DEV_PROJECT_KEY: "OTHER" });
+    const r = resolveUser(viewerId)!;
+    expect(r.config.JIRA_DEV_BOARD_ID).toBe("9999"); // resolved config carries the override
+
+    const boards = runWithUser(
+      { userId: viewerId, config: r.config, storeUserId: r.storeUserId },
+      () => getProjects()
+    );
+    expect(boards.dev[0]).toEqual({ id: 9999, projectKey: "OTHER" }); // the OVERRIDDEN board, not 10002
+    expect(boards.po[0]).toEqual({ id: 10001, projectKey: "PO" }); // untouched side stays global
+  });
+
+  it("overriding only the project KEY (not the board ID) does NOT change which board is fetched", () => {
+    // The reported trap: getProjects() selects by board *id*; a key-only override is cosmetic.
+    setUserConfig(viewerId, { JIRA_DEV_PROJECT_KEY: "RELABEL" });
+    const r = resolveUser(viewerId)!;
+    const boards = runWithUser(
+      { userId: viewerId, config: r.config, storeUserId: r.storeUserId },
+      () => getProjects()
+    );
+    expect(boards.dev[0]).toEqual({ id: 10002, projectKey: "RELABEL" }); // same id 10002 → same board
+  });
+});
+
+// v1.53 (ADR-064) — a user's OWN AI token must make getAiStatus() report enabled inside their context,
+// which is what GET /api/me/context runs to tell the UI whether the assistant/drafting is available.
+// Reproduces the reported bug: global .env has no AI, but a user on their own AI token saw "AI disabled".
+describe("per-user AI status reaches getAiStatus() (the /api/me/context .ai path)", () => {
+  it("globally (no .env AI, no request context) getAiStatus() reports disabled", () => {
+    expect(getAiStatus()).toEqual({ enabled: false, provider: null, model: null });
+  });
+
+  it("a user on their OWN AI token is reported ENABLED in their context, though global AI is off", () => {
+    upsertConnection(viewerId, "ai", {
+      enc: seal("viewer-ai-token"),
+      meta: { provider: "github", model: "openai/gpt-4o-mini", hint: "…xxxx" },
+      updatedAt: new Date().toISOString(),
+    });
+    const r = resolveUser(viewerId)!;
+    const ai = runWithUser(
+      { userId: viewerId, config: r.config, storeUserId: r.storeUserId },
+      () => getAiStatus()
+    );
+    expect(ai).toEqual({ enabled: true, provider: "github", model: "openai/gpt-4o-mini" });
+    expect(getAiStatus().enabled).toBe(false); // still disabled globally — the exact bug scenario
   });
 });

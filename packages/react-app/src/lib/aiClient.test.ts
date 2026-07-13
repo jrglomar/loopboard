@@ -26,22 +26,25 @@ function makeResponse(body: unknown, status = 200): Response {
 }
 
 // ── getAiStatus ───────────────────────────────────────────────────────────────
+// v1.53 (ADR-064): reads the PER-USER GET /api/me/context .ai (envelope { ok, data }), not the global
+// GET /api/health. So a user on their own AI token is reported enabled. Any failure → disabled.
+
+/** A /api/me/context envelope carrying the given .ai (plus the other required context fields). */
+function ctxWithAi(ai: unknown): Response {
+  return makeResponse({ ok: true, data: { connections: {}, ready: true, boards: { dev: [], po: [] }, role: "user", ai } });
+}
 
 describe("getAiStatus", () => {
-  it("returns enabled status when health responds with ai field", async () => {
-    mockFetch.mockResolvedValueOnce(
-      makeResponse({ ok: true, service: "mcp-jira", version: "1.0.0", ai: { enabled: true, provider: "anthropic", model: "claude-opus-4-8" } })
-    );
+  it("returns enabled status when the user's context .ai is enabled", async () => {
+    mockFetch.mockResolvedValueOnce(ctxWithAi({ enabled: true, provider: "anthropic", model: "claude-opus-4-8" }));
     const status = await getAiStatus();
     expect(status.enabled).toBe(true);
     expect(status.provider).toBe("anthropic");
     expect(status.model).toBe("claude-opus-4-8");
   });
 
-  it("returns disabled when ai field is absent in health response", async () => {
-    mockFetch.mockResolvedValueOnce(
-      makeResponse({ ok: true, service: "mcp-jira", version: "1.0.0" })
-    );
+  it("returns disabled when the ai field is absent from the context", async () => {
+    mockFetch.mockResolvedValueOnce(ctxWithAi(undefined));
     const status = await getAiStatus();
     expect(status.enabled).toBe(false);
     expect(status.provider).toBeNull();
@@ -49,29 +52,26 @@ describe("getAiStatus", () => {
   });
 
   it("returns disabled when ai.enabled is false", async () => {
-    mockFetch.mockResolvedValueOnce(
-      makeResponse({ ok: true, ai: { enabled: false, provider: null, model: null } })
-    );
+    mockFetch.mockResolvedValueOnce(ctxWithAi({ enabled: false, provider: null, model: null }));
     const status = await getAiStatus();
     expect(status.enabled).toBe(false);
   });
 
   it("returns disabled when fetch fails (BRIDGE_DOWN) — must NOT throw", async () => {
     mockFetch.mockRejectedValueOnce(new Error("Network failure"));
-    // Should NOT throw — health failure returns safe default
     const status = await getAiStatus();
     expect(status.enabled).toBe(false);
     expect(status.provider).toBeNull();
     expect(status.model).toBeNull();
   });
 
-  it("returns disabled when health returns non-200", async () => {
-    mockFetch.mockResolvedValueOnce(makeResponse({ ok: false, error: { code: "INTERNAL" } }, 500));
+  it("returns disabled when not signed in (error envelope) — must NOT throw", async () => {
+    mockFetch.mockResolvedValueOnce(makeResponse({ ok: false, error: { code: "UNAUTHENTICATED", message: "no session" } }, 401));
     const status = await getAiStatus();
     expect(status.enabled).toBe(false);
   });
 
-  it("returns disabled when health response is not valid JSON", async () => {
+  it("returns disabled when the context response is not valid JSON", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,

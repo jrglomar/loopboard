@@ -21,8 +21,9 @@ async function handler(input: unknown): Promise<GetOffsetLedgerOutput> {
 export const getOffsetLedgerTool: ToolDef = {
   name: "get_offset_ledger",
   description:
-    "Return each developer's offset-point standing — earned (Σ across sprints), spent (Σ Offset " +
-    "leaves), manualAdjust, and balance (earned − spent + manualAdjust). Reads a bridge-side store.",
+    "Return each developer's offset-point standing — earned (Σ banked across sprints), spent (Σ Offset " +
+    "leaves), manualAdjust (the manual/opening balance), balance (earned − spent + manualAdjust), and " +
+    "bySprint (the per-sprint banked earned/spent). Reads a bridge-side store.",
   schema,
   handler,
 };

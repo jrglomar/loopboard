@@ -946,17 +946,20 @@ data, so the Huddle's code-review card uses it for both the PR list and the appr
 
 Per-developer offset-point tracking, backed by a bridge-side JSON store (`JIRA_OFFSET_FILE`, default
 `<mcp-jira>/.loopboard-offset.json`, git-ignored). Store shape:
-`{ [assignee]: { bySprint: { [sprintId]: { earned, spent } }, manualAdjust } }`. **Two ways to adjust**
-(per the user): an **auto** per-sprint snapshot + a **manual** absolute delta.
+`{ [assignee]: { bySprint: { [sprintId]: { earned, spent } }, manualAdjust } }`. **Two ways to adjust**:
+a per-sprint snapshot (**banked on user confirm** since v1.50 — see below) + a **manual** delta the UI
+surfaces as each developer's **opening balance** (their prior/carry-in balance).
 **`balance = Σ earned − Σ spent + manualAdjust`** (pure `summarizeOffset`).
 
-- **`get_offset_ledger`** — Input `{}`. Output `{ entries: Record<assignee, { earned, spent, manualAdjust, balance }> }`.
+- **`get_offset_ledger`** — Input `{}`. Output `{ entries: Record<assignee, { earned, spent, manualAdjust,
+  balance, bySprint }> }`. **v1.50 (ADR-061):** each summary now includes `bySprint: { [sprintId]: {
+  earned, spent } }` so the UI can show whether a sprint's offsets are already banked.
 - **`set_offset_for_sprint`** — Input `{ sprintId, entries: Array<{ assignee, earned ≥ 0, spent ≥ 0 }> }`.
   **Idempotent** upsert of that sprint's `{ earned, spent }` per assignee (re-recording never
-  double-counts). The Leaves page computes earned (`offset.ts`, §6) + spent (Offset-leave days) and writes it.
-  Output the updated `entries` summary.
-- **`set_offset_adjustment`** — Input `{ assignee, manualAdjust: int }` — set the absolute manual delta.
-  Output the updated `entries` summary.
+  double-counts). **v1.50 (ADR-061):** the Leaves page calls this only when the user **confirms** the
+  "Bank earned offsets" dialog (was auto-on-view). Output the updated `entries` summary.
+- **`set_offset_adjustment`** — Input `{ assignee, manualAdjust: int }` — set the manual delta (the UI's
+  **opening balance**). Output the updated `entries` summary.
 - **Offset policy** (`GET /api/health` `.policy = { requiredPoints, offsetThreshold }`, from
   `JIRA_REQUIRED_POINTS` (N) + `JIRA_OFFSET_THRESHOLD` (N2)). The UI computes earned =
   `(donePoints + leaveDays) ≥ (N + N2) ? 1 : 0` (**max 1/sprint**).
@@ -1647,9 +1650,20 @@ live call at connect so a bad/expired token is caught then, clearly. Folds into 
 
 ### 9.5 Context + app-wide gate
 
-`GET /api/me/context` → `{ connections, ready, boards, role }`, `ready = !!jira && !!github`. Frontend
-`AuthProvider` + `AppGate`: not signed in → login; signed in but not ready → onboarding (connect accounts);
-ready → the app. `callTool` + the AI client send `credentials: "include"`.
+`GET /api/me/context` → `{ connections, ready, boards, policy, ai, role }`, `ready = !!jira && !!github`.
+Frontend `AuthProvider` + `AppGate`: not signed in → login; signed in but not ready → onboarding (connect
+accounts); ready → the app. `callTool` + the AI client send `credentials: "include"`.
+
+**`boards` + `policy` + `ai` are PER-USER and authoritative for the UI (v1.51/v1.53, ADR-062/064).** All are
+computed inside the caller's request context (`resolveUser(userId)` → `runWithUser(…
+getProjects()/getOffsetPolicy()/getAiStatus())`), so they reflect the user's own
+`.env`←admin-global←shared-source←per-user override chain. `policy` is `{ requiredPoints, offsetThreshold }`;
+`ai` is `{ enabled, provider, model }` (the user's OWN AI token, else inherited/global). The React board
+selector + offset views read `boards`/`policy`, and `getAiStatus()` reads `ai`, from **this** endpoint (via
+`AuthContext`) — NOT from the global, unauthenticated `GET /api/health` (which still returns the `.env`
+values and is used only for keyless smoke/health). Two consequences: to point a user at a different board an
+admin/user override must set the board **id** (`JIRA_DEV_BOARD_ID` / `JIRA_PO_BOARD_ID`), not just the
+project key; and a user on their own AI token — with no global `.env` AI — is correctly shown AI-enabled.
 
 ### 9.6 Admin console API (all require an admin session → else 401 / 403)
 
@@ -1658,6 +1672,11 @@ ready → the app. `callTool` + the AI client send `credentials: "include"`.
 - `PUT /api/admin/users/:id/config` (body = `adminConfigSchema`) → replaces that user's overrides; `404 NOT_FOUND` if unknown.
 - `PUT /api/admin/users/:id/role` `{ role }` → promote/demote; `409 BOOTSTRAP_ADMIN` when demoting an ADMIN_EMAILS account.
 - Enablement: `/api/admin/*` returns **503 TASK_HELPER_UNAVAILABLE** unless both Task Helper secrets are set.
+- **UI note (v1.52, ADR-063):** the admin console's per-user "Manage" panel saves access AND board/env
+  overrides with a **single "Save changes"** — it fires `PUT /api/admin/users/:id` (access) and/or
+  `PUT /api/admin/users/:id/config` (overrides), only for the section(s) that changed. No new endpoint;
+  this removes the "saved access but forgot to save the board override" trap. It also disables the button
+  until something changes and warns before discarding unsaved edits.
 
 ### 9.7 Quality
 

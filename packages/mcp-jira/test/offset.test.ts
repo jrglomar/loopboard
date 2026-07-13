@@ -36,8 +36,11 @@ describe("summarizeOffset (pure)", () => {
       Bob: { bySprint: {}, manualAdjust: 0 },
     };
     const out = summarizeOffset(file);
-    expect(out["Alice"]).toEqual({ earned: 2, spent: 1, manualAdjust: 2, balance: 3 }); // 2−1+2
-    expect(out["Bob"]).toEqual({ earned: 0, spent: 0, manualAdjust: 0, balance: 0 });
+    expect(out["Alice"]).toEqual({
+      earned: 2, spent: 1, manualAdjust: 2, balance: 3, // 2−1+2
+      bySprint: { "1": { earned: 1, spent: 0 }, "2": { earned: 1, spent: 1 } }, // v1.50: per-sprint banked state
+    });
+    expect(out["Bob"]).toEqual({ earned: 0, spent: 0, manualAdjust: 0, balance: 0, bySprint: {} });
   });
 });
 
