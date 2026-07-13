@@ -66,6 +66,17 @@ describe("computeOffsetWallet", () => {
     expect(w.Alice.balance).toBe(-2); // 0 − 2 + 0
     expect(w.Carol.balance).toBe(-1);
   });
+
+  it("handles DECIMAL earned / opening / adjustments (v1.55, ADR-066)", () => {
+    const dec: OffsetLedger = {
+      Dana: {
+        earned: 2.5, spent: 0, manualAdjust: 0.5, balance: 0,
+        adjustments: [{ id: "x", amount: 0.25, createdAt: "2026-07-01T00:00:00Z" }],
+      },
+    };
+    const w = computeOffsetWallet(dec, {}); // no leaves → spent 0
+    expect(w.Dana).toEqual({ earned: 2.5, spent: 0, manual: 0.5, adjustmentsTotal: 0.25, balance: 3.25 });
+  });
 });
 
 describe("buildOffsetHistory", () => {

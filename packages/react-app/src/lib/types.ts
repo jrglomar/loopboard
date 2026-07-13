@@ -546,7 +546,7 @@ export type AssigneeLeaves = Record<string, LeaveType>;
 /** v1.54 (ADR-065): one ad-hoc manual balance adjustment — the Offset History log. */
 export interface OffsetAdjustment {
   id: string;
-  amount: number; // signed integer (±), non-zero
+  amount: number; // signed, non-zero; decimals allowed (v1.55, ADR-066 — e.g. 0.5)
   note?: string;
   createdAt: string; // ISO
 }

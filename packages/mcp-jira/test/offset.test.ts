@@ -136,6 +136,17 @@ describe("offset manual-adjustment log (v1.54, ADR-065)", () => {
     await expect(addOffsetAdjustmentTool.handler({ assignee: "Alice", amount: 0 })).rejects.toThrow();
   });
 
+  it("accepts DECIMAL amounts for opening + adjustments, decimal-safe balance (v1.55, ADR-066)", async () => {
+    await setOffsetForSprintTool.handler({ sprintId: 5, entries: [{ assignee: "Alice", earned: 1, spent: 0 }] });
+    await setOffsetAdjustmentTool.handler({ assignee: "Alice", manualAdjust: 0.5 }); // decimal opening
+    const out = (await addOffsetAdjustmentTool.handler({ assignee: "Alice", amount: 0.25, note: "half credit" })) as {
+      entries: Record<string, OffsetSummary>;
+    };
+    expect(out.entries["Alice"]!.manualAdjust).toBe(0.5);
+    expect(out.entries["Alice"]!.adjustments[0]!.amount).toBe(0.25);
+    expect(out.entries["Alice"]!.balance).toBe(1.75); // 1 earned + 0.5 opening + 0.25 adjustment
+  });
+
   it("delete is a no-op for an unknown id", async () => {
     await addOffsetAdjustmentTool.handler({ assignee: "Alice", amount: 3 });
     const out = (await deleteOffsetAdjustmentTool.handler({ assignee: "Alice", id: "nope" })) as {

@@ -26,6 +26,7 @@ import { LeaveTypePicker } from "../components/LeaveTypePicker";
 import { sprintWorkingDays } from "../lib/capacity";
 import { leaveDaysByType, totalLeaveDays, computeOffsetEarned } from "../lib/offset";
 import { computeOffsetWallet, buildOffsetHistory } from "../lib/offsetWallet";
+import { formatPoints } from "../lib/format";
 import type { BoardKey, SharedSprintProps, LeaveType, SprintRef } from "../lib/types";
 import { cn } from "@/lib/utils";
 
@@ -252,30 +253,32 @@ export function Leaves({
                 {rows.map((r) => (
                   <tr key={r.name} className="border-t border-border/50 tabular-nums">
                     <td className="py-1.5 text-foreground font-medium">{r.name}</td>
-                    <td className="text-right px-2">{r.done}</td>
+                    <td className="text-right px-2">{formatPoints(r.done)}</td>
                     <td className="text-right px-2 text-muted-foreground">{r.byType.VL || "—"}</td>
                     <td className="text-right px-2 text-muted-foreground">{r.byType.EL || "—"}</td>
                     <td className="text-right px-2 text-muted-foreground">{r.byType.Holiday || "—"}</td>
                     <td className="text-right px-2 text-muted-foreground">{r.byType.Offset || "—"}</td>
-                    <td className="text-right px-2 font-medium">{r.total}</td>
+                    <td className="text-right px-2 font-medium">{formatPoints(r.total)}</td>
                     <td className={cn("text-right px-2 font-medium", r.earnedThisSprint > 0 && "text-success")}>
-                      {r.earnedThisSprint > 0 ? `+${r.earnedThisSprint}` : "0"}
+                      {r.earnedThisSprint > 0 ? `+${formatPoints(r.earnedThisSprint)}` : "0"}
                     </td>
                     <td className="text-right px-2">
                       <label className="sr-only" htmlFor={`adj-${r.name}`}>Opening balance for {r.name}</label>
                       <Input
                         id={`adj-${r.name}`}
                         type="number"
+                        step="0.5"
                         defaultValue={r.manualAdjust}
                         onBlur={(e) => {
-                          const v = Math.trunc(Number(e.target.value) || 0);
+                          // v1.55 (ADR-066): decimals allowed (e.g. 0.5); round to 2 dp to keep the store tidy.
+                          const v = Math.round((Number(e.target.value) || 0) * 100) / 100;
                           if (v !== r.manualAdjust) void ledger.adjust(r.name, v);
                         }}
                         className="h-7 w-16 text-right ml-auto"
                         aria-label={`Opening balance for ${r.name}`}
                       />
                     </td>
-                    <td className="text-right px-2 font-semibold text-primary tabular-nums">{wallet[r.name]?.balance ?? 0}</td>
+                    <td className="text-right px-2 font-semibold text-primary tabular-nums">{formatPoints(wallet[r.name]?.balance ?? 0)}</td>
                   </tr>
                 ))}
               </tbody>

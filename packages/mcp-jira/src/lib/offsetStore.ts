@@ -28,7 +28,7 @@ export interface OffsetSprintEntry {
 /** v1.54 (ADR-065) — one ad-hoc manual adjustment to a developer's balance. */
 export interface OffsetAdjustment {
   id: string;
-  amount: number; // signed integer (±), non-zero
+  amount: number; // signed, non-zero; DECIMAL-capable (v1.55, ADR-066 — e.g. 0.5)
   note?: string;
   createdAt: string; // ISO
 }

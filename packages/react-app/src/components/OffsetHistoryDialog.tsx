@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { formatPoints } from "../lib/format";
 import type { OffsetHistory } from "../lib/offsetWallet";
 
 function shortDate(iso: string): string {
@@ -25,15 +26,17 @@ function shortTimestamp(iso: string): string {
   return isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+// v1.55 (ADR-066): decimals allowed → format the number part (≤2 dp, trailing zeros trimmed). U+2212 minus
+// for negatives (matches the Used column).
 function signed(n: number): string {
-  return n > 0 ? `+${n}` : `−${Math.abs(n)}`; // U+2212 minus for negatives (matches the Used column)
+  return n > 0 ? `+${formatPoints(n)}` : `−${formatPoints(Math.abs(n))}`;
 }
 
 function Tile({ label, value, strong }: { label: string; value: number; strong?: boolean }) {
   const tone = strong ? (value > 0 ? "text-success" : value < 0 ? "text-destructive" : "text-foreground") : "text-foreground";
   return (
     <div className="rounded-md bg-muted px-2 py-1.5">
-      <p className={cn("text-base font-bold tabular-nums leading-none", tone)}>{value}</p>
+      <p className={cn("text-base font-bold tabular-nums leading-none", tone)}>{formatPoints(value)}</p>
       <p className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground mt-0.5">{label}</p>
     </div>
   );
@@ -66,7 +69,7 @@ export function OffsetHistoryDialog({
   const [busy, setBusy] = useState(false);
   const canEdit = !!assignee && !!onAddAdjustment;
 
-  const parsedAmount = Number.parseInt(amount, 10);
+  const parsedAmount = Number.parseFloat(amount); // v1.55 (ADR-066): decimals allowed (e.g. 0.5)
   const amountValid = Number.isFinite(parsedAmount) && parsedAmount !== 0;
 
   async function submit(e: FormEvent) {
@@ -125,7 +128,7 @@ export function OffsetHistoryDialog({
                       <span className="flex-1 min-w-0 text-foreground truncate" title={e.sprintName ?? `Sprint ${e.sprintId}`}>
                         {e.sprintName ?? `Sprint ${e.sprintId}`}
                       </span>
-                      <span className="text-success font-semibold flex-shrink-0 tabular-nums">+{e.earned}</span>
+                      <span className="text-success font-semibold flex-shrink-0 tabular-nums">+{formatPoints(e.earned)}</span>
                     </li>
                   ))}
                 </ul>
@@ -185,7 +188,7 @@ export function OffsetHistoryDialog({
                   <div className="w-20">
                     <Label htmlFor="adj-amount" className="text-xs font-medium">Amount ±</Label>
                     <Input
-                      id="adj-amount" type="number" step="1" inputMode="numeric" placeholder="±"
+                      id="adj-amount" type="number" step="0.5" inputMode="decimal" placeholder="±"
                       value={amount} onChange={(e) => setAmount(e.target.value)} className="h-8"
                     />
                   </div>

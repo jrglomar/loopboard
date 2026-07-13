@@ -74,6 +74,25 @@ describe("OffsetHistoryDialog (v1.33 / v1.54)", () => {
     expect(screen.getByRole("button", { name: /^add$/i }).hasAttribute("disabled")).toBe(true);
   });
 
+  it("accepts a DECIMAL amount in the add form (v1.55, ADR-066)", async () => {
+    const onAdd = vi.fn().mockResolvedValue(undefined);
+    render(<OffsetHistoryDialog assignee="Alice" history={EMPTY} open onOpenChange={() => {}} onAddAdjustment={onAdd} />);
+    fireEvent.change(screen.getByLabelText(/Amount/i), { target: { value: "0.5" } });
+    fireEvent.click(screen.getByRole("button", { name: /^add$/i }));
+    await waitFor(() => expect(onAdd).toHaveBeenCalledWith("Alice", 0.5, ""));
+  });
+
+  it("renders decimal figures cleanly (formatPoints)", () => {
+    const dec: OffsetHistory = {
+      ...EMPTY, earned: 2.5, balance: 2.75,
+      earnedBySprint: [{ sprintId: 1, sprintName: "Sprint One", earned: 0.5 }],
+      adjustments: [{ id: "d", amount: 0.25, note: "half", createdAt: "2026-07-01T00:00:00Z" }],
+    };
+    render(<OffsetHistoryDialog assignee="Alice" history={dec} open onOpenChange={() => {}} />);
+    expect(screen.getByRole("list", { name: /Offset earned history/i }).textContent).toContain("+0.5");
+    expect(screen.getByRole("list", { name: /Manual adjustments/i }).textContent).toContain("+0.25");
+  });
+
   it("removes an adjustment via its delete button", async () => {
     const onDelete = vi.fn().mockResolvedValue(undefined);
     render(

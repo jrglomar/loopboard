@@ -947,10 +947,13 @@ data, so the Huddle's code-review card uses it for both the PR list and the appr
 Per-developer offset-point tracking, backed by a bridge-side JSON store (`JIRA_OFFSET_FILE`, default
 `<mcp-jira>/.loopboard-offset.json`, git-ignored). Store shape:
 `{ [assignee]: { bySprint: { [sprintId]: { earned, spent } }, manualAdjust, adjustments?: OffsetAdjustment[] } }`,
-where **`OffsetAdjustment = { id, amount: int (non-zero, ±), note?: string, createdAt: ISO }`** (v1.54).
-**Ways to adjust the balance**: a per-sprint snapshot (**banked on user confirm** since v1.50 — see below);
-a single **manual** delta the UI surfaces as each developer's **opening balance** (prior/carry-in); and
-(v1.54, ADR-065) a **log of ad-hoc manual adjustments** (`adjustments[]`), each a signed entry with an
+where **`OffsetAdjustment = { id, amount: number (non-zero, ±), note?: string, createdAt: ISO }`** (v1.54).
+**All offset amounts are DECIMAL-capable (v1.55, ADR-066)** — `earned`, `spent`, `manualAdjust`, and each
+`adjustments[].amount` accept fractional values (e.g. credit 0.5), since teams credit half-points. The UI
+formats every offset figure with `formatPoints` (≤ 2 dp, trailing zeros trimmed) so sums never show float
+noise. **Ways to adjust the balance**: a per-sprint snapshot (**banked on user confirm** since v1.50 — see
+below); a single **manual** delta the UI surfaces as each developer's **opening balance** (prior/carry-in);
+and (v1.54, ADR-065) a **log of ad-hoc manual adjustments** (`adjustments[]`), each a signed entry with an
 optional note, managed from the Offset History dialog — distinct from the one-time opening.
 **`balance = Σ earned − Σ spent + manualAdjust + Σ adjustments.amount`** (pure `summarizeOffset`).
 
@@ -958,15 +961,15 @@ optional note, managed from the Offset History dialog — distinct from the one-
   balance, bySprint, adjustments }> }`. `bySprint: { [sprintId]: { earned, spent } }` (v1.50) lets the UI
   show whether a sprint's offsets are already banked + plot per-sprint EARNED history; `adjustments:
   OffsetAdjustment[]` (v1.54) is the manual-adjustment log (newest-first).
-- **`set_offset_for_sprint`** — Input `{ sprintId, entries: Array<{ assignee, earned ≥ 0, spent ≥ 0 }> }`.
-  **Idempotent** upsert of that sprint's `{ earned, spent }` per assignee (re-recording never
-  double-counts). **v1.50 (ADR-061):** the Leaves page calls this only when the user **confirms** the
-  "Bank earned offsets" dialog (was auto-on-view). Output the updated `entries` summary.
-- **`set_offset_adjustment`** — Input `{ assignee, manualAdjust: int }` — set the single manual delta (the
-  UI's **opening balance**). Output the updated `entries` summary.
-- **`add_offset_adjustment`** (v1.54, ADR-065) — Input `{ assignee, amount: int (non-zero), note?: string
-  ≤ 200 }` — APPEND a manual adjustment (server assigns `id` + `createdAt`). Output the updated `entries`
-  summary. `400 VALIDATION` when `amount` is 0/non-integer.
+- **`set_offset_for_sprint`** — Input `{ sprintId, entries: Array<{ assignee, earned ≥ 0, spent ≥ 0 }> }`
+  (earned/spent are decimal-capable numbers). **Idempotent** upsert of that sprint's `{ earned, spent }` per
+  assignee (re-recording never double-counts). **v1.50 (ADR-061):** the Leaves page calls this only when the
+  user **confirms** the "Bank earned offsets" dialog (was auto-on-view). Output the updated `entries` summary.
+- **`set_offset_adjustment`** — Input `{ assignee, manualAdjust: number }` — set the single manual delta
+  (the UI's **opening balance**, decimal-capable). Output the updated `entries` summary.
+- **`add_offset_adjustment`** (v1.54, ADR-065) — Input `{ assignee, amount: number (non-zero, decimal ok),
+  note?: string ≤ 200 }` — APPEND a manual adjustment (server assigns `id` + `createdAt`). Output the updated
+  `entries` summary. `400 VALIDATION` when `amount` is 0.
 - **`delete_offset_adjustment`** (v1.54, ADR-065) — Input `{ assignee, id }` — remove that adjustment by id
   (no-op if absent). Output the updated `entries` summary.
 - **Offset policy** (`GET /api/health` `.policy = { requiredPoints, offsetThreshold }`, from

@@ -6,6 +6,7 @@ import { Wallet } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { formatPoints } from "../lib/format";
 import type { OffsetWalletEntry } from "../lib/offsetWallet";
 
 function initials(name: string): string {
@@ -53,13 +54,13 @@ export function OffsetWalletCard({
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground truncate" title={name}>{name}</p>
                     <p className="text-[0.6875rem] text-muted-foreground">
-                      earned {w.earned} · used {w.spent}
-                      {w.manual !== 0 ? ` · opening ${w.manual > 0 ? "+" : ""}${w.manual}` : ""}
-                      {w.adjustmentsTotal !== 0 ? ` · adj ${w.adjustmentsTotal > 0 ? "+" : ""}${w.adjustmentsTotal}` : ""}
+                      earned {formatPoints(w.earned)} · used {formatPoints(w.spent)}
+                      {w.manual !== 0 ? ` · opening ${w.manual > 0 ? "+" : ""}${formatPoints(w.manual)}` : ""}
+                      {w.adjustmentsTotal !== 0 ? ` · adj ${w.adjustmentsTotal > 0 ? "+" : ""}${formatPoints(w.adjustmentsTotal)}` : ""}
                     </p>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <p className={cn("text-lg font-bold tabular-nums leading-none", tone)}>{w.balance}</p>
+                    <p className={cn("text-lg font-bold tabular-nums leading-none", tone)}>{formatPoints(w.balance)}</p>
                     <p className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground">balance</p>
                   </div>
                   {onHistory && (

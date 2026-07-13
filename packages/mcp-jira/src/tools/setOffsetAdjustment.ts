@@ -9,7 +9,7 @@ import { readOffset, writeOffset, summarizeOffset, type OffsetSummary } from "..
 
 const schema = z.object({
   assignee: z.string().min(1).max(120),
-  manualAdjust: z.number().int(),
+  manualAdjust: z.number(), // v1.55 (ADR-066): decimal-capable (e.g. 0.5 opening balance)
 });
 
 interface SetOffsetAdjustmentOutput {

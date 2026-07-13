@@ -14,8 +14,9 @@ const schema = z.object({
     .array(
       z.object({
         assignee: z.string().min(1).max(120),
-        earned: z.number().int().min(0),
-        spent: z.number().int().min(0),
+        // v1.55 (ADR-066): decimal-capable (teams may bank/spend fractional offset points).
+        earned: z.number().min(0),
+        spent: z.number().min(0),
       })
     )
     .min(1)
