@@ -7,6 +7,8 @@ import {
   getOffsetLedger,
   setOffsetForSprint,
   setOffsetAdjustment,
+  addOffsetAdjustment,
+  deleteOffsetAdjustment,
   type OffsetLedger,
 } from "../lib/offsetClient";
 import { getLeaves, getAllLeaves, setLeaves, type LeavesMap, type LeaveEntry, type AllLeavesMap } from "../lib/leavesClient";
@@ -1083,8 +1085,12 @@ export interface UseOffsetLedgerState {
   run: () => void;
   /** Record the auto earned/spent snapshot for a sprint (idempotent), then refresh. */
   recordSprint: (sprintId: number, entries: Array<{ assignee: string; earned: number; spent: number }>) => Promise<void>;
-  /** Set a developer's manual offset adjustment, then refresh. */
+  /** Set a developer's single manual offset adjustment (opening balance), then refresh. */
   adjust: (assignee: string, manualAdjust: number) => Promise<void>;
+  /** v1.54: append a manual adjustment to a developer's log, then refresh. */
+  addAdjustment: (assignee: string, amount: number, note?: string) => Promise<void>;
+  /** v1.54: remove a manual adjustment from a developer's log by id, then refresh. */
+  deleteAdjustment: (assignee: string, id: string) => Promise<void>;
 }
 
 /** The per-developer offset ledger (earned/spent/manualAdjust/balance). Loads on mount. */
@@ -1116,5 +1122,15 @@ export function useOffsetLedger(): UseOffsetLedgerState {
     setData(updated);
   }, []);
 
-  return { data, loading, error, run, recordSprint, adjust };
+  const addAdjustment = useCallback(async (assignee: string, amount: number, note?: string) => {
+    const updated = await addOffsetAdjustment(assignee, amount, note);
+    setData(updated);
+  }, []);
+
+  const deleteAdjustment = useCallback(async (assignee: string, id: string) => {
+    const updated = await deleteOffsetAdjustment(assignee, id);
+    setData(updated);
+  }, []);
+
+  return { data, loading, error, run, recordSprint, adjust, addAdjustment, deleteAdjustment };
 }

@@ -942,28 +942,38 @@ data, so the Huddle's code-review card uses it for both the PR list and the appr
 - **Config:** `JIRA_DEV_STATUS_APP_TYPE` (default `"GitHub"`; `"GitHubEnterprise"` for GHE).
 - Registered MCP tool (stdio + `/api/tools` + bridge). jira tools **31 → 32**.
 
-### 4.26 `get_offset_ledger` / `set_offset_for_sprint` / `set_offset_adjustment` (v1.26, ADR-038 — offset ledger)
+### 4.26 `get_offset_ledger` / `set_offset_for_sprint` / `set_offset_adjustment` / `add_offset_adjustment` / `delete_offset_adjustment` (v1.26, ADR-038; v1.54, ADR-065 — offset ledger)
 
 Per-developer offset-point tracking, backed by a bridge-side JSON store (`JIRA_OFFSET_FILE`, default
 `<mcp-jira>/.loopboard-offset.json`, git-ignored). Store shape:
-`{ [assignee]: { bySprint: { [sprintId]: { earned, spent } }, manualAdjust } }`. **Two ways to adjust**:
-a per-sprint snapshot (**banked on user confirm** since v1.50 — see below) + a **manual** delta the UI
-surfaces as each developer's **opening balance** (their prior/carry-in balance).
-**`balance = Σ earned − Σ spent + manualAdjust`** (pure `summarizeOffset`).
+`{ [assignee]: { bySprint: { [sprintId]: { earned, spent } }, manualAdjust, adjustments?: OffsetAdjustment[] } }`,
+where **`OffsetAdjustment = { id, amount: int (non-zero, ±), note?: string, createdAt: ISO }`** (v1.54).
+**Ways to adjust the balance**: a per-sprint snapshot (**banked on user confirm** since v1.50 — see below);
+a single **manual** delta the UI surfaces as each developer's **opening balance** (prior/carry-in); and
+(v1.54, ADR-065) a **log of ad-hoc manual adjustments** (`adjustments[]`), each a signed entry with an
+optional note, managed from the Offset History dialog — distinct from the one-time opening.
+**`balance = Σ earned − Σ spent + manualAdjust + Σ adjustments.amount`** (pure `summarizeOffset`).
 
 - **`get_offset_ledger`** — Input `{}`. Output `{ entries: Record<assignee, { earned, spent, manualAdjust,
-  balance, bySprint }> }`. **v1.50 (ADR-061):** each summary now includes `bySprint: { [sprintId]: {
-  earned, spent } }` so the UI can show whether a sprint's offsets are already banked.
+  balance, bySprint, adjustments }> }`. `bySprint: { [sprintId]: { earned, spent } }` (v1.50) lets the UI
+  show whether a sprint's offsets are already banked + plot per-sprint EARNED history; `adjustments:
+  OffsetAdjustment[]` (v1.54) is the manual-adjustment log (newest-first).
 - **`set_offset_for_sprint`** — Input `{ sprintId, entries: Array<{ assignee, earned ≥ 0, spent ≥ 0 }> }`.
   **Idempotent** upsert of that sprint's `{ earned, spent }` per assignee (re-recording never
   double-counts). **v1.50 (ADR-061):** the Leaves page calls this only when the user **confirms** the
   "Bank earned offsets" dialog (was auto-on-view). Output the updated `entries` summary.
-- **`set_offset_adjustment`** — Input `{ assignee, manualAdjust: int }` — set the manual delta (the UI's
-  **opening balance**). Output the updated `entries` summary.
+- **`set_offset_adjustment`** — Input `{ assignee, manualAdjust: int }` — set the single manual delta (the
+  UI's **opening balance**). Output the updated `entries` summary.
+- **`add_offset_adjustment`** (v1.54, ADR-065) — Input `{ assignee, amount: int (non-zero), note?: string
+  ≤ 200 }` — APPEND a manual adjustment (server assigns `id` + `createdAt`). Output the updated `entries`
+  summary. `400 VALIDATION` when `amount` is 0/non-integer.
+- **`delete_offset_adjustment`** (v1.54, ADR-065) — Input `{ assignee, id }` — remove that adjustment by id
+  (no-op if absent). Output the updated `entries` summary.
 - **Offset policy** (`GET /api/health` `.policy = { requiredPoints, offsetThreshold }`, from
   `JIRA_REQUIRED_POINTS` (N) + `JIRA_OFFSET_THRESHOLD` (N2)). The UI computes earned =
   `(donePoints + leaveDays) ≥ (N + N2) ? 1 : 0` (**max 1/sprint**).
-- Registered MCP tools. jira tools **32 → 35**. Tests use a temp store; keyless/offline.
+- Registered MCP tools. jira tools **40 → 42** (v1.54 adds `add_offset_adjustment` +
+  `delete_offset_adjustment`). Tests use a temp store; keyless/offline.
 
 ### 4.27 `get_meeting_notes` / `set_meeting_notes` (v1.41, ADR-051 — Huddle rich meeting notes)
 

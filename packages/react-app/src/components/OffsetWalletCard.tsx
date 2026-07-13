@@ -14,7 +14,7 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-const EMPTY: OffsetWalletEntry = { earned: 0, spent: 0, manual: 0, balance: 0 };
+const EMPTY: OffsetWalletEntry = { earned: 0, spent: 0, manual: 0, adjustmentsTotal: 0, balance: 0 };
 
 export function OffsetWalletCard({
   wallet,
@@ -55,6 +55,7 @@ export function OffsetWalletCard({
                     <p className="text-[0.6875rem] text-muted-foreground">
                       earned {w.earned} · used {w.spent}
                       {w.manual !== 0 ? ` · opening ${w.manual > 0 ? "+" : ""}${w.manual}` : ""}
+                      {w.adjustmentsTotal !== 0 ? ` · adj ${w.adjustmentsTotal > 0 ? "+" : ""}${w.adjustmentsTotal}` : ""}
                     </p>
                   </div>
                   <div className="text-right flex-shrink-0">

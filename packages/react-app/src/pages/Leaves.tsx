@@ -298,12 +298,15 @@ export function Leaves({
         onConfirm={bankSprint}
       />
 
-      {/* v1.33 (ADR-044, Phase 2): per-developer offset usage history */}
+      {/* v1.33 (ADR-044, Phase 2): per-developer offset history. v1.54 (ADR-065): earned + used + a
+          manual-adjustment log you can add to / remove from, all in this dialog. */}
       <OffsetHistoryDialog
         assignee={historyFor}
         history={history}
         open={historyFor !== null}
         onOpenChange={(o) => { if (!o) setHistoryFor(null); }}
+        onAddAdjustment={ledger.addAdjustment}
+        onDeleteAdjustment={ledger.deleteAdjustment}
       />
     </div>
   );

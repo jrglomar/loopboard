@@ -24,7 +24,7 @@ export async function setOffsetForSprint(
   return res.entries;
 }
 
-/** Set a developer's manual offset adjustment (absolute signed delta). */
+/** Set a developer's single manual offset adjustment / opening balance (absolute signed delta). */
 export async function setOffsetAdjustment(
   assignee: string,
   manualAdjust: number
@@ -32,6 +32,29 @@ export async function setOffsetAdjustment(
   const res = await callTool<{ entries: OffsetLedger }>("jira", "set_offset_adjustment", {
     assignee,
     manualAdjust,
+  });
+  return res.entries;
+}
+
+/** v1.54 (ADR-065): append a manual adjustment to a developer's log (signed non-zero amount + note). */
+export async function addOffsetAdjustment(
+  assignee: string,
+  amount: number,
+  note?: string
+): Promise<OffsetLedger> {
+  const res = await callTool<{ entries: OffsetLedger }>("jira", "add_offset_adjustment", {
+    assignee,
+    amount,
+    ...(note && note.trim() ? { note: note.trim() } : {}),
+  });
+  return res.entries;
+}
+
+/** v1.54 (ADR-065): remove a manual adjustment from a developer's log by id. */
+export async function deleteOffsetAdjustment(assignee: string, id: string): Promise<OffsetLedger> {
+  const res = await callTool<{ entries: OffsetLedger }>("jira", "delete_offset_adjustment", {
+    assignee,
+    id,
   });
   return res.entries;
 }

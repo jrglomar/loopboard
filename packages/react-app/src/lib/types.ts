@@ -543,14 +543,24 @@ export type LeaveType = "VL" | "EL" | "Holiday" | "Offset";
 /** Per-assignee map of ISO date (YYYY-MM-DD) → leave type. */
 export type AssigneeLeaves = Record<string, LeaveType>;
 
+/** v1.54 (ADR-065): one ad-hoc manual balance adjustment — the Offset History log. */
+export interface OffsetAdjustment {
+  id: string;
+  amount: number; // signed integer (±), non-zero
+  note?: string;
+  createdAt: string; // ISO
+}
+
 /** One developer's computed offset standing (get_offset_ledger). */
 export interface OffsetSummary {
   earned: number;
   spent: number;
-  manualAdjust: number; // the manual/opening balance (surfaced as "Opening balance" in the UI)
+  manualAdjust: number; // the single manual/opening balance (surfaced as "Opening balance" in the UI)
   balance: number;
   /** v1.50 (ADR-061): per-sprint banked earned/spent — lets the UI show if a sprint is banked. */
   bySprint?: Record<string, { earned: number; spent: number }>;
+  /** v1.54 (ADR-065): the manual-adjustment log (newest-first), managed from the Offset History dialog. */
+  adjustments?: OffsetAdjustment[];
 }
 
 /** Offset policy (per-user via /api/me/context .policy since v1.51; global default otherwise). */

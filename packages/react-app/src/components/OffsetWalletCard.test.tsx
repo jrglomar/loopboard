@@ -6,8 +6,8 @@ import { OffsetWalletCard } from "./OffsetWalletCard";
 import type { OffsetWalletEntry } from "../lib/offsetWallet";
 
 const WALLET: Record<string, OffsetWalletEntry> = {
-  Alice: { earned: 3, spent: 1, manual: 0, balance: 2 },
-  Bob: { earned: 0, spent: 1, manual: 0, balance: -1 },
+  Alice: { earned: 3, spent: 1, manual: 0, adjustmentsTotal: 0, balance: 2 },
+  Bob: { earned: 0, spent: 1, manual: 0, adjustmentsTotal: 0, balance: -1 },
 };
 
 afterEach(() => cleanup());

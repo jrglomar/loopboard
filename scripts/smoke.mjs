@@ -125,6 +125,9 @@ const EXPECTED_JIRA_TOOLS = [
   "get_offset_ledger",
   "set_offset_for_sprint",
   "set_offset_adjustment",
+  // v1.54 (ADR-065) — manual-adjustment log
+  "add_offset_adjustment",
+  "delete_offset_adjustment",
 ];
 
 const EXPECTED_GITHUB_TOOLS = [
@@ -533,6 +536,8 @@ if (!jiraReady) {
     "get_issue_pull_requests",
     // v1.26 — offset writes reject empty input (validation precedes any file write)
     "set_offset_for_sprint", "set_offset_adjustment",
+    // v1.54 (ADR-065) — manual-adjustment log writes reject empty input
+    "add_offset_adjustment", "delete_offset_adjustment",
   ]) {
     try {
       const { status, body } = await httpPost(`http://127.0.0.1:${JIRA_PORT}/api/tools/${tool}`, {});

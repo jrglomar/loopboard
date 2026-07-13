@@ -10,12 +10,14 @@
 
 import type { OffsetLedger } from "./offsetClient";
 import type { AllLeavesMap } from "./leavesClient";
+import type { OffsetAdjustment } from "./types";
 
 export interface OffsetWalletEntry {
   earned: number; // Σ banked earned across sprints (from the ledger)
   spent: number; // Σ Offset-type leave days plotted (derived, live)
-  manual: number; // manual adjustment
-  balance: number; // earned − spent + manual
+  manual: number; // the single manual "opening balance" adjustment
+  adjustmentsTotal: number; // v1.54 (ADR-065): Σ of the manual-adjustment log
+  balance: number; // earned − spent + manual + adjustmentsTotal
 }
 
 /** Count each assignee's plotted Offset-type leave days across every sprint. */
@@ -47,7 +49,9 @@ export function computeOffsetWallet(
     const earned = ledger?.[name]?.earned ?? 0;
     const manual = ledger?.[name]?.manualAdjust ?? 0;
     const spent = spentByAssignee[name] ?? 0;
-    out[name] = { earned, spent, manual, balance: earned - spent + manual };
+    // v1.54 (ADR-065): fold the manual-adjustment log into the balance.
+    const adjustmentsTotal = (ledger?.[name]?.adjustments ?? []).reduce((s, a) => s + (a.amount ?? 0), 0);
+    out[name] = { earned, spent, manual, adjustmentsTotal, balance: earned - spent + manual + adjustmentsTotal };
   }
   return out;
 }
@@ -61,14 +65,26 @@ export interface OffsetUsage {
   sprintName?: string;
 }
 
+/** v1.54 (ADR-065): one sprint's banked EARNED points (for the earned-history section). */
+export interface OffsetEarned {
+  sprintId: number;
+  sprintName?: string;
+  earned: number;
+}
+
 export interface OffsetHistory extends OffsetWalletEntry {
   /** Each Offset leave (spend), newest first. */
   usage: OffsetUsage[];
+  /** v1.54: each sprint that banked earned points, newest sprint first. */
+  earnedBySprint: OffsetEarned[];
+  /** v1.54: the manual-adjustment log (newest first, as returned by the ledger). */
+  adjustments: OffsetAdjustment[];
 }
 
 /**
- * One developer's offset standing + usage history. `earned` is the banked total (the ledger does not
- * expose a per-sprint earned breakdown); `usage` lists every Offset leave (spend) with its date + sprint.
+ * One developer's offset standing + full history: `usage` (every Offset leave spend, dated), plus (v1.54)
+ * `earnedBySprint` (each sprint's banked earned, from the ledger `bySprint`) and `adjustments` (the manual
+ * adjustment log). All feed the Offset History dialog.
  */
 export function buildOffsetHistory(
   assignee: string,
@@ -76,7 +92,8 @@ export function buildOffsetHistory(
   allLeaves: AllLeavesMap,
   sprintNameById?: Record<string, string>
 ): OffsetHistory {
-  const wallet = computeOffsetWallet(ledger, allLeaves)[assignee] ?? { earned: 0, spent: 0, manual: 0, balance: 0 };
+  const wallet = computeOffsetWallet(ledger, allLeaves)[assignee]
+    ?? { earned: 0, spent: 0, manual: 0, adjustmentsTotal: 0, balance: 0 };
 
   const usage: OffsetUsage[] = [];
   for (const [sprintId, byAssignee] of Object.entries(allLeaves)) {
@@ -88,5 +105,13 @@ export function buildOffsetHistory(
   }
   usage.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)); // newest first
 
-  return { ...wallet, usage };
+  // v1.54: banked earned per sprint (only sprints that earned > 0), newest sprint (highest id) first.
+  const earnedBySprint: OffsetEarned[] = Object.entries(ledger?.[assignee]?.bySprint ?? {})
+    .filter(([, v]) => (v.earned ?? 0) > 0)
+    .map(([sprintId, v]) => ({ sprintId: Number(sprintId), sprintName: sprintNameById?.[sprintId], earned: v.earned }))
+    .sort((a, b) => b.sprintId - a.sprintId);
+
+  const adjustments = ledger?.[assignee]?.adjustments ?? []; // backend returns newest-first
+
+  return { ...wallet, usage, earnedBySprint, adjustments };
 }

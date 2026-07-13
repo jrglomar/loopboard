@@ -39,6 +39,8 @@ import { getIssuePullRequestsTool } from "./getIssuePullRequests.js";
 import { getOffsetLedgerTool } from "./getOffsetLedger.js";
 import { setOffsetForSprintTool } from "./setOffsetForSprint.js";
 import { setOffsetAdjustmentTool } from "./setOffsetAdjustment.js";
+import { addOffsetAdjustmentTool } from "./addOffsetAdjustment.js";
+import { deleteOffsetAdjustmentTool } from "./deleteOffsetAdjustment.js";
 
 export const tools: ToolDef[] = [
   createPoTicket,
@@ -81,4 +83,6 @@ export const tools: ToolDef[] = [
   getOffsetLedgerTool,
   setOffsetForSprintTool,
   setOffsetAdjustmentTool,
+  addOffsetAdjustmentTool,
+  deleteOffsetAdjustmentTool,
 ];
