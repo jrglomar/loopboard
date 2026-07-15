@@ -1,0 +1,539 @@
+// Tool catalog for the Guide's "Using the MCP tools" + "Tool reference" sections (v1.56, ADR-067).
+//
+// This is the single source of truth the Guide page renders from — one row per MCP tool exposed
+// by mcp-jira and mcp-github (see docs/CONTRACTS.md for the wire contract each tool implements).
+//
+// `aiAssistant` is a DELIBERATE hand-synced duplicate of the floating assistant's allowlists —
+// READ_TOOLS / WRITE_TOOLS in packages/mcp-jira/src/lib/ai/askService.ts — because react-app must
+// not import mcp-jira's server-only modules into the browser bundle. This mirrors the existing
+// convention in packages/mcp-jira/src/lib/delegation.ts, whose JIRA_WRITE_TOOLS is itself a
+// hand-maintained list rather than an import. toolCatalog.test.ts keeps this catalog honest by
+// asserting set-equality against inlined copies of those same allowlists.
+
+export type ToolServer = "mcp-jira" | "mcp-github";
+export type ToolSurface = "jira" | "github" | "local";
+export type ToolAccess = "read" | "write";
+
+/** Whether/how the floating AI assistant (askService.ts) can reach this tool. */
+export type AiAssistantAvailability = "read" | "propose" | "none";
+
+export const TOOL_GROUPS = [
+  "Ticket CRUD",
+  "Sprint reads",
+  "Sprint management",
+  "Reports & velocity",
+  "Assignment & roster",
+  "Leaves & offset wallet",
+  "Huddle stores",
+  "Linking & PR visibility",
+  "GitHub pull requests",
+] as const;
+
+export type ToolGroup = (typeof TOOL_GROUPS)[number];
+
+export interface ToolCatalogEntry {
+  name: string;
+  server: ToolServer;
+  group: ToolGroup;
+  surface: ToolSurface;
+  access: ToolAccess;
+  blurb: string;
+  /** Where this tool surfaces in the app UI, or null when it's Copilot/VS Code only. */
+  appSurface: string | null;
+  aiAssistant: AiAssistantAvailability;
+}
+
+export const TOOL_CATALOG: ToolCatalogEntry[] = [
+  // ── Ticket CRUD (5) ──────────────────────────────────────────────────────────
+  {
+    name: "create_po_ticket",
+    server: "mcp-jira",
+    group: "Ticket CRUD",
+    surface: "jira",
+    access: "write",
+    blurb: "Create a PO story in Jira (plain text becomes a formatted description); optionally into a sprint.",
+    appSurface: "Planning · Ticket generator, Linking",
+    aiAssistant: "none",
+  },
+  {
+    name: "create_dev_ticket",
+    server: "mcp-jira",
+    group: "Ticket CRUD",
+    surface: "jira",
+    access: "write",
+    blurb: "Create a Dev task, optionally linked to a PO story, assigned, and added to a sprint.",
+    appSurface: "Planning · Ticket generator, Linking",
+    aiAssistant: "none",
+  },
+  {
+    name: "get_ticket",
+    server: "mcp-jira",
+    group: "Ticket CRUD",
+    surface: "jira",
+    access: "read",
+    blurb: "Fetch one ticket's summary, description, status, assignee, points and labels.",
+    appSurface: "Huddle chat · ticket <KEY>",
+    aiAssistant: "read",
+  },
+  {
+    name: "update_ticket",
+    server: "mcp-jira",
+    group: "Ticket CRUD",
+    surface: "jira",
+    access: "write",
+    blurb: "Update a ticket's summary, description and/or story points.",
+    appSurface: "Planning · Assignment list (points)",
+    aiAssistant: "propose",
+  },
+  {
+    name: "get_issue_descriptions",
+    server: "mcp-jira",
+    group: "Ticket CRUD",
+    surface: "jira",
+    access: "read",
+    blurb: "Batch-fetch plain-text descriptions for up to 50 issue keys at once.",
+    appSurface: "Linking (AI plan drafting)",
+    aiAssistant: "none",
+  },
+
+  // ── Sprint reads (3) ─────────────────────────────────────────────────────────
+  {
+    name: "get_active_sprint",
+    server: "mcp-jira",
+    group: "Sprint reads",
+    surface: "jira",
+    access: "read",
+    blurb: "The active (or chosen) sprint's issues bucketed by status, with totals and points.",
+    appSurface: "Huddle, Reports",
+    aiAssistant: "read",
+  },
+  {
+    name: "get_daily_huddle",
+    server: "mcp-jira",
+    group: "Sprint reads",
+    surface: "jira",
+    access: "read",
+    blurb: "A deterministic standup digest — in progress, code review, blocked, done, up next.",
+    appSurface: "Huddle",
+    aiAssistant: "read",
+  },
+  {
+    name: "list_sprints",
+    server: "mcp-jira",
+    group: "Sprint reads",
+    surface: "jira",
+    access: "read",
+    blurb: "List a board's sprints grouped by active, future and closed.",
+    appSurface: "Planning, Reports (sprint pickers)",
+    aiAssistant: "read",
+  },
+
+  // ── Sprint management (5) ───────────────────────────────────────────────────
+  {
+    name: "create_sprint",
+    server: "mcp-jira",
+    group: "Sprint management",
+    surface: "jira",
+    access: "write",
+    blurb: "Create a new future sprint with a name, goal and optional dates.",
+    appSurface: "Planning · New sprint",
+    aiAssistant: "propose",
+  },
+  {
+    name: "set_sprint_goal",
+    server: "mcp-jira",
+    group: "Sprint management",
+    surface: "jira",
+    access: "write",
+    blurb: "Set or clear a sprint's goal.",
+    appSurface: "Huddle · Sprint goal editor",
+    aiAssistant: "propose",
+  },
+  {
+    name: "get_transitions",
+    server: "mcp-jira",
+    group: "Sprint management",
+    surface: "jira",
+    access: "read",
+    blurb: "List the valid next-status transitions for a ticket.",
+    appSurface: "Planning · Assignment list",
+    aiAssistant: "none",
+  },
+  {
+    name: "transition_issue",
+    server: "mcp-jira",
+    group: "Sprint management",
+    surface: "jira",
+    access: "write",
+    blurb: "Move a ticket to a new status using a transition id.",
+    appSurface: "Planning · Assignment list",
+    aiAssistant: "propose",
+  },
+  {
+    name: "move_issue_to_sprint",
+    server: "mcp-jira",
+    group: "Sprint management",
+    surface: "jira",
+    access: "write",
+    blurb: "Move a ticket into a different sprint.",
+    appSurface: "Planning · Assignment list",
+    aiAssistant: "propose",
+  },
+
+  // ── Reports & velocity (2) ──────────────────────────────────────────────────
+  {
+    name: "get_sprint_report",
+    server: "mcp-jira",
+    group: "Reports & velocity",
+    surface: "jira",
+    access: "read",
+    blurb: "Committed vs completed points, completion rate and a by-assignee breakdown.",
+    appSurface: "Reports",
+    aiAssistant: "read",
+  },
+  {
+    name: "get_velocity",
+    server: "mcp-jira",
+    group: "Reports & velocity",
+    surface: "jira",
+    access: "read",
+    blurb: "Average completed points over recent sprints, with a simple forecast.",
+    appSurface: "Reports",
+    aiAssistant: "read",
+  },
+
+  // ── Assignment & roster (5) ─────────────────────────────────────────────────
+  {
+    name: "get_assignable_users",
+    server: "mcp-jira",
+    group: "Assignment & roster",
+    surface: "jira",
+    access: "read",
+    blurb: "List the developers eligible to be assigned tickets on a project or board.",
+    appSurface: "Planning · Assignment list",
+    aiAssistant: "none",
+  },
+  {
+    name: "assign_issue",
+    server: "mcp-jira",
+    group: "Assignment & roster",
+    surface: "jira",
+    access: "write",
+    blurb: "Assign (or unassign) a ticket to a developer.",
+    appSurface: "Planning · Assignment list",
+    aiAssistant: "propose",
+  },
+  {
+    name: "get_recent_assignees",
+    server: "mcp-jira",
+    group: "Assignment & roster",
+    surface: "jira",
+    access: "read",
+    blurb: "Suggest roster members from everyone assigned a ticket recently on the board.",
+    appSurface: "Planning · Team roster",
+    aiAssistant: "none",
+  },
+  {
+    name: "get_team_members",
+    server: "mcp-jira",
+    group: "Assignment & roster",
+    surface: "local",
+    access: "read",
+    blurb: "The curated team roster Loopboard plans around, per board.",
+    appSurface: "Planning · Team roster",
+    aiAssistant: "read",
+  },
+  {
+    name: "set_team_members",
+    server: "mcp-jira",
+    group: "Assignment & roster",
+    surface: "local",
+    access: "write",
+    blurb: "Replace the curated team roster for a board.",
+    appSurface: "Planning · Team roster",
+    aiAssistant: "none",
+  },
+
+  // ── Leaves & offset wallet (8) ──────────────────────────────────────────────
+  {
+    name: "get_leaves",
+    server: "mcp-jira",
+    group: "Leaves & offset wallet",
+    surface: "local",
+    access: "read",
+    blurb: "One sprint's typed leave days (VL, EL, Holiday, Offset) per person.",
+    appSurface: "Planning · Leaves & capacity",
+    aiAssistant: "read",
+  },
+  {
+    name: "get_all_leaves",
+    server: "mcp-jira",
+    group: "Leaves & offset wallet",
+    surface: "local",
+    access: "read",
+    blurb: "The entire leaves store across every sprint, for the planner and wallet.",
+    appSurface: "Offset Tracker",
+    aiAssistant: "read",
+  },
+  {
+    name: "set_leaves",
+    server: "mcp-jira",
+    group: "Leaves & offset wallet",
+    surface: "local",
+    access: "write",
+    blurb: "Replace one person's typed leave days for a sprint.",
+    appSurface: "Planning, Offset Tracker",
+    aiAssistant: "propose",
+  },
+  {
+    name: "get_offset_ledger",
+    server: "mcp-jira",
+    group: "Leaves & offset wallet",
+    surface: "local",
+    access: "read",
+    blurb: "Every developer's offset balance — earned, used, opening, adjustments.",
+    appSurface: "Offset Tracker",
+    aiAssistant: "read",
+  },
+  {
+    name: "set_offset_for_sprint",
+    server: "mcp-jira",
+    group: "Leaves & offset wallet",
+    surface: "local",
+    access: "write",
+    blurb: "Bank a sprint's computed offset earnings (idempotent per sprint).",
+    appSurface: "Offset Tracker · Bank earned offsets",
+    aiAssistant: "none",
+  },
+  {
+    name: "set_offset_adjustment",
+    server: "mcp-jira",
+    group: "Leaves & offset wallet",
+    surface: "local",
+    access: "write",
+    blurb: "Set a developer's one-time opening offset balance.",
+    appSurface: "Offset Tracker · Opening column",
+    aiAssistant: "none",
+  },
+  {
+    name: "add_offset_adjustment",
+    server: "mcp-jira",
+    group: "Leaves & offset wallet",
+    surface: "local",
+    access: "write",
+    blurb: "Log a manual ± offset adjustment (decimals allowed) with an optional note.",
+    appSurface: "Offset Tracker · History dialog",
+    aiAssistant: "none",
+  },
+  {
+    name: "delete_offset_adjustment",
+    server: "mcp-jira",
+    group: "Leaves & offset wallet",
+    surface: "local",
+    access: "write",
+    blurb: "Remove one manual offset adjustment from a developer's log.",
+    appSurface: "Offset Tracker · History dialog",
+    aiAssistant: "none",
+  },
+
+  // ── Huddle stores (12) ──────────────────────────────────────────────────────
+  {
+    name: "get_impediments",
+    server: "mcp-jira",
+    group: "Huddle stores",
+    surface: "local",
+    access: "read",
+    blurb: "This sprint's logged blockers and impediments.",
+    appSurface: "Huddle · Impediments card",
+    aiAssistant: "read",
+  },
+  {
+    name: "set_impediments",
+    server: "mcp-jira",
+    group: "Huddle stores",
+    surface: "local",
+    access: "write",
+    blurb: "Replace this sprint's logged blockers.",
+    appSurface: "Huddle · Impediments card",
+    aiAssistant: "none",
+  },
+  {
+    name: "get_pull_requests",
+    server: "mcp-jira",
+    group: "Huddle stores",
+    surface: "local",
+    access: "read",
+    blurb: "This sprint's manually-tracked pending PR links.",
+    appSurface: "Huddle · Code review card",
+    aiAssistant: "read",
+  },
+  {
+    name: "set_pull_requests",
+    server: "mcp-jira",
+    group: "Huddle stores",
+    surface: "local",
+    access: "write",
+    blurb: "Replace this sprint's manually-tracked PR links.",
+    appSurface: "Huddle · Code review card",
+    aiAssistant: "none",
+  },
+  {
+    name: "get_post_scrum",
+    server: "mcp-jira",
+    group: "Huddle stores",
+    surface: "local",
+    access: "read",
+    blurb: "This sprint's post-standup follow-up notes, per person.",
+    appSurface: "Huddle · Post-scrum card",
+    aiAssistant: "read",
+  },
+  {
+    name: "set_post_scrum",
+    server: "mcp-jira",
+    group: "Huddle stores",
+    surface: "local",
+    access: "write",
+    blurb: "Replace this sprint's post-scrum follow-up notes.",
+    appSurface: "Huddle · Post-scrum card",
+    aiAssistant: "none",
+  },
+  {
+    name: "get_meeting_goal",
+    server: "mcp-jira",
+    group: "Huddle stores",
+    surface: "local",
+    access: "read",
+    blurb: "Today's standup focus (distinct from the Jira sprint goal).",
+    appSurface: "Huddle · Meeting goal card",
+    aiAssistant: "read",
+  },
+  {
+    name: "set_meeting_goal",
+    server: "mcp-jira",
+    group: "Huddle stores",
+    surface: "local",
+    access: "write",
+    blurb: "Set or clear today's standup focus.",
+    appSurface: "Huddle · Meeting goal card",
+    aiAssistant: "none",
+  },
+  {
+    name: "get_meeting_notes",
+    server: "mcp-jira",
+    group: "Huddle stores",
+    surface: "local",
+    access: "read",
+    blurb: "The sprint's rich-text meeting notes.",
+    appSurface: "Huddle · Meeting notes card",
+    aiAssistant: "read",
+  },
+  {
+    name: "set_meeting_notes",
+    server: "mcp-jira",
+    group: "Huddle stores",
+    surface: "local",
+    access: "write",
+    blurb: "Replace the sprint's rich-text meeting notes.",
+    appSurface: "Huddle · Meeting notes card",
+    aiAssistant: "none",
+  },
+  {
+    name: "get_retro",
+    server: "mcp-jira",
+    group: "Huddle stores",
+    surface: "local",
+    access: "read",
+    blurb: "The sprint's saved retrospective (delays, what worked, kudos and more).",
+    appSurface: "Reports · Retrospective",
+    aiAssistant: "read",
+  },
+  {
+    name: "set_retro",
+    server: "mcp-jira",
+    group: "Huddle stores",
+    surface: "local",
+    access: "write",
+    blurb: "Replace the sprint's retrospective fields.",
+    appSurface: "Reports · Retrospective",
+    aiAssistant: "none",
+  },
+
+  // ── Linking & PR visibility (2) ─────────────────────────────────────────────
+  {
+    name: "get_linked_issues",
+    server: "mcp-jira",
+    group: "Linking & PR visibility",
+    surface: "jira",
+    access: "read",
+    blurb: "Issues linked to a set of keys, filtered to a project (PO ↔ Dev links).",
+    appSurface: "Linking, fly-in tracker",
+    aiAssistant: "read",
+  },
+  {
+    name: "get_issue_pull_requests",
+    server: "mcp-jira",
+    group: "Linking & PR visibility",
+    surface: "jira",
+    access: "read",
+    blurb: "Every linked PR (any repo) for a set of issues, with approval status.",
+    appSurface: "Huddle has-PR badges, Reports",
+    aiAssistant: "read",
+  },
+
+  // ── GitHub pull requests (5) ────────────────────────────────────────────────
+  {
+    name: "list_prs",
+    server: "mcp-github",
+    group: "GitHub pull requests",
+    surface: "github",
+    access: "read",
+    blurb: "List pull requests in a GitHub repo, with detected Jira keys.",
+    appSurface: "Huddle chat · prs",
+    aiAssistant: "none",
+  },
+  {
+    name: "get_pr",
+    server: "mcp-github",
+    group: "GitHub pull requests",
+    surface: "github",
+    access: "read",
+    blurb: "Full details for one pull request by number.",
+    appSurface: null,
+    aiAssistant: "none",
+  },
+  {
+    name: "get_pr_reviews",
+    server: "mcp-github",
+    group: "GitHub pull requests",
+    surface: "github",
+    access: "read",
+    blurb: "Approval / changes-requested status for a batch of PR numbers.",
+    appSurface: null,
+    aiAssistant: "none",
+  },
+  {
+    name: "link_pr_to_ticket",
+    server: "mcp-github",
+    group: "GitHub pull requests",
+    surface: "github",
+    access: "write",
+    blurb: "Link a PR to Jira ticket(s) — a remote link plus a PR comment (idempotent).",
+    appSurface: "Huddle chat · link pr <n> [KEY]",
+    aiAssistant: "none",
+  },
+  {
+    name: "sync_pr_links",
+    server: "mcp-github",
+    group: "GitHub pull requests",
+    surface: "github",
+    access: "write",
+    blurb: "Auto-link every open PR in a repo to its detected Jira ticket(s).",
+    appSurface: null,
+    aiAssistant: "none",
+  },
+];
+
+/** All tools in one group, in catalog order — used to render each Tool reference table. */
+export function toolsByGroup(group: ToolGroup): ToolCatalogEntry[] {
+  return TOOL_CATALOG.filter((t) => t.group === group);
+}

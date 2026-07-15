@@ -37,8 +37,12 @@ describe("sprintReviewAoa (layout)", () => {
     expect(String(layout.aoa[layout.titleRows[1]!]![0])).toContain("Bane.2026.06.02.137");
   });
 
-  it("has the member table header at memberHeaderRow", () => {
-    expect(layout.aoa[layout.memberHeaderRow]).toEqual([...MEMBER_COLUMNS]);
+  it("has the member table header at memberHeaderRow — WITHOUT the offset balance (v1.57, ADR-069)", () => {
+    expect(layout.aoa[layout.memberHeaderRow]).toEqual(
+      [...MEMBER_COLUMNS].filter((c) => c !== "Offset bal.")
+    );
+    expect(layout.aoa[layout.memberHeaderRow]).not.toContain("Offset bal.");
+    expect(layout.cols).toBe(8);
   });
 
   it("writes member points/leaves as real numbers (Excel can sum them)", () => {
@@ -48,7 +52,14 @@ describe("sprintReviewAoa (layout)", () => {
     expect(alice[2]).toBe(13); // completed (done points)
     expect(alice[3]).toBe(1); // VL
     expect(alice[6]).toBe(1); // Offset
-    expect(alice[8]).toBe(1); // offset balance
+    expect(alice[7]).toBe(2); // leave days total (1 VL + 1 Offset)
+    expect(alice).toHaveLength(8); // v1.57 (ADR-069): no offset-balance cell in the workbook
+  });
+
+  it("excludes the offset balance from every member row and the TOTAL row (v1.57, ADR-069)", () => {
+    for (let r = layout.memberFirstDataRow; r <= layout.totalRow; r++) {
+      expect(layout.aoa[r]).toHaveLength(8);
+    }
   });
 
   it("ends the member block with a bold TOTAL row", () => {

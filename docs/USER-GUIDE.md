@@ -99,6 +99,148 @@ about the current sprint ("what's in code review?", "who owns VRDB‑1234?", "an
 and even **propose changes** (update points, move a ticket, set a sprint goal, file leave) — each
 change is shown for **confirmation before it's applied**. Nothing is changed without your OK.
 
+### 🧰 Using the MCP tools
+
+Every tab above is a thin UI over **47 MCP tools**, split across two servers: `mcp-jira` (42
+tools — tickets, sprints, reports, leaves, the offset wallet, the Huddle stores) and `mcp-github`
+(5 tools — pull requests). There are two ways to reach them:
+
+- **VS Code Copilot Chat** gets **all 47**. This repo's `.vscode/mcp.json` registers both servers,
+  and VS Code loads them automatically the moment you open the workspace folder — see **Step 3**
+  of [`docs/SETUP.md`](SETUP.md). Copilot talks to them over **stdio**; the dashboard instead
+  talks to an HTTP bridge in front of the same tool registry (see `docs/ARCHITECTURE.md`, §7, for
+  the split). Three tools have **no dashboard button at all** and are Copilot‑only: `get_pr`
+  (full detail on one pull request), `get_pr_reviews` (batch approval status), and
+  `sync_pr_links` (auto‑link every open PR in a repo to its Jira ticket).
+- **The floating AI assistant** (bottom‑right, every tab) reaches a curated subset: **18 read
+  tools** it can call on its own to answer a question, and **7 write tools** it can only
+  *propose* — every proposed change waits in a confirmation dialog until you approve it (see "AI
+  assistant", above). It never calls a GitHub tool; anything it tells you about PRs comes from
+  Jira's own linked‑issue data, not a live GitHub call.
+
+**Jira/GitHub tools vs. local tools.** Most tools act on your real Jira boards (or, for the PR
+tools, GitHub) — those changes land immediately. A second group instead reads and writes
+Loopboard's own local store: the team roster, typed leaves, the offset ledger, and the Huddle
+sidebar's impediments, post‑scrum notes, meeting goal, meeting notes, and retro. Those are
+Loopboard app state rather than Jira history, so they work the same for everyone regardless of
+Jira write permissions.
+
+**Shared‑credential users:** an account that's borrowing someone else's Jira connection has its
+Jira‑mutating tools **blocked with a read‑only error** unless an admin has explicitly granted it
+write access. Local‑store tools (leaves, retro, notes, impediments…) always work for these
+accounts too, since nothing there is attributed to a Jira user.
+
+A few prompts that work well in Copilot Chat:
+
+> "What's in code review on the Dev board right now?"
+> "Create a PO story for CSV export on Reports, with a linked Dev task."
+> "Check the review status of PRs 41, 42, and 44 in our repo."
+> "Auto-link every open PR to its Jira ticket."
+> "What's our velocity over the last three sprints?"
+
+### 📋 Tool reference
+
+All 47 tools, grouped the same way the in‑app Guide groups them. **Type** marks which system a
+tool acts on and whether it reads or writes; **AI** marks whether the floating assistant can call
+it itself (`Ask`), only propose it for your confirmation (`Propose`), or not reach it at all
+(`—` — dashboard-only or Copilot‑only).
+
+#### Ticket CRUD (5)
+
+| Tool | What it does | Type | AI | Used in the app |
+|---|---|---|---|---|
+| `create_po_ticket` | Create a PO story in Jira (plain text becomes a formatted description); optionally into a sprint. | Jira·Write | — | Planning · Ticket generator, Linking |
+| `create_dev_ticket` | Create a Dev task, optionally linked to a PO story, assigned, and added to a sprint. | Jira·Write | — | Planning · Ticket generator, Linking |
+| `get_ticket` | Fetch one ticket's summary, description, status, assignee, points and labels. | Jira·Read | Ask | Huddle chat · `ticket <KEY>` |
+| `update_ticket` | Update a ticket's summary, description and/or story points. | Jira·Write | Propose | Planning · Assignment list (points) |
+| `get_issue_descriptions` | Batch‑fetch plain‑text descriptions for up to 50 issue keys at once. | Jira·Read | — | Linking (AI plan drafting) |
+
+#### Sprint reads (3)
+
+| Tool | What it does | Type | AI | Used in the app |
+|---|---|---|---|---|
+| `get_active_sprint` | The active (or chosen) sprint's issues bucketed by status, with totals and points. | Jira·Read | Ask | Huddle, Reports |
+| `get_daily_huddle` | A deterministic standup digest — in progress, code review, blocked, done, up next. | Jira·Read | Ask | Huddle |
+| `list_sprints` | List a board's sprints grouped by active, future and closed. | Jira·Read | Ask | Planning, Reports (sprint pickers) |
+
+#### Sprint management (5)
+
+| Tool | What it does | Type | AI | Used in the app |
+|---|---|---|---|---|
+| `create_sprint` | Create a new future sprint with a name, goal and optional dates. | Jira·Write | Propose | Planning · New sprint |
+| `set_sprint_goal` | Set or clear a sprint's goal. | Jira·Write | Propose | Huddle · Sprint goal editor |
+| `get_transitions` | List the valid next‑status transitions for a ticket. | Jira·Read | — | Planning · Assignment list |
+| `transition_issue` | Move a ticket to a new status using a transition id. | Jira·Write | Propose | Planning · Assignment list |
+| `move_issue_to_sprint` | Move a ticket into a different sprint. | Jira·Write | Propose | Planning · Assignment list |
+
+#### Reports & velocity (2)
+
+| Tool | What it does | Type | AI | Used in the app |
+|---|---|---|---|---|
+| `get_sprint_report` | Committed vs completed points, completion rate and a by‑assignee breakdown. | Jira·Read | Ask | Reports |
+| `get_velocity` | Average completed points over recent sprints, with a simple forecast. | Jira·Read | Ask | Reports |
+
+#### Assignment & roster (5)
+
+| Tool | What it does | Type | AI | Used in the app |
+|---|---|---|---|---|
+| `get_assignable_users` | List the developers eligible to be assigned tickets on a project or board. | Jira·Read | — | Planning · Assignment list |
+| `assign_issue` | Assign (or unassign) a ticket to a developer. | Jira·Write | Propose | Planning · Assignment list |
+| `get_recent_assignees` | Suggest roster members from everyone assigned a ticket recently on the board. | Jira·Read | — | Planning · Team roster |
+| `get_team_members` | The curated team roster Loopboard plans around, per board. | Local·Read | Ask | Planning · Team roster |
+| `set_team_members` | Replace the curated team roster for a board. | Local·Write | — | Planning · Team roster |
+
+#### Leaves & offset wallet (8)
+
+| Tool | What it does | Type | AI | Used in the app |
+|---|---|---|---|---|
+| `get_leaves` | One sprint's typed leave days (VL, EL, Holiday, Offset) per person. | Local·Read | Ask | Planning · Leaves & capacity |
+| `get_all_leaves` | The entire leaves store across every sprint, for the planner and wallet. | Local·Read | Ask | Offset Tracker |
+| `set_leaves` | Replace one person's typed leave days for a sprint. | Local·Write | Propose | Planning, Offset Tracker |
+| `get_offset_ledger` | Every developer's offset balance — earned, used, opening, adjustments. | Local·Read | Ask | Offset Tracker |
+| `set_offset_for_sprint` | Bank a sprint's computed offset earnings (idempotent per sprint). | Local·Write | — | Offset Tracker · Bank earned offsets |
+| `set_offset_adjustment` | Set a developer's one‑time opening offset balance. | Local·Write | — | Offset Tracker · Opening column |
+| `add_offset_adjustment` | Log a manual ± offset adjustment (decimals allowed) with an optional note. | Local·Write | — | Offset Tracker · History dialog |
+| `delete_offset_adjustment` | Remove one manual offset adjustment from a developer's log. | Local·Write | — | Offset Tracker · History dialog |
+
+#### Huddle stores (12)
+
+| Tool | What it does | Type | AI | Used in the app |
+|---|---|---|---|---|
+| `get_impediments` | This sprint's logged blockers and impediments. | Local·Read | Ask | Huddle · Impediments card |
+| `set_impediments` | Replace this sprint's logged blockers. | Local·Write | — | Huddle · Impediments card |
+| `get_pull_requests` | This sprint's manually‑tracked pending PR links. | Local·Read | Ask | Huddle · Code review card |
+| `set_pull_requests` | Replace this sprint's manually‑tracked PR links. | Local·Write | — | Huddle · Code review card |
+| `get_post_scrum` | This sprint's post‑standup follow‑up notes, per person. | Local·Read | Ask | Huddle · Post‑scrum card |
+| `set_post_scrum` | Replace this sprint's post‑scrum follow‑up notes. | Local·Write | — | Huddle · Post‑scrum card |
+| `get_meeting_goal` | Today's standup focus (distinct from the Jira sprint goal). | Local·Read | Ask | Huddle · Meeting goal card |
+| `set_meeting_goal` | Set or clear today's standup focus. | Local·Write | — | Huddle · Meeting goal card |
+| `get_meeting_notes` | The sprint's rich‑text meeting notes. | Local·Read | Ask | Huddle · Meeting notes card |
+| `set_meeting_notes` | Replace the sprint's rich‑text meeting notes. | Local·Write | — | Huddle · Meeting notes card |
+| `get_retro` | The sprint's saved retrospective (delays, what worked, kudos and more). | Local·Read | Ask | Reports · Retrospective |
+| `set_retro` | Replace the sprint's retrospective fields. | Local·Write | — | Reports · Retrospective |
+
+#### Linking & PR visibility (2)
+
+| Tool | What it does | Type | AI | Used in the app |
+|---|---|---|---|---|
+| `get_linked_issues` | Issues linked to a set of keys, filtered to a project (PO ↔ Dev links). | Jira·Read | Ask | Linking, fly‑in tracker |
+| `get_issue_pull_requests` | Every linked PR (any repo) for a set of issues, with approval status. | Jira·Read | Ask | Huddle has‑PR badges, Reports |
+
+#### GitHub pull requests (5)
+
+| Tool | What it does | Type | AI | Used in the app |
+|---|---|---|---|---|
+| `list_prs` | List pull requests in a GitHub repo, with detected Jira keys. | GitHub·Read | — | Huddle chat · `prs` |
+| `get_pr` | Full details for one pull request by number. | GitHub·Read | — | VS Code Copilot only |
+| `get_pr_reviews` | Approval / changes‑requested status for a batch of PR numbers. | GitHub·Read | — | VS Code Copilot only |
+| `link_pr_to_ticket` | Link a PR to Jira ticket(s) — a remote link plus a PR comment (idempotent). | GitHub·Write | — | Huddle chat · `link pr <n> [KEY]` |
+| `sync_pr_links` | Auto‑link every open PR in a repo to its detected Jira ticket(s). | GitHub·Write | — | VS Code Copilot only |
+
+**42** tools live on `mcp-jira`, **5** on `mcp-github` — **47** in total. The floating assistant
+can read 18 of them and propose 7 more with your confirmation; the rest are driven directly by
+the dashboard's UI (or, for three GitHub tools, reachable only via Copilot).
+
 ---
 
 ## Setting up Loopboard

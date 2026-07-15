@@ -137,6 +137,24 @@ export async function createPoTicket(input: {
 }
 
 /**
+ * Create ONLY a standalone Dev task (no PO story, no link) — v1.57, ADR-068.
+ * Used when the ticket generator's create mode is "Dev task only".
+ */
+export async function createDevTicketOnly(input: {
+  summary: string;
+  description: string;
+  storyPoints?: number;
+  sprintId?: number;
+}): Promise<CreateDevTicketOutput> {
+  return callTool<CreateDevTicketOutput>("jira", "create_dev_ticket", {
+    summary: input.summary,
+    description: input.description,
+    ...(input.storyPoints !== undefined ? { storyPoints: input.storyPoints } : {}),
+    ...(input.sprintId !== undefined ? { sprintId: input.sprintId } : {}),
+  });
+}
+
+/**
  * Creates a PO ticket, then a Dev ticket linked to it.
  * Returns both ticket outputs including optional sprintId/sprintWarning (v1.4).
  */

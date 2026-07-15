@@ -34,7 +34,11 @@ const LONG_META = new Set<string>([
   "Kudos",
 ]);
 
-const COLS = MEMBER_COLUMNS.length; // 9 — the widest block drives the merge width
+// v1.57 (ADR-069): the exported workbook EXCLUDES the offset balance — it's internal team data,
+// not sprint-review material. Only this xlsx drops the column (the printable HTML keeps it); the
+// ledger param still feeds buildMemberReviewTable, so WHO appears in the table is unchanged.
+const XLSX_MEMBER_COLUMNS = MEMBER_COLUMNS.filter((c) => c !== "Offset bal.");
+const COLS = XLSX_MEMBER_COLUMNS.length; // 8 — the widest block drives the merge width
 
 /**
  * Pure layout: build the cell matrix + row/merge metadata for the sprint-review workbook.
@@ -85,18 +89,17 @@ export function sprintReviewAoa(
   r = aoa.length;
   aoa.push(["Per-member — points & leaves"]); full(r); sectionRows.push(r);
   const memberHeaderRow = aoa.length;
-  aoa.push([...MEMBER_COLUMNS]);
+  aoa.push([...XLSX_MEMBER_COLUMNS]);
   const memberFirstDataRow = aoa.length;
   for (const m of table.rows) {
     aoa.push([
       m.name, m.committedPoints, m.completedPoints, m.vl, m.el, m.holiday, m.offset, m.leaveTotal,
-      m.offsetBalance,
     ]);
   }
   const memberLastDataRow = table.rows.length > 0 ? aoa.length - 1 : memberFirstDataRow - 1;
   const totalRow = aoa.length;
   const t = table.totals;
-  aoa.push(["TOTAL", t.committedPoints, t.completedPoints, t.vl, t.el, t.holiday, t.offset, t.leaveTotal, ""]);
+  aoa.push(["TOTAL", t.committedPoints, t.completedPoints, t.vl, t.el, t.holiday, t.offset, t.leaveTotal]);
   aoa.push(blank());
 
   // Retrospective section (long meta as Field/Value with wide value)
@@ -142,7 +145,7 @@ export function sprintReviewXlsxArray(
   const ws = XLSX.utils.aoa_to_sheet(layout.aoa);
 
   ws["!merges"] = layout.merges;
-  ws["!cols"] = [{ wch: 34 }, { wch: 12 }, { wch: 12 }, { wch: 6 }, { wch: 6 }, { wch: 8 }, { wch: 8 }, { wch: 11 }, { wch: 11 }];
+  ws["!cols"] = [{ wch: 34 }, { wch: 12 }, { wch: 12 }, { wch: 6 }, { wch: 6 }, { wch: 8 }, { wch: 8 }, { wch: 11 }];
 
   const at = (r: number, c: number) => XLSX.utils.encode_cell({ r, c });
   const styleCell = (r: number, c: number, s: Record<string, unknown>) => {

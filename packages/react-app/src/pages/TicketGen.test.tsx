@@ -34,6 +34,10 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
     createPoTicket: vi.fn().mockResolvedValue({
       key: "PO-42", url: "https://jira.example.com/browse/PO-42", board: "PO" as const,
     }),
+    // v1.57 (ADR-068): standalone Dev task (no PO, no link)
+    createDevTicketOnly: vi.fn().mockResolvedValue({
+      key: "DEV-77", url: "https://jira.example.com/browse/DEV-77", board: "DEV" as const,
+    }),
     useSprintList: vi.fn().mockReturnValue({
       // v1.4: 1 active + 1 future sprint for target sprint selector tests
       data: {
@@ -56,10 +60,16 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
 // ── Import boards module for mock reset ───────────────────────────────────────
 import * as boardsModule from "../lib/boards";
 
-// v1.17 (ADR-028): TicketGen is PO-first by default. Pair tests opt in to the Dev task
-// via the "Also create a linked Dev task" checkbox (present in form + AI modes).
+// v1.17 (ADR-028): TicketGen is PO-first by default. v1.57 (ADR-068): the boolean checkbox is
+// now a 3-way "What to create" select — pair tests switch it to the PO+Dev pair; dev-only tests
+// switch it to the standalone Dev task.
+function setCreateMode(mode: "po" | "pair" | "dev") {
+  fireEvent.change(screen.getByRole("combobox", { name: /what to create/i }), {
+    target: { value: mode },
+  });
+}
 function enableDevTask() {
-  fireEvent.click(screen.getByRole("checkbox", { name: /Also create a linked Dev task/i }));
+  setCreateMode("pair");
 }
 
 describe("TicketGen", () => {
@@ -115,6 +125,56 @@ describe("TicketGen", () => {
     });
     // The success heading is singular and there is no Dev link
     expect(screen.queryByText(/DEV:/)).toBeNull();
+  });
+
+  it("v1.57 (ADR-068): Dev-only mode — creates a standalone Dev task, no PO story", async () => {
+    const { createPoTicket, createTicketPair, createDevTicketOnly } = await import("../hooks/useJira");
+    const user = userEvent.setup();
+    render(<TicketGen />);
+
+    await waitFor(() => screen.getByLabelText(/feature description/i));
+    await user.type(screen.getByLabelText(/feature description/i), "Dev only feature");
+    setCreateMode("dev");
+    await user.click(screen.getByRole("button", { name: /generate drafts/i }));
+
+    // Only the Dev Task pane shows — the PO pane is hidden in Dev-only mode
+    await waitFor(() => expect(screen.getByText("Dev Task")).toBeTruthy());
+    expect(screen.queryByText("PO Story")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /create in jira/i }));
+
+    await waitFor(() => {
+      expect(vi.mocked(createDevTicketOnly)).toHaveBeenCalledOnce();
+      expect(vi.mocked(createPoTicket)).not.toHaveBeenCalled();
+      expect(vi.mocked(createTicketPair)).not.toHaveBeenCalled();
+      expect(screen.getByText(/DEV: DEV-77/)).toBeTruthy();
+    });
+    // No PO link on the success panel
+    expect(screen.queryByText(/PO: PO-42/)).toBeNull();
+  });
+
+  it("v1.57 (ADR-068): Dev-only passes story points + the selected sprint to createDevTicketOnly", async () => {
+    const { createDevTicketOnly } = await import("../hooks/useJira");
+    const user = userEvent.setup();
+    render(<TicketGen />);
+
+    await waitFor(() => screen.getByLabelText(/feature description/i));
+    fireEvent.change(screen.getByRole("combobox", { name: /add to sprint/i }), { target: { value: "55" } });
+    await user.type(screen.getByLabelText(/feature description/i), "Dev only with points");
+    await user.type(screen.getByLabelText(/story points/i), "3");
+    setCreateMode("dev");
+    await user.click(screen.getByRole("button", { name: /generate drafts/i }));
+
+    await waitFor(() => screen.getByRole("button", { name: /create in jira/i }));
+    await user.click(screen.getByRole("button", { name: /create in jira/i }));
+
+    await waitFor(() => {
+      expect(vi.mocked(createDevTicketOnly)).toHaveBeenCalledOnce();
+      const arg = vi.mocked(createDevTicketOnly).mock.calls[0][0];
+      expect(arg.storyPoints).toBe(3);
+      expect(arg.sprintId).toBe(55);
+      expect(arg.summary.length).toBeGreaterThan(0);
+    });
   });
 
   it("shows draft previews after entering description and clicking generate", async () => {

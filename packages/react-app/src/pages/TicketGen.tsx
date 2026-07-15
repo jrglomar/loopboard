@@ -1,6 +1,6 @@
 import { useState, useEffect, useId, useRef, Fragment } from "react";
 import { buildDraftPair } from "../lib/ticketTemplates";
-import { createTicketPair, createPoTicket, useSprintList } from "../hooks/useJira";
+import { createTicketPair, createPoTicket, createDevTicketOnly, useSprintList } from "../hooks/useJira";
 import { getAiStatus, aiDraftTickets } from "../lib/aiClient";
 import { RefineDraftControl } from "../components/RefineDraftControl";
 import { useBoards } from "../lib/boards";
@@ -32,9 +32,14 @@ interface DraftState {
   devDescription: string;
 }
 
+/** v1.57 (ADR-068): what the generator creates — PO story only (default), the linked pair, or a
+ * standalone Dev task. Replaces the v1.17 boolean "also create a Dev task" toggle. */
+type CreateMode = "po" | "pair" | "dev";
+
 interface SuccessState {
-  po: TicketRef;
-  /** v1.17 (ADR-028): Dev is optional — only present when "Also create a Dev task" was on. */
+  /** v1.57 (ADR-068): PO is optional too — absent in "Dev task only" mode. */
+  po?: TicketRef;
+  /** v1.17 (ADR-028): Dev is optional — only present when a Dev task was created. */
   dev?: TicketRef;
   /** v1.4: sprint name if a sprint was targeted (single sprint — v1.4 fallback) */
   targetSprintName?: string;
@@ -286,21 +291,52 @@ function TargetSprintSelect({ sprintListData, sprintListLoading, value, onChange
   );
 }
 
+// ── Create-mode select (v1.57, ADR-068) ───────────────────────────────────────
+
+/** What the generator creates: PO story only (default), the linked PO+Dev pair, or a standalone
+ * Dev task. A native <select> per ADR-009 (Radix Select is jsdom-hostile). */
+function CreateModeSelect({ value, onChange, formId }: {
+  value: CreateMode;
+  onChange: (m: CreateMode) => void;
+  formId: string;
+}) {
+  const selectId = `${formId}-create-mode`;
+  return (
+    <div className="space-y-1 w-fit min-w-[170px]">
+      <Label htmlFor={selectId} className="text-xs font-semibold">Create</Label>
+      <select
+        id={selectId}
+        className="h-9 w-full text-xs px-2 border border-border rounded-md bg-background text-foreground font-[inherit] cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 transition-colors hover:border-ring"
+        value={value}
+        onChange={(e) => onChange(e.target.value as CreateMode)}
+        aria-label="What to create"
+      >
+        <option value="po">PO story only</option>
+        <option value="pair">PO + linked Dev task</option>
+        <option value="dev">Dev task only</option>
+      </select>
+    </div>
+  );
+}
+
 // ── Draft preview panes (shared between AI and fallback modes) ────────────────
 
 interface DraftPreviewProps {
   draft: DraftState;
   onChangeDraft: (d: DraftState) => void;
   formId: string;
-  /** v1.17 (ADR-028): show the Dev Task pane only when the user opted to also create a Dev task. */
+  /** v1.17 (ADR-028): show the Dev Task pane only when a Dev task will be created. */
   showDev: boolean;
+  /** v1.57 (ADR-068): hide the PO pane in "Dev task only" mode. Defaults to true. */
+  showPo?: boolean;
 }
 
-function DraftPreview({ draft, onChangeDraft, formId, showDev }: DraftPreviewProps) {
+function DraftPreview({ draft, onChangeDraft, formId, showDev, showPo = true }: DraftPreviewProps) {
   return (
     // Migrate from .draft-preview CSS class to Tailwind grid
-    <div className={cn("grid grid-cols-1 gap-5", showDev && "md:grid-cols-2")}>
-      {/* PO Story pane */}
+    <div className={cn("grid grid-cols-1 gap-5", showDev && showPo && "md:grid-cols-2")}>
+      {/* PO Story pane — v1.57 (ADR-068): hidden in Dev-only mode */}
+      {showPo && (
       <Card>
         <CardHeader className="pb-3">
           {/* a11y: Badge is decorative; card role conveys context */}
@@ -331,8 +367,9 @@ function DraftPreview({ draft, onChangeDraft, formId, showDev }: DraftPreviewPro
           </div>
         </CardContent>
       </Card>
+      )}
 
-      {/* Dev Task pane — v1.17 (ADR-028): only when "Also create a Dev task" is on */}
+      {/* Dev Task pane — v1.17 (ADR-028): only when a Dev task will be created */}
       {showDev && (
       <Card>
         <CardHeader className="pb-3">
@@ -403,7 +440,10 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
 
   // v1.17 (ADR-028): PO-first — create only the PO story unless the user opts in to a
   // linked Dev task (bulk PO→Dev lives on the Linking page).
-  const [createDev, setCreateDev] = useState(false);
+  // v1.57 (ADR-068): 3-way create mode (was a boolean "also create a Dev task" since v1.17).
+  const [createMode, setCreateMode] = useState<CreateMode>("po");
+  const wantPo = createMode !== "dev";
+  const wantDev = createMode !== "po";
 
   // AI chat state
   const [bubbles, setBubbles] = useState<BubbleMessage[]>([]);
@@ -629,7 +669,7 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
           ? allDevSprints.find((s) => s.id === devTargetSprintId)
           : undefined;
 
-        if (createDev) {
+        if (createMode === "pair") {
           const result = await createTicketPair({
             po: { summary: draft.poSummary, description: draft.poDescription, storyPoints: sp, sprintId: poTargetSprintId },
             dev: { summary: draft.devSummary, description: draft.devDescription, sprintId: devTargetSprintId },
@@ -642,6 +682,12 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
             poSprintWarning: result.po.sprintWarning,
             devSprintWarning: result.dev.sprintWarning,
           });
+        } else if (createMode === "dev") {
+          // v1.57 (ADR-068): standalone Dev task — no PO story, no link; points go to the Dev task.
+          const dev = await createDevTicketOnly({
+            summary: draft.devSummary, description: draft.devDescription, storyPoints: sp, sprintId: devTargetSprintId,
+          });
+          setSuccess({ dev, devSprintName: devSprint?.name, devSprintWarning: dev.sprintWarning });
         } else {
           // v1.17 (ADR-028): PO-only (default)
           const po = await createPoTicket({
@@ -661,7 +707,7 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
         ? allSprints.find((s) => s.id === targetSprintId)
         : undefined;
 
-      if (createDev) {
+      if (createMode === "pair") {
         const result = await createTicketPair({
           po: { summary: draft.poSummary, description: draft.poDescription, storyPoints: sp, sprintId: targetSprintId },
           dev: { summary: draft.devSummary, description: draft.devDescription, sprintId: targetSprintId },
@@ -674,6 +720,12 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
           targetSprintName: targetSprint?.name,
           sprintWarning,
         });
+      } else if (createMode === "dev") {
+        // v1.57 (ADR-068): standalone Dev task — no PO story, no link.
+        const dev = await createDevTicketOnly({
+          summary: draft.devSummary, description: draft.devDescription, storyPoints: sp, sprintId: targetSprintId,
+        });
+        setSuccess({ dev, targetSprintName: targetSprint?.name, sprintWarning: dev.sprintWarning });
       } else {
         const po = await createPoTicket({
           summary: draft.poSummary, description: draft.poDescription, storyPoints: sp, sprintId: targetSprintId,
@@ -704,7 +756,7 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
     setTargetSprintId(undefined);
     setPoTargetSprintId(undefined);
     setDevTargetSprintId(undefined);
-    setCreateDev(false);
+    setCreateMode("po");
   };
 
   // ── Render: Success ───────────────────────────────────────────────────────
@@ -723,15 +775,18 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
           <CardContent className="p-8 text-center">
             <div className="text-5xl mb-3" aria-hidden="true">✓</div>
             <h3 className="text-lg font-bold text-success mb-4">
-              {success.dev ? "Tickets" : "Ticket"} created in Jira!
+              {success.po && success.dev ? "Tickets" : "Ticket"} created in Jira!
             </h3>
             <div className="flex justify-center gap-4 flex-wrap mb-4">
-              <TicketLink
-                href={success.po.url}
-                ariaLabel={`Open PO ticket ${success.po.key} in Jira`}
-              >
-                PO: {success.po.key}
-              </TicketLink>
+              {/* v1.57 (ADR-068): PO is absent in "Dev task only" mode */}
+              {success.po && (
+                <TicketLink
+                  href={success.po.url}
+                  ariaLabel={`Open PO ticket ${success.po.key} in Jira`}
+                >
+                  PO: {success.po.key}
+                </TicketLink>
+              )}
               {success.dev && (
                 <TicketLink
                   href={success.dev.url}
@@ -868,7 +923,8 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
               {/* v1.6 (ADR-017): two sprint selects when boards available; fallback to single */}
               {boards !== null ? (
                 <div className="flex flex-col sm:flex-row gap-2 flex-1 min-w-[280px]">
-                  {/* PO sprint — for the PO story */}
+                  {/* PO sprint — for the PO story (v1.57: hidden in Dev-only mode) */}
+                  {wantPo && (
                   <div className="flex-1 min-w-[120px]">
                     <TargetSprintSelect
                       sprintListData={poSprintList.data}
@@ -880,8 +936,9 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
                       ariaLabel="PO story sprint"
                     />
                   </div>
-                  {/* Dev sprint — for the Dev task (v1.17: only when Dev creation is on) */}
-                  {createDev && (
+                  )}
+                  {/* Dev sprint — for the Dev task (v1.17/v1.57: only when a Dev task will be created) */}
+                  {wantDev && (
                   <div className="flex-1 min-w-[120px]">
                     <TargetSprintSelect
                       sprintListData={devSprintList.data}
@@ -908,11 +965,7 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
                   />
                 </div>
               )}
-              <label className="flex items-center gap-1.5 text-xs text-muted-foreground self-end pb-2 whitespace-nowrap cursor-pointer">
-                <input type="checkbox" checked={createDev} onChange={(e) => setCreateDev(e.target.checked)}
-                  className="h-3.5 w-3.5 cursor-pointer accent-[hsl(var(--primary))]" aria-label="Also create a linked Dev task" />
-                Also create a Dev task
-              </label>
+              <CreateModeSelect value={createMode} onChange={setCreateMode} formId={`${formId}-ai`} />
               <Button
                 type="button"
                 onClick={() => void handleAiSend()}
@@ -960,7 +1013,7 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
               <Separator className="flex-1" />
             </div>
 
-            <DraftPreview draft={draft} onChangeDraft={setDraft} formId={formId} showDev={createDev} />
+            <DraftPreview draft={draft} onChangeDraft={setDraft} formId={formId} showDev={wantDev} showPo={wantPo} />
 
             {/* v1.12 (ADR-023): comment + regenerate the PO+Dev pair via the conversation */}
             <div className="mt-3">
@@ -1094,6 +1147,7 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
               {/* v1.6 (ADR-017): two sprint selects when boards available; fallback single */}
               {boards !== null ? (
                 <div className="flex flex-col sm:flex-row gap-3">
+                  {wantPo && (
                   <div className="flex-1">
                     <TargetSprintSelect
                       sprintListData={poSprintList.data}
@@ -1105,7 +1159,8 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
                       ariaLabel="PO story sprint"
                     />
                   </div>
-                  {createDev && (
+                  )}
+                  {wantDev && (
                   <div className="flex-1">
                     <TargetSprintSelect
                       sprintListData={devSprintList.data}
@@ -1131,13 +1186,8 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
                 />
               )}
 
-              {/* v1.17 (ADR-028): optional Dev task — PO-only by default */}
-              <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer w-fit">
-                <input type="checkbox" checked={createDev} onChange={(e) => setCreateDev(e.target.checked)}
-                  className="h-4 w-4 cursor-pointer accent-[hsl(var(--primary))]" aria-label="Also create a linked Dev task" />
-                Also create a linked Dev task
-                <span className="text-xs text-muted-foreground">(optional)</span>
-              </label>
+              {/* v1.17 (ADR-028) / v1.57 (ADR-068): what to create — PO-only by default */}
+              <CreateModeSelect value={createMode} onChange={setCreateMode} formId={`${formId}-form`} />
 
               <div className="flex gap-3">
                 <Button type="submit">
@@ -1168,7 +1218,7 @@ export function TicketGen({ initialPoSprintId, initialDevSprintId }: TicketGenPr
             </Alert>
           )}
 
-          <DraftPreview draft={draft} onChangeDraft={setDraft} formId={formId} showDev={createDev} />
+          <DraftPreview draft={draft} onChangeDraft={setDraft} formId={formId} showDev={wantDev} showPo={wantPo} />
 
           <div className="flex gap-3 mt-5">
             <Button

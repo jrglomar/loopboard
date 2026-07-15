@@ -28,7 +28,7 @@ in one input box:
 ## 2. Ask mode — questions it can answer
 
 Free-form questions run an agentic loop (up to 5 tool steps) over a **read-only allowlist** of
-17 tools. It always knows **today's date and the board/sprint you're currently viewing**, so
+18 tools. It always knows **today's date and the board/sprint you're currently viewing**, so
 "this sprint" resolves correctly. **It also remembers the conversation (v1.40)** — your last 8
 Ask-mode turns travel with each question, so follow-ups like "who owns *it*?" work.
 

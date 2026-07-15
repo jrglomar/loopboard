@@ -6,15 +6,70 @@
 import type { ReactNode } from "react";
 import {
   BookOpen, PlayCircle, LayoutDashboard, CalendarRange, CalendarDays, Link2, BarChart3,
-  Sparkles, Plug, ShieldCheck, MessageCircle, HelpCircle,
+  Sparkles, Plug, ShieldCheck, MessageCircle, HelpCircle, Terminal, Table2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import {
+  TOOL_GROUPS, toolsByGroup, type ToolGroup, type ToolSurface, type ToolAccess, type ToolCatalogEntry,
+} from "../lib/toolCatalog";
 
 type Section = { id: string; title: string; icon: typeof BookOpen; body: ReactNode };
 
 // A term the reader recognises in the UI (bold), used consistently across sections.
 function T({ children }: { children: ReactNode }) {
   return <strong className="font-semibold text-foreground">{children}</strong>;
+}
+
+// ── MCP tool reference helpers (v1.56, ADR-067) ─────────────────────────────────
+// Page-local presentational pieces for the "Tool reference" section's per-group tables.
+
+const SURFACE_LABEL: Record<ToolSurface, string> = { jira: "Jira", github: "GitHub", local: "Local" };
+const AI_LABEL: Record<ToolCatalogEntry["aiAssistant"], string> = { read: "Ask", propose: "Propose", none: "—" };
+
+function ToolTypeBadge({ surface, access }: { surface: ToolSurface; access: ToolAccess }) {
+  const cls =
+    access === "read"
+      ? "border-info-border text-info bg-info-bg"
+      : "border-warning-border text-warning-foreground bg-warning-bg";
+  return (
+    <Badge variant="outline" className={`text-[0.625rem] font-medium whitespace-nowrap ${cls}`}>
+      {SURFACE_LABEL[surface]} · {access === "read" ? "Read" : "Write"}
+    </Badge>
+  );
+}
+
+function ToolGroupTable({ group }: { group: ToolGroup }) {
+  const rows = toolsByGroup(group);
+  return (
+    <div className="mb-5 last:mb-0">
+      <h3 className="text-sm font-semibold text-foreground mb-1.5">{group}</h3>
+      <div className="overflow-x-auto rounded-md border border-border">
+        <table className="w-full text-xs" aria-label={`${group} tools`}>
+          <thead>
+            <tr className="border-b border-border bg-muted/40 text-[0.6875rem] font-medium uppercase tracking-wide text-muted-foreground">
+              <th className="text-left py-1.5 px-2.5">Tool</th>
+              <th className="text-left py-1.5 px-2.5">What it does</th>
+              <th className="text-left py-1.5 px-2.5">Type</th>
+              <th className="text-left py-1.5 px-2.5">AI</th>
+              <th className="text-left py-1.5 px-2.5">Used in the app</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((t) => (
+              <tr key={t.name} className="border-b border-border/50 last:border-0 align-top">
+                <td className="py-1.5 px-2.5"><code className="text-[0.6875rem] font-mono text-foreground">{t.name}</code></td>
+                <td className="py-1.5 px-2.5 text-muted-foreground">{t.blurb}</td>
+                <td className="py-1.5 px-2.5"><ToolTypeBadge surface={t.surface} access={t.access} /></td>
+                <td className="py-1.5 px-2.5 text-muted-foreground">{AI_LABEL[t.aiAssistant]}</td>
+                <td className="py-1.5 px-2.5 text-muted-foreground">{t.appSurface ?? "VS Code Copilot only"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
 const SECTIONS: Section[] = [
@@ -167,6 +222,94 @@ const SECTIONS: Section[] = [
           <li><T>Ask</T> about the current sprint — “what's in code review?”, “who owns VRDB-1234?”, “any impediments today?”</li>
           <li><T>Propose changes</T> — update points, move a ticket, set a sprint goal, file leave — each shown for <T>confirmation before it's applied</T>. Nothing changes without your OK.</li>
         </ul>
+      </>
+    ),
+  },
+  {
+    id: "mcp-tools",
+    title: "Using the MCP tools",
+    icon: Terminal,
+    body: (
+      <>
+        <p>
+          Everything in Loopboard runs on <T>47 MCP tools</T> spread across two servers —{" "}
+          <T>mcp-jira</T> and <T>mcp-github</T>. There are two ways to reach them.
+        </p>
+
+        <p className="mt-3">
+          <T>1. VS Code Copilot Chat.</T> Open the repo in VS Code and Copilot auto-loads both
+          servers from <code className="font-mono text-xs">.vscode/mcp.json</code> — nothing to
+          configure. All 47 tools are available there, including a few with no dashboard button at
+          all, like <code className="font-mono text-xs">sync_pr_links</code>,{" "}
+          <code className="font-mono text-xs">get_pr</code> and{" "}
+          <code className="font-mono text-xs">get_pr_reviews</code>. Try asking:
+        </p>
+        <ul className="list-disc pl-5 space-y-1.5 mt-2">
+          <li><em>“Create a PO story and a linked dev task for CSV export on the Reports page.”</em></li>
+          <li><em>“What's our velocity over the last 6 sprints on the Dev board?”</em></li>
+          <li><em>“Sync PR links across every open PR in the repo.”</em></li>
+        </ul>
+
+        <p className="mt-3">
+          <T>2. The floating AI assistant</T> (bottom-right, every page). Ask a question and it
+          answers using 18 read-only tools; ask for a change and it proposes one of <T>7 writes</T>{" "}
+          — always shown for confirmation before anything happens. It calls no GitHub tools today.
+          Try asking:
+        </p>
+        <ul className="list-disc pl-5 space-y-1.5 mt-2">
+          <li><em>“What's in code review right now?”</em></li>
+          <li>
+            <em>“Set VRDB-2712 to 5 points.”</em> — proposes an <T>update_ticket</T>{" "}
+            change and shows it to you for confirmation before anything is applied.
+          </li>
+        </ul>
+
+        <p className="mt-3">
+          <T>Two kinds of data.</T> Some tools read or write real Jira or GitHub, like{" "}
+          <code className="font-mono text-xs">get_ticket</code>,{" "}
+          <code className="font-mono text-xs">transition_issue</code> and{" "}
+          <code className="font-mono text-xs">link_pr_to_ticket</code>. Others read or write{" "}
+          Loopboard's own local stores — team data Jira has no field for — like{" "}
+          <code className="font-mono text-xs">get_leaves</code>,{" "}
+          <code className="font-mono text-xs">get_impediments</code> and{" "}
+          <code className="font-mono text-xs">get_offset_ledger</code>. The <T>Tool reference</T>{" "}
+          below marks each tool <T>Jira</T>, <T>GitHub</T> or <T>Local</T>.
+        </p>
+
+        <p className="mt-3">
+          On <T>shared credentials</T>, every read works as normal. Writes that touch real Jira
+          need an admin to grant write access first — otherwise you'll see a read-only error.
+          Writes to Loopboard's own local stores work either way.
+        </p>
+      </>
+    ),
+  },
+  {
+    id: "tool-reference",
+    title: "Tool reference",
+    icon: Table2,
+    body: (
+      <>
+        <p>Every tool Loopboard and Copilot can call, grouped by what it does.</p>
+
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground pb-3 mb-4 border-b border-border">
+          <span className="inline-flex items-center gap-1.5">
+            <ToolTypeBadge surface="jira" access="read" /> observes only
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <ToolTypeBadge surface="jira" access="write" /> changes data — the assistant always
+            asks first
+          </span>
+          <span>Jira / GitHub = the real service · Local = Loopboard's own store, not Jira</span>
+          <span>
+            AI column: Ask = the assistant can read it · Propose = it can suggest the change (you
+            confirm) · — = app/Copilot only
+          </span>
+        </div>
+
+        {TOOL_GROUPS.map((g) => (
+          <ToolGroupTable key={g} group={g} />
+        ))}
       </>
     ),
   },
