@@ -24,6 +24,8 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
       ticket: { key: "DEV-10", summary: "Old summary", description: "Old desc", url: "https://jira.example.com/browse/DEV-10" },
       updated: { key: "DEV-10", url: "https://jira.example.com/browse/DEV-10", updatedFields: ["description"] },
     }),
+    // v1.59 (ADR-071): idle/empty shape (anti-drift parity — see Reports.test.tsx's comment).
+    useMultiSprintReport: vi.fn().mockReturnValue({ data: null, loading: false, error: null, run: vi.fn() }),
   };
 });
 

@@ -2,8 +2,11 @@
 // Pure function; no mocks needed. Keyless/offline.
 
 import { describe, it, expect } from "vitest";
-import { buildReportMarkdown, buildReportCsv, buildSprintReviewCsv, type SprintReviewForm } from "./reportMarkdown";
-import type { SprintReport, VelocityData } from "./types";
+import {
+  buildReportMarkdown, buildReportCsv, buildSprintReviewCsv, type SprintReviewForm,
+  buildMultiSprintMarkdown, buildMultiSprintCsv,
+} from "./reportMarkdown";
+import type { SprintReport, VelocityData, MultiSprintReport } from "./types";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -434,5 +437,144 @@ describe("buildSprintReviewCsv (v1.35, ADR-045)", () => {
     const csv = buildSprintReviewCsv(noGoal, form, []);
     expect(csv).toContain("Sprint goals,—");
     expect(csv).toContain("Fly-ins,—");
+  });
+});
+
+// ── Multi-sprint (Trends & KPIs) builders (v1.59, ADR-071) ────────────────────
+
+const BASE_MULTI_SPRINT: MultiSprintReport = {
+  boardId: 1,
+  sprintCount: 2,
+  sprints: [
+    {
+      sprint: {
+        id: 50, name: "Sprint 4", state: "closed",
+        startDate: "2026-04-01T00:00:00.000Z", endDate: "2026-04-14T00:00:00.000Z",
+        completeDate: "2026-04-14T17:00:00.000Z", goal: null, boardId: 1,
+      },
+      committedPoints: 30, completedPoints: 28, completionRate: 0.9333333,
+      totalCount: 8, completedCount: 7, carryoverCount: 1, blockedCount: 0,
+      byAssignee: [
+        { name: "Alice", donePoints: 18, totalPoints: 20, doneCount: 4, totalCount: 5 },
+        { name: "Bob", donePoints: 10, totalPoints: 10, doneCount: 3, totalCount: 3 },
+      ],
+    },
+    {
+      sprint: {
+        id: 54, name: "Sprint 6", state: "closed",
+        startDate: "2026-05-12T00:00:00.000Z", endDate: "2026-05-25T00:00:00.000Z",
+        completeDate: "2026-05-25T17:00:00.000Z", goal: "Ship auth flow", boardId: 1,
+      },
+      committedPoints: 40, completedPoints: 32, completionRate: 0.8,
+      totalCount: 10, completedCount: 8, carryoverCount: 2, blockedCount: 1,
+      byAssignee: [
+        { name: "Alice", donePoints: 8, totalPoints: 13, doneCount: 1, totalCount: 2 },
+        { name: "Bob", donePoints: 5, totalPoints: 10, doneCount: 1, totalCount: 2 },
+      ],
+    },
+  ],
+  totals: { committedPoints: 70, completedPoints: 60 },
+  averageCompleted: 30,
+  averageCompletionRate: 0.8666665,
+  byAssignee: [
+    { name: "Alice", sprintsActive: 2, donePoints: 26, totalPoints: 33, avgDonePoints: 13 },
+    { name: "Bob", sprintsActive: 2, donePoints: 15, totalPoints: 20, avgDonePoints: 7.5 },
+  ],
+};
+
+const EMPTY_MULTI_SPRINT: MultiSprintReport = {
+  boardId: 1,
+  sprintCount: 0,
+  sprints: [],
+  totals: { committedPoints: 0, completedPoints: 0 },
+  averageCompleted: 0,
+  averageCompletionRate: 0,
+  byAssignee: [],
+};
+
+describe("buildMultiSprintMarkdown", () => {
+  it("includes a title with the sprint count", () => {
+    const md = buildMultiSprintMarkdown(BASE_MULTI_SPRINT);
+    expect(md).toContain("# Trends & KPIs — 2 sprints");
+  });
+
+  it("uses singular 'sprint' when sprintCount is 1", () => {
+    const one: MultiSprintReport = { ...BASE_MULTI_SPRINT, sprintCount: 1 };
+    const md = buildMultiSprintMarkdown(one);
+    expect(md).toContain("# Trends & KPIs — 1 sprint");
+    expect(md).not.toContain("1 sprints");
+  });
+
+  it("includes a window summary line with totals, average completed, and average rate", () => {
+    const md = buildMultiSprintMarkdown(BASE_MULTI_SPRINT);
+    expect(md).toContain("**60 / 70 pts**");
+    expect(md).toContain("Average completed: **30 pts/sprint**");
+    expect(md).toContain("Average completion rate: **87%**");
+  });
+
+  it("includes a per-sprint table with both sprint names and formatted points", () => {
+    const md = buildMultiSprintMarkdown(BASE_MULTI_SPRINT);
+    expect(md).toContain("## Sprint History");
+    expect(md).toContain("| Sprint 4 | 2026-04-01 – 2026-04-14 | 30 | 28 | 93% | 1 | 0 |");
+    expect(md).toContain("| Sprint 6 | 2026-05-12 – 2026-05-25 | 40 | 32 | 80% | 2 | 1 |");
+  });
+
+  it("includes a Team KPIs section with avg completed and avg completion rate", () => {
+    const md = buildMultiSprintMarkdown(BASE_MULTI_SPRINT);
+    expect(md).toContain("## Team KPIs");
+    expect(md).toContain("Avg completed / sprint: **30 pts**");
+    expect(md).toContain("Avg completion rate: **87%**");
+  });
+
+  it("includes a by-assignee aggregate table (sprints active, done/total/avg pts)", () => {
+    const md = buildMultiSprintMarkdown(BASE_MULTI_SPRINT);
+    expect(md).toContain("## By Assignee (window aggregate)");
+    expect(md).toContain("| Alice | 2 | 26 | 33 | 13 |");
+    expect(md).toContain("| Bob | 2 | 15 | 20 | 7.5 |");
+  });
+
+  it("renders empty-window messages when sprints/byAssignee are empty", () => {
+    const md = buildMultiSprintMarkdown(EMPTY_MULTI_SPRINT);
+    expect(md).toContain("_No sprints in this window._");
+    expect(md).toContain("_No assignee data._");
+  });
+});
+
+describe("buildMultiSprintCsv", () => {
+  it("emits a header row + one row per sprint + a TOTAL / AVERAGE row", () => {
+    const csv = buildMultiSprintCsv(BASE_MULTI_SPRINT);
+    const lines = csv.split("\r\n");
+    expect(lines[0]).toBe(
+      "Sprint,Start,End,Committed Points,Completed Points,Completion Rate,Carryover Count,Blocked Count"
+    );
+    expect(lines).toContain("Sprint 4,2026-04-01,2026-04-14,30,28,93%,1,0");
+    expect(lines).toContain("Sprint 6,2026-05-12,2026-05-25,40,32,80%,2,1");
+    expect(lines).toContain("TOTAL / AVERAGE,,,70,60,87%,3,1");
+  });
+
+  it("emits a second by-assignee block after a blank line", () => {
+    const csv = buildMultiSprintCsv(BASE_MULTI_SPRINT);
+    const lines = csv.split("\r\n");
+    const blankIdx = lines.indexOf("");
+    expect(blankIdx).toBeGreaterThan(0);
+    expect(lines[blankIdx + 1]).toBe("Assignee,Sprints Active,Done Points,Total Points,Avg Done Points/Sprint");
+    expect(lines).toContain("Alice,2,26,33,13");
+    expect(lines).toContain("Bob,2,15,20,7.5");
+  });
+
+  it("quotes/escapes assignee names containing commas or quotes", () => {
+    const tricky: MultiSprintReport = {
+      ...BASE_MULTI_SPRINT,
+      byAssignee: [{ name: 'Doe, John "JD"', sprintsActive: 1, donePoints: 3, totalPoints: 3, avgDonePoints: 1.5 }],
+    };
+    const csv = buildMultiSprintCsv(tricky);
+    expect(csv).toContain('"Doe, John ""JD""",1,3,3,1.5');
+  });
+
+  it("emits header + TOTAL row (all zero) + empty assignee header when the window is empty", () => {
+    const csv = buildMultiSprintCsv(EMPTY_MULTI_SPRINT);
+    const lines = csv.split("\r\n");
+    expect(lines).toContain("TOTAL / AVERAGE,,,0,0,0%,0,0");
+    expect(lines[lines.length - 1]).toBe("Assignee,Sprints Active,Done Points,Total Points,Avg Done Points/Sprint");
   });
 });

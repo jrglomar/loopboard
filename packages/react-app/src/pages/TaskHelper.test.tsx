@@ -34,7 +34,12 @@ vi.mock("../lib/boards", () => ({
     loading: false,
   }),
 }));
-vi.mock("../hooks/useJira", () => ({ useSprintList: vi.fn() }));
+// v1.59 (ADR-071): idle/empty shape — this factory has no importOriginal spread, so every
+// export other test files transitively need (via a shared module graph) must be listed here.
+vi.mock("../hooks/useJira", () => ({
+  useSprintList: vi.fn(),
+  useMultiSprintReport: vi.fn().mockReturnValue({ data: null, loading: false, error: null, run: vi.fn() }),
+}));
 
 import * as authClient from "../lib/authClient";
 import * as taskHelperClient from "../lib/taskHelperClient";

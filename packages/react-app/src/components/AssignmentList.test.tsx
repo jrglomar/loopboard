@@ -15,6 +15,8 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
     useActiveSprint: vi.fn(),
     useTeamMembers: vi.fn(),
     updateTicketPoints: vi.fn(),   // v1.37 (ADR-047): inline points edit
+    // v1.59 (ADR-071): idle/empty shape (anti-drift parity — see Reports.test.tsx's comment).
+    useMultiSprintReport: vi.fn().mockReturnValue({ data: null, loading: false, error: null, run: vi.fn() }),
   };
 });
 

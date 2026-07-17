@@ -8,7 +8,13 @@ import type { PullRequest, LinkedPr } from "../lib/types";
 
 vi.mock("../hooks/useJira", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../hooks/useJira")>();
-  return { ...actual, usePullRequests: vi.fn(), useIssuePullRequests: vi.fn() };
+  return {
+    ...actual,
+    usePullRequests: vi.fn(),
+    useIssuePullRequests: vi.fn(),
+    // v1.59 (ADR-071): idle/empty shape (anti-drift parity — see Reports.test.tsx's comment).
+    useMultiSprintReport: vi.fn().mockReturnValue({ data: null, loading: false, error: null, run: vi.fn() }),
+  };
 });
 import * as useJiraModule from "../hooks/useJira";
 

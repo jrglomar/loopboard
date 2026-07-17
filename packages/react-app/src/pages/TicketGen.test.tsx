@@ -38,6 +38,9 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
     createDevTicketOnly: vi.fn().mockResolvedValue({
       key: "DEV-77", url: "https://jira.example.com/browse/DEV-77", board: "DEV" as const,
     }),
+    // v1.59 (ADR-071): idle/empty shape (kept for anti-drift parity across every mocked
+    // hooks/useJira factory — see Reports.test.tsx's comment for why this must be listed).
+    useMultiSprintReport: vi.fn().mockReturnValue({ data: null, loading: false, error: null, run: vi.fn() }),
     useSprintList: vi.fn().mockReturnValue({
       // v1.4: 1 active + 1 future sprint for target sprint selector tests
       data: {

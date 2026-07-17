@@ -24,6 +24,8 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
     // useAssignableUsers stays REAL (inert while search is closed: opts=null →
     // no fetch). The new "Search all people" test mocks the network boundary
     // (assignClient.getAssignableUsers) below instead.
+    // v1.59 (ADR-071): idle/empty shape (anti-drift parity — see Reports.test.tsx's comment).
+    useMultiSprintReport: vi.fn().mockReturnValue({ data: null, loading: false, error: null, run: vi.fn() }),
   };
 });
 

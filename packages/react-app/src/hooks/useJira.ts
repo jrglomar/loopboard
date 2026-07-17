@@ -42,6 +42,7 @@ import {
   type MeetingGoal,
   type LinkedPr,
   type LinkedIssue,
+  type MultiSprintReport,
 } from "../lib/types";
 import { useMCP, type UseMCPState } from "./useMCP";
 
@@ -1161,4 +1162,44 @@ export function useOffsetLedger(): UseOffsetLedgerState {
   }, []);
 
   return { data, loading, error, run, recordSprint, adjust, addAdjustment, deleteAdjustment };
+}
+
+// ── useMultiSprintReport (v1.59, ADR-071) ─────────────────────────────────────
+
+/**
+ * Fetches the multi-sprint window report (team + per-developer trend & KPIs) for an EXPLICIT
+ * set of sprint ids. The Reports page's "Trends & KPIs" mode resolves the window client-side
+ * (via sprintRange.ts's lastNClosedSprintIds/sprintIdsInDateRange, or a checked-sprints list)
+ * and passes concrete ids here — "last N" / date-range selection is a client concern per
+ * CONTRACTS.md §4.29, so the tool itself only ever receives `sprintIds`.
+ *
+ * Pass null or [] to skip fetching (idle state) — e.g. no sprints selected yet. Refetches when
+ * the SET of ids changes (dependency key: sprintIds?.join(",")).
+ *
+ * CONTRACTS.md §4.29 v1.59, ADR-071.
+ */
+export function useMultiSprintReport(
+  sprintIds: number[] | null
+): UseMCPState<MultiSprintReport> {
+  const key = sprintIds?.join(",");
+
+  const fn = useCallback(() => {
+    if (sprintIds === null || sprintIds.length === 0) {
+      // Return a never-resolving promise — run() is only meaningfully called when sprintIds is set
+      return new Promise<MultiSprintReport>(() => undefined);
+    }
+    return callTool<MultiSprintReport>("jira", "get_multi_sprint_report", { sprintIds });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  const hookState = useMCP(fn);
+
+  useEffect(() => {
+    if (sprintIds !== null && sprintIds.length > 0) {
+      hookState.run();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return hookState;
 }

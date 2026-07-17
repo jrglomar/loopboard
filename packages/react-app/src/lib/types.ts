@@ -309,6 +309,65 @@ export interface VelocityData {
 }
 
 /**
+ * Per-assignee stats within ONE sprint — name, done/total points and counts. Mirrors
+ * SprintReport.byAssignee's element shape (kept inline there to avoid touching existing
+ * contract-adjacent types) plus get_multi_sprint_report's per-sprint byAssignee.
+ * CONTRACTS.md §4.12 / §4.29, v1.59, ADR-071.
+ */
+export interface AssigneeStats {
+  name: string; // "Unassigned" for null
+  donePoints: number;
+  totalPoints: number;
+  doneCount: number;
+  totalCount: number;
+}
+
+/**
+ * One sprint's entry within a get_multi_sprint_report window, chronological (oldest → newest).
+ * CONTRACTS.md §4.29 v1.59, ADR-071.
+ */
+export interface MultiSprintEntry {
+  sprint: SprintRef;
+  committedPoints: number;
+  completedPoints: number;
+  completionRate: number; // completedPoints / committedPoints, 0 when committed=0
+  totalCount: number;
+  completedCount: number;
+  carryoverCount: number; // totalCount − completedCount
+  blockedCount: number;
+  byAssignee: AssigneeStats[];
+}
+
+/**
+ * Cross-sprint per-assignee aggregate — CONTRACTS.md §4.29 v1.59, ADR-071.
+ * avgDonePoints is donePoints / sprintCount over the FULL window (velocity convention — a
+ * quiet sprint still drags the average down), NOT donePoints / sprintsActive.
+ */
+export interface MultiSprintAssigneeSummary {
+  name: string;
+  sprintsActive: number; // sprints where the person had >=1 issue
+  donePoints: number;
+  totalPoints: number;
+  avgDonePoints: number;
+}
+
+/**
+ * get_multi_sprint_report output — CONTRACTS.md §4.29 v1.59, ADR-071.
+ * One aggregated report across a WINDOW of sprints — the data source for the Reports page's
+ * "Trends & KPIs" mode (team + per-developer velocity & trend). Empty window → the all-zero /
+ * empty-array shape, NOT an error (get_velocity convention).
+ */
+export interface MultiSprintReport {
+  boardId: number;
+  sprintCount: number; // sprints actually included
+  sprints: MultiSprintEntry[];
+  totals: { committedPoints: number; completedPoints: number };
+  averageCompleted: number; // totals.completedPoints / sprintCount (0 when empty)
+  averageCompletionRate: number; // mean of per-sprint completionRate (0 when empty)
+  byAssignee: MultiSprintAssigneeSummary[]; // aggregated across the window, donePoints desc
+}
+
+/**
  * POST /api/ai/sprint-summary request body — CONTRACTS.md §4.9 v1.4
  */
 export interface SprintSummaryRequest {
