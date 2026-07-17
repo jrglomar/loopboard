@@ -31,8 +31,6 @@ Your run‑the‑standup home screen.
   person** (walk‑the‑board‑by‑person standups).
 - **Sidebar widgets** (each collapsible — click the chevron in a card's header; your choices are
   remembered):
-  - **Needs attention** — auto‑flagged nudges: stale in‑progress tickets, unassigned work, and PRs
-    awaiting review.
   - **Meeting goal** — today's standup focus (distinct from the Jira sprint goal).
   - **Meeting notes** — a rich‑text (WYSIWYG) notepad for deployment notes, runbook links, reminders.
   - **Impediments** — a per‑sprint blocker log.
@@ -87,9 +85,12 @@ Everything you need to prepare the next sprint.
 - **AI executive summary** — an on‑demand narrative of the sprint (when AI is enabled).
 - **Trends & KPIs** — a second mode (toggle next to the board switcher) that reports across a *window*
   of sprints instead of one: committed/completed points, rate, carryover and blocked counts per sprint,
-  team‑wide averages, and a per‑developer view (pick a name to see their trend). Choose the window as
-  the **last N** closed sprints (10 by default), **pick sprints** individually, or a **date range** —
-  then export the same way (Copy, .md, .csv).
+  team‑wide averages, and a per‑developer view (pick a name to see their trend). The window defaults to
+  a **date range** pre‑filled to the span of the last 10 closed sprints — or choose the **last N** closed
+  sprints instead, or **pick sprints** individually — then export the same way (Copy, .md, .csv).
+  Per‑developer KPIs are leave‑adjusted: each plotted leave day (Vacation, Emergency, Holiday, or Offset)
+  reduces that developer's sprint target by a point, so their **met target** mark reflects the adjusted
+  number, not the flat team target.
 
 ### ✨ Task Helper — your personal ticket → prompt assistant
 

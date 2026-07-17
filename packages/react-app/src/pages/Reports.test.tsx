@@ -33,6 +33,17 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
       error: null,
       run: vi.fn(),
     }),
+    // v1.60 (ADR-072): TrendsView now calls useAllLeaves for the leave-adjusted dev KPIs.
+    // Idle/empty store — mirrors UseAllLeavesState exactly (data is an AllLeavesMap, {} when
+    // empty — NOT null; plus the save method). Without this, ...actual's REAL hook would fire
+    // a network fetch the moment a test enters trends mode.
+    useAllLeaves: vi.fn().mockReturnValue({
+      data: {},
+      loading: false,
+      error: null,
+      run: vi.fn(),
+      save: vi.fn().mockResolvedValue(undefined),
+    }),
   };
 });
 
@@ -194,6 +205,21 @@ function setDefaultMocks() {
     loading: false,
     error: null,
     run: vi.fn(),
+  });
+  // v1.60 (ADR-072): re-pin the trends hooks to their idle defaults so a per-test
+  // mockReturnValue (e.g. the leave-adjusted dev-section test) can't leak forward.
+  vi.mocked(useJiraModule.useMultiSprintReport).mockReturnValue({
+    data: null,
+    loading: false,
+    error: null,
+    run: vi.fn(),
+  });
+  vi.mocked(useJiraModule.useAllLeaves).mockReturnValue({
+    data: {},
+    loading: false,
+    error: null,
+    run: vi.fn(),
+    save: vi.fn().mockResolvedValue(undefined),
   });
   // AI mocks are reset to their factory defaults by the vi.mock factory above.
   // Only reset the jira hooks here since they have no factory default.
@@ -808,5 +834,111 @@ describe("Reports page — Trends & KPIs mode toggle (v1.59, ADR-071)", () => {
       expect(screen.getByRole("combobox", { name: /select sprint/i })).toBeTruthy();
     });
     expect(screen.queryByRole("group", { name: /sprint selection mode/i })).toBeNull();
+  });
+});
+
+// ── v1.60 (ADR-072): date-range default + leave-adjusted developer KPIs ───────
+
+// A loaded one-sprint trends window: Alice done 9 vs the mocked policy's requiredPoints 8 → met.
+const TRENDS_REPORT = {
+  boardId: 1,
+  sprintCount: 1,
+  sprints: [
+    {
+      sprint: {
+        id: 54,
+        name: "Sprint 6",
+        state: "closed" as const,
+        startDate: "2026-05-12T00:00:00.000Z",
+        endDate: "2026-05-25T00:00:00.000Z",
+        completeDate: "2026-05-25T17:00:00.000Z",
+        goal: null,
+        boardId: 1,
+      },
+      committedPoints: 10,
+      completedPoints: 9,
+      completionRate: 0.9,
+      totalCount: 3,
+      completedCount: 2,
+      carryoverCount: 1,
+      blockedCount: 0,
+      byAssignee: [{ name: "Alice", donePoints: 9, totalPoints: 9, doneCount: 2, totalCount: 2 }],
+    },
+  ],
+  totals: { committedPoints: 10, completedPoints: 9 },
+  averageCompleted: 9,
+  averageCompletionRate: 0.9,
+  byAssignee: [{ name: "Alice", sprintsActive: 1, donePoints: 9, totalPoints: 9, avgDonePoints: 9 }],
+};
+
+describe("Reports page — Trends & KPIs v1.60 (ADR-072)", () => {
+  it("trends mode defaults to the Date range selection", async () => {
+    await renderReports();
+    fireEvent.click(screen.getByRole("button", { name: "Trends & KPIs" }));
+    await waitFor(() => screen.getByRole("group", { name: /sprint selection mode/i }));
+    expect(screen.getByRole("button", { name: "Date range" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Last N" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "Pick sprints" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("pre-fills the range inputs to the last-closed-sprints span through today", async () => {
+    await renderReports();
+    fireEvent.click(screen.getByRole("button", { name: "Trends & KPIs" }));
+    await waitFor(() => screen.getByRole("group", { name: /sprint selection mode/i }));
+    // Only closed sprint = Sprint 6 (startDate 2026-05-12) → From = its start, To = today.
+    const from = screen.getByLabelText(/^From$/i) as HTMLInputElement;
+    const to = screen.getByLabelText(/^To$/i) as HTMLInputElement;
+    expect(from.value).toBe("2026-05-12");
+    expect(to.value).toBe(new Date().toISOString().slice(0, 10));
+  });
+
+  it("does not clobber a user-typed range input when the sprint list loads later", async () => {
+    // Boards resolved (so TrendsView mounts) but the sprint list is still loading.
+    vi.mocked(boardsModule.useBoards).mockReturnValue({
+      boards: { dev: [{ id: 10, projectKey: "DEV" }], po: [{ id: 20, projectKey: "PO" }] },
+      loading: false,
+    });
+    vi.mocked(useJiraModule.useSprintList).mockReturnValue({
+      data: null,
+      loading: true,
+      error: null,
+      run: vi.fn(),
+    });
+    const { rerender } = render(<Reports />);
+    await waitFor(() => screen.getByText("Reports"));
+    fireEvent.click(screen.getByRole("button", { name: "Trends & KPIs" }));
+    await waitFor(() => screen.getByRole("group", { name: /sprint selection mode/i }));
+
+    // User types before the sprint list arrives…
+    fireEvent.change(screen.getByLabelText(/^From$/i), { target: { value: "2026-01-01" } });
+
+    // …then the list lands. The one-shot pre-fill must NOT overwrite the typed value.
+    vi.mocked(useJiraModule.useSprintList).mockReturnValue({
+      data: DEFAULT_SPRINT_LIST,
+      loading: false,
+      error: null,
+      run: vi.fn(),
+    });
+    rerender(<Reports />);
+    await waitFor(() => {
+      expect((screen.getByLabelText(/^From$/i) as HTMLInputElement).value).toBe("2026-01-01");
+    });
+    expect((screen.getByLabelText(/^To$/i) as HTMLInputElement).value).toBe("");
+  });
+
+  it("renders the leave-adjusted developer section when the leaves store is empty", async () => {
+    vi.mocked(useJiraModule.useMultiSprintReport).mockReturnValue({
+      data: TRENDS_REPORT,
+      loading: false,
+      error: null,
+      run: vi.fn(),
+    });
+    await renderReports();
+    fireEvent.click(screen.getByRole("button", { name: "Trends & KPIs" }));
+    await waitFor(() => screen.getByText("Developer KPIs"));
+    // Empty leaves store → target = usePolicy's requiredPoints (8) everywhere; Alice did 9 → met.
+    expect(screen.getByText("Met target").nextElementSibling?.textContent).toBe("1 of 1");
+    expect(screen.getAllByText("Target (adj)").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByLabelText("met").length).toBeGreaterThanOrEqual(1);
   });
 });

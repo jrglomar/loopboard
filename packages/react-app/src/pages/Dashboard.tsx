@@ -7,7 +7,6 @@ import { ImpedimentsCard } from "../components/ImpedimentsCard";
 import { LeaveStatusCard } from "../components/LeaveStatusCard";
 import { PullRequestsCard } from "../components/PullRequestsCard";
 import { MeetingGoalCard } from "../components/MeetingGoalCard";
-import { AttentionCard } from "../components/AttentionCard";
 import { AgingCard } from "../components/AgingCard";
 import { MeetingNotesCard } from "../components/MeetingNotesCard";
 import { FlyInCard, selectFlyIns, matchFlyIn } from "../components/FlyInCard";
@@ -315,11 +314,6 @@ export function Dashboard({
         {/* Sidebar: compact daily-standup widgets + Huddle Digest.
           The AI assistant is now a global floating widget (AssistantWidget). */}
         <div className="flex flex-col gap-3 min-w-0">
-          {/* v1.42 (ADR-052): prioritized nudges — stale, unassigned, PRs awaiting review */}
-          <section aria-label="Needs attention">
-            <AttentionCard issues={sprintIssues} prsByKey={issuePrs.data} />
-          </section>
-
           {/* v1.58 (ADR-070): Work Item Age — how long in-flight tickets have sat, vs a
               points-scaled expectation. Rides the already-fetched sprintIssues; no extra call. */}
           <section aria-label="Ticket aging">

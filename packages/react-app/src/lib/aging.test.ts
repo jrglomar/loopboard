@@ -2,7 +2,7 @@
 // Pure; `today` injected so the math is deterministic. Keyless/offline.
 
 import { describe, it, expect } from "vitest";
-import { computeAging, agingDetail, tierFor } from "./aging";
+import { computeAging, agingDetail, tierFor, daysSince, toUtcMidnight } from "./aging";
 import type { IssueSummary, AgingPolicy } from "./types";
 
 const TODAY = "2026-07-16";
@@ -22,6 +22,27 @@ function aged(n: number, over: Partial<IssueSummary> = {}): IssueSummary {
   const d = new Date(Date.UTC(2026, 6, 16 - n));
   return issue({ inProgressSince: d.toISOString(), ...over });
 }
+
+// v1.60 (ADR-072): daysSince/toUtcMidnight relocated here from the now-deleted nudge-card helper
+// module (their only remaining consumer). Direct pin tests for the UTC-midnight calendar-day
+// convention — previously exercised only indirectly (via the now-removed nudge-list builder).
+describe("daysSince / toUtcMidnight (relocated, v1.60 ADR-072)", () => {
+  it("toUtcMidnight collapses any time-of-day to the same UTC-midnight epoch", () => {
+    expect(toUtcMidnight("2026-07-16T23:59:59.999Z")).toBe(toUtcMidnight("2026-07-16T00:00:00.000Z"));
+  });
+
+  it("daysSince counts whole calendar days between an ISO timestamp and today", () => {
+    expect(daysSince("2026-07-10T00:00:00.000Z", TODAY)).toBe(6);
+  });
+
+  it("daysSince treats the same calendar day as 0, regardless of time-of-day", () => {
+    expect(daysSince(`${TODAY}T23:00:00.000Z`, TODAY)).toBe(0);
+  });
+
+  it("daysSince is negative for a timestamp after today (future)", () => {
+    expect(daysSince("2026-07-20T00:00:00.000Z", TODAY)).toBe(-4);
+  });
+});
 
 describe("tierFor (thresholds)", () => {
   it("is ok below 100% of the expectation", () => {

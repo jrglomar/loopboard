@@ -55,13 +55,43 @@ describe("AgingCard (v1.58)", () => {
     expect(screen.queryByRole("list", { name: /ticket aging/i })).toBeNull();
   });
 
-  it("caps the list and shows a '+N more' trailer", () => {
+  it("caps the list at 6 and shows a 'Show all N' toggle", () => {
     const many = Array.from({ length: 9 }, (_, i) => aged(`DEV-${i}`, i + 1));
     render(<AgingCard issues={many} policy={POLICY} />);
     const list = screen.getByRole("list", { name: /ticket aging/i });
-    // 6 shown + the "+3 more" trailer li
-    expect(within(list).getAllByRole("listitem")).toHaveLength(7);
-    expect(screen.getByText("+3 more")).toBeTruthy();
+    expect(within(list).getAllByRole("listitem")).toHaveLength(6);
+    const toggle = screen.getByRole("button", { name: "Show all 9" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("expands to show all entries and flips to 'Show less'", () => {
+    const many = Array.from({ length: 9 }, (_, i) => aged(`DEV-${i}`, i + 1));
+    render(<AgingCard issues={many} policy={POLICY} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show all 9" }));
+
+    const list = screen.getByRole("list", { name: /ticket aging/i });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(9);
+    const toggle = screen.getByRole("button", { name: "Show less" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("collapses back to 6 when 'Show less' is clicked again", () => {
+    const many = Array.from({ length: 9 }, (_, i) => aged(`DEV-${i}`, i + 1));
+    render(<AgingCard issues={many} policy={POLICY} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show all 9" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show less" }));
+
+    const list = screen.getByRole("list", { name: /ticket aging/i });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(6);
+    expect(screen.getByRole("button", { name: "Show all 9" }).getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("shows no expander button at 6 or fewer entries", () => {
+    const six = Array.from({ length: 6 }, (_, i) => aged(`DEV-${i}`, i + 1));
+    render(<AgingCard issues={six} policy={POLICY} />);
+    const list = screen.getByRole("list", { name: /ticket aging/i });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(6);
+    expect(screen.queryByRole("button", { name: /show all|show less/i })).toBeNull();
   });
 
   it("collapses and expands independently (own storage key)", () => {

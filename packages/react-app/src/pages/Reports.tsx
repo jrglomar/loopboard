@@ -1407,6 +1407,9 @@ export function Reports({
   // boards context hasn't loaded yet (legacy/older-bridge flows still need a concrete id).
   const [mode, setMode] = useState<"sprint" | "trends">("sprint");
   const trendsBoardId = selectedBoardId ?? sprintList.data?.boardId;
+  // v1.60 (ADR-072): the per-user offset policy's required points feed TrendsView's
+  // leave-adjusted per-developer targets. Pages call context hooks; components take props.
+  const { requiredPoints: trendsRequiredPoints } = usePolicy();
   // localSprintId holds the page DEFAULT (set by the effect) + uncontrolled picks.
   const [localSprintId, setLocalSprintId] = useState<number | null>(null);
   // Effective sprint (v1.13): an explicit shared pick (controlled) overrides the default.
@@ -1552,7 +1555,11 @@ export function Reports({
       {/* v1.59 (ADR-071): Trends & KPIs mode — the entire sprint-report path below is
           untouched; it only renders in "sprint" mode (the default). */}
       {mode === "trends" && trendsBoardId !== undefined && (
-        <TrendsView boardId={trendsBoardId} boardKey={selectedBoardKey} />
+        <TrendsView
+          boardId={trendsBoardId}
+          boardKey={selectedBoardKey}
+          requiredPoints={trendsRequiredPoints}
+        />
       )}
 
       {mode === "sprint" && (

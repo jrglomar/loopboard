@@ -2807,3 +2807,25 @@ All frontend/presentation; **no new tool, jira tools stay 36, IO shapes unchange
     no new tab per the ADR-060 tab-crowding precedent): Last-N (default 10) / pick-sprints /
     date-range selection → one `get_multi_sprint_report` fetch; team + per-developer velocity &
     trend sections + markdown/CSV export. Guide + USER-GUIDE updated.
+
+## Changelog v1.60 (2026-07-17 — Huddle attention removal + leave-adjusted Trends KPIs; ADR-072)
+
+No tool, route, or env surface changes — UI-only release (client-side joins of EXISTING tools).
+
+169. **Huddle — "Needs attention" card REMOVED** (retires the ADR-052 Phase C surface): the v1.58
+    Aging card supersedes the stale-ticket signal; the unassigned/PR-review nudges leave the Huddle
+    with it. `lib/attention.ts` is deleted; its calendar-day helpers (`daysSince`/`toUtcMidnight`)
+    relocate into `lib/aging.ts` (their only remaining consumer).
+170. **Huddle — Aging card lists ALL tracked in-flight tickets**: the static "+N more" trailer
+    becomes a "Show all N / Show less" toggle; the expanded list scrolls (max-height) so a 30-deep
+    WIP list stays usable.
+171. **Reports · Trends & KPIs — per-developer KPIs are leave-adjusted** (client-side join of
+    `get_all_leaves` × the per-user `policy.requiredPoints` — zero new backend surface): per dev
+    per sprint, `leaveDays` = plotted days of ANY type (VL/EL/Holiday/Offset — the ADR-038/048
+    capacity convention: one leave day = one point of relief), adjusted target =
+    `max(0, requiredPoints − leaveDays)`, met = donePoints ≥ adjusted target. Developers with
+    plotted leaves but zero issues in a sprint still appear (names = byAssignee ∪ leaves).
+    The per-dev bar chart renders donePoints against the adjusted target as its secondary series.
+172. **Reports · Trends & KPIs — date range is the DEFAULT selection mode**, pre-filled to the span
+    of the last 10 closed sprints (start = 10th-most-recent closed sprint's startDate, end = today);
+    Last-N and pick-sprints modes remain.
