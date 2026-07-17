@@ -2,10 +2,13 @@
 // in-flight ticket worst-first (a mini WIP-age view), each aged against a points-scaled
 // expectation via the pure computeAging(). Presentational otherwise.
 //
-// Unlike AttentionCard (which only shows flagged outliers), this shows ALL in-flight work with a
-// known age — the standup question is "what's been sitting too long?", which needs the whole list
-// ordered, not just the exceptions.
+// This shows ALL in-flight work with a known age — the standup question is "what's been sitting
+// too long?", which needs the whole list ordered, not just a flagged subset. v1.60 (ADR-072):
+// now the Huddle's sole such signal card (the earlier flagged-outliers-only nudge card was
+// retired). A "Show all N / Show less" toggle (below MAX_SHOWN entries, per-visit only — not
+// persisted) reveals the full list in a scrollable region so a deep WIP list stays usable.
 
+import { useState } from "react";
 import { Hourglass, CheckCircle2 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { computeAging, agingDetail, type AgingTier } from "../lib/aging";
@@ -33,9 +36,12 @@ export function AgingCard({
   const today = new Date().toISOString().slice(0, 10);
   const { entries, okCount, watchCount, overdueCount } = computeAging(issues, policy, today);
   const [collapsed, toggleCollapsed] = useCollapse("aging");
+  // v1.60 (ADR-072): "Show all" is per-visit only — deliberately NOT persisted like the card's
+  // own collapse state above (useCollapse), which survives reloads.
+  const [expanded, setExpanded] = useState(false);
 
-  const shown = entries.slice(0, MAX_SHOWN);
-  const extra = entries.length - shown.length;
+  const canExpand = entries.length > MAX_SHOWN;
+  const shown = expanded ? entries : entries.slice(0, MAX_SHOWN);
   const flagged = overdueCount + watchCount;
 
   return (
@@ -64,7 +70,10 @@ export function AgingCard({
               <p className="text-[0.6875rem] text-muted-foreground mb-1.5">
                 {overdueCount} overdue · {watchCount} watch · {okCount} ok
               </p>
-              <ul className="space-y-1.5" aria-label="Ticket aging">
+              <ul
+                className={cn("space-y-1.5", expanded && "max-h-80 overflow-y-auto")}
+                aria-label="Ticket aging"
+              >
                 {shown.map((e) => (
                   <li key={e.key} className="text-sm">
                     <a
@@ -91,10 +100,17 @@ export function AgingCard({
                     </a>
                   </li>
                 ))}
-                {extra > 0 && (
-                  <li className="text-[0.6875rem] text-muted-foreground pl-9">+{extra} more</li>
-                )}
               </ul>
+              {canExpand && (
+                <button
+                  type="button"
+                  onClick={() => setExpanded((cur) => !cur)}
+                  aria-expanded={expanded}
+                  className="mt-1.5 text-[0.6875rem] text-muted-foreground hover:underline"
+                >
+                  {expanded ? "Show less" : `Show all ${entries.length}`}
+                </button>
+              )}
             </>
           )}
         </CardContent>

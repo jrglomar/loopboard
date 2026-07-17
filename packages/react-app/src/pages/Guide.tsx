@@ -109,7 +109,7 @@ const SECTIONS: Section[] = [
         <ul className="list-disc pl-5 space-y-1.5 mt-2">
           <li><T>Sprint board</T> — the sprint's issues in <T>To Do · In Progress · Code Review · Done</T>, with points, assignee and a “has-PR” badge; filter by assignee.</li>
           <li><T>Daily huddle digest</T> — a copy-pastable summary, viewable by status or <T>by person</T> for walk-the-board standups.</li>
-          <li><T>Sidebar cards</T> (each collapses via the chevron; your choices are remembered): <T>Needs attention</T> (stale, unassigned, PRs awaiting review), <T>Meeting goal</T>, <T>Meeting notes</T> (rich text), <T>Impediments</T>, <T>On leave</T>, and <T>Code review</T> (linked PRs + approval status).</li>
+          <li><T>Sidebar cards</T> (each collapses via the chevron; your choices are remembered): <T>Meeting goal</T>, <T>Meeting notes</T> (rich text), <T>Impediments</T>, <T>On leave</T>, and <T>Code review</T> (linked PRs + approval status).</li>
           <li><T>Fly-in tracker</T> across the Dev and PO boards, plus auto-refresh with a “last updated” stamp.</li>
           <li>
             <T>Ticket aging</T> — the sprint board's in-progress and code-review tickets each show an age
@@ -176,8 +176,12 @@ const SECTIONS: Section[] = [
           <T>Trends & KPIs</T> — a second mode (toggle next to the board switcher) that reports across a
           whole window of sprints instead of just one: committed/completed points, rate, carryover and
           blocked counts per sprint, team-wide averages, and a per-developer view (pick a name to see
-          their trend). Choose the window as the <T>last N</T> closed sprints (10 by default), <T>pick
-          sprints</T> individually, or a <T>date range</T> — then export the same way (Copy, .md, .csv).
+          their trend). The window defaults to a <T>date range</T> pre-filled to the span of the last 10
+          closed sprints — or choose <T>last N</T> closed sprints instead, or <T>pick sprints</T>
+          individually — then export the same way (Copy, .md, .csv). Per-developer KPIs are
+          leave-adjusted: each plotted leave day (Vacation, Emergency, Holiday, or Offset) reduces that
+          developer's sprint target by a point, and their per-sprint <T>met target</T> mark reflects that
+          adjusted number, not the flat team target.
         </li>
       </ul>
     ),

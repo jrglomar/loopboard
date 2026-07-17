@@ -5,16 +5,30 @@
 //   expectedDays = baseDays + daysPerPoint × storyPoints   (unpointed → baseDays only)
 //   ratio        = ageDays / expectedDays  →  ok (<100%) · watch (≥100%) · overdue (≥150%)
 //
-// `today` is injected (never reads the clock) so the math is deterministic and unit-testable —
-// the attention.ts convention, whose calendar-day helpers this reuses (ADR-052: calendar days,
-// not business days — deliberately simple until noise warrants otherwise).
+// `today` is injected (never reads the clock) so the math is deterministic and unit-testable
+// (ADR-052: calendar days, not business days — deliberately simple until noise warrants
+// otherwise). v1.60 (ADR-072): the calendar-day helpers below relocated here from the now-deleted
+// nudge-card helper module (that Huddle sidebar card was retired; this was their only remaining
+// consumer) — same convention, no behavior change.
 //
 // Age comes from `IssueSummary.inProgressSince` (when the issue entered its CURRENT status,
 // resolved from the Jira changelog by get_active_sprint's withAging option). Issues without it
 // are EXCLUDED entirely rather than guessed at — an unknown age shows nothing, never a wrong number.
 
-import { daysSince } from "./attention";
 import type { IssueSummary } from "./types";
+
+/** UTC midnight epoch for a full ISO timestamp or a YYYY-MM-DD date. */
+export function toUtcMidnight(iso: string): number {
+  const d = new Date(iso);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+/**
+ * Whole calendar days from an ISO timestamp to `today` (YYYY-MM-DD). Negative if in the future.
+ */
+export function daysSince(iso: string, today: string): number {
+  return Math.floor((toUtcMidnight(today) - toUtcMidnight(iso)) / 86_400_000);
+}
 
 export type AgingTier = "ok" | "watch" | "overdue";
 

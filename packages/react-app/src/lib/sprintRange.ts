@@ -61,3 +61,33 @@ export function sprintIdsInDateRange(
     })
     .map((s) => s.id);
 }
+
+/**
+ * Default "date range" window for the Trends & KPIs mode (v1.60, ADR-072): the span covering the
+ * last `n` CLOSED sprints (latest-first, list_sprints convention — the same slice
+ * lastNClosedSprintIds takes) through today. `start` is the min startDate among that slice (i.e.
+ * the `n`th-most-recent closed sprint's startDate — the oldest one the window needs to reach back
+ * to), sliced to YYYY-MM-DD for the native date input; `end` is `todayIso`, verbatim.
+ *
+ * Fewer than `n` closed sprints → uses all of them (same convention as lastNClosedSprintIds).
+ * Returns null when `closed` is empty, `n` is not a positive finite number, or every sprint in
+ * the slice has a null startDate (nothing to anchor the start on) — callers fall back to their
+ * existing empty-state handling.
+ */
+export function defaultRangeFromClosed(
+  closed: SprintRef[],
+  n: number,
+  todayIso: string
+): { start: string; end: string } | null {
+  if (!Array.isArray(closed) || closed.length === 0) return null;
+  if (!Number.isFinite(n) || n <= 0) return null;
+
+  const slice = closed.slice(0, Math.floor(n)); // closed is latest-first — first N = most recent N
+  const starts = slice
+    .map((s) => s.startDate)
+    .filter((d): d is string => !!d && !Number.isNaN(Date.parse(d)));
+  if (starts.length === 0) return null;
+
+  const minStart = starts.reduce((min, d) => (Date.parse(d) < Date.parse(min) ? d : min));
+  return { start: minStart.slice(0, 10), end: todayIso };
+}

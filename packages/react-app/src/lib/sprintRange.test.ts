@@ -2,7 +2,7 @@
 // Pure functions; no mocks needed. Keyless/offline.
 
 import { describe, it, expect } from "vitest";
-import { lastNClosedSprintIds, sprintIdsInDateRange } from "./sprintRange";
+import { lastNClosedSprintIds, sprintIdsInDateRange, defaultRangeFromClosed } from "./sprintRange";
 import type { SprintRef } from "./types";
 
 function sprint(partial: Partial<SprintRef> & { id: number }): SprintRef {
@@ -109,5 +109,62 @@ describe("sprintIdsInDateRange", () => {
 
   it("returns [] when no sprint falls in the range (empty result)", () => {
     expect(sprintIdsInDateRange(MIXED, "2020-01-01", "2020-01-31")).toEqual([]);
+  });
+});
+
+// v1.60 (ADR-072): default "date range" window pre-fill — Trends & KPIs mode 2 defaults to
+// "range" instead of "recent", pre-filled to the span of the last N closed sprints.
+describe("defaultRangeFromClosed", () => {
+  const TODAY = "2026-07-17";
+
+  it("returns null for an empty closed list", () => {
+    expect(defaultRangeFromClosed([], 10, TODAY)).toBeNull();
+  });
+
+  it("returns null for n <= 0 or non-finite", () => {
+    expect(defaultRangeFromClosed(CLOSED_LATEST_FIRST, 0, TODAY)).toBeNull();
+    expect(defaultRangeFromClosed(CLOSED_LATEST_FIRST, -3, TODAY)).toBeNull();
+    expect(defaultRangeFromClosed(CLOSED_LATEST_FIRST, NaN, TODAY)).toBeNull();
+  });
+
+  it("fewer-than-n: uses all closed sprints — start is the oldest of them", () => {
+    // 5 closed sprints, ask for 10 → all 5 considered, oldest startDate is id 1's "2026-03-06".
+    expect(defaultRangeFromClosed(CLOSED_LATEST_FIRST, 10, TODAY)).toEqual({
+      start: "2026-03-06",
+      end: TODAY,
+    });
+  });
+
+  it("exactly-N: start is the Nth-most-recent closed sprint's startDate", () => {
+    // n=3 → ids 5,4,3 (latest-first) → startDates 05-01, 04-17, 04-03 → min = id 3's 04-03.
+    expect(defaultRangeFromClosed(CLOSED_LATEST_FIRST, 3, TODAY)).toEqual({
+      start: "2026-04-03",
+      end: TODAY,
+    });
+  });
+
+  it("end is todayIso, passed through verbatim", () => {
+    expect(defaultRangeFromClosed(CLOSED_LATEST_FIRST, 1, "2099-01-01")!.end).toBe("2099-01-01");
+  });
+
+  it("slices a full ISO timestamp startDate down to YYYY-MM-DD", () => {
+    const closed: SprintRef[] = [
+      sprint({ id: 1, startDate: "2026-05-12T00:00:00.000Z", endDate: "2026-05-25T00:00:00.000Z" }),
+    ];
+    expect(defaultRangeFromClosed(closed, 10, TODAY)).toEqual({ start: "2026-05-12", end: TODAY });
+  });
+
+  it("skips a null startDate within the slice, using the min of the rest", () => {
+    const closed: SprintRef[] = [
+      sprint({ id: 3, startDate: null }), // most recent, but unknown date
+      sprint({ id: 2, startDate: "2026-04-20" }),
+      sprint({ id: 1, startDate: "2026-03-06" }),
+    ];
+    expect(defaultRangeFromClosed(closed, 10, TODAY)).toEqual({ start: "2026-03-06", end: TODAY });
+  });
+
+  it("returns null when every sprint in the slice has a null startDate", () => {
+    const closed: SprintRef[] = [sprint({ id: 2, startDate: null }), sprint({ id: 1, startDate: null })];
+    expect(defaultRangeFromClosed(closed, 10, TODAY)).toBeNull();
   });
 });
