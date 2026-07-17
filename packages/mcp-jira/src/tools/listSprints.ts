@@ -10,7 +10,11 @@ import type { ToolDef } from "../lib/toolDef.js";
 import type { SprintRef } from "../lib/types.js";
 import { getConfig } from "../lib/config.js";
 import { getSprintsByState } from "../lib/jiraClient.js";
-import { sortSprintsLatestFirst, sortSprintsEarliestFirst } from "../lib/sprintSelect.js";
+import {
+  sortSprintsLatestFirst,
+  sortSprintsEarliestFirst,
+  sortClosedSprintsLatestFirst,
+} from "../lib/sprintSelect.js";
 
 const schema = z.object({
   boardId: z.number().int().positive().optional(),
@@ -74,19 +78,11 @@ async function handler(input: unknown): Promise<ListSprintsOutput> {
     mapToSprintRef(s, boardId)
   );
 
-  // Closed: sort latest-completed-first (by completeDate desc, then endDate desc, then id desc)
-  const sortedClosed = [...rawClosed]
-    .sort((a, b) => {
-      const aDate = a.completeDate ?? a.endDate;
-      const bDate = b.completeDate ?? b.endDate;
-      if (aDate === null && bDate === null) return b.id - a.id;
-      if (aDate === null) return 1;
-      if (bDate === null) return -1;
-      if (aDate > bDate) return -1;
-      if (aDate < bDate) return 1;
-      return b.id - a.id;
-    })
-    .map((s) => mapToSprintRef(s, boardId));
+  // Closed: sort latest-completed-first (by completeDate desc, then endDate desc, then id desc).
+  // v1.59 (ADR-071): shared with get_multi_sprint_report via sprintSelect.ts (was duplicated inline).
+  const sortedClosed = sortClosedSprintsLatestFirst(rawClosed).map((s) =>
+    mapToSprintRef(s, boardId)
+  );
 
   return {
     boardId,

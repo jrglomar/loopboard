@@ -20,6 +20,7 @@ import type { ToolDef } from "../lib/toolDef.js";
 import { getConfig } from "../lib/config.js";
 import { getSprintsByState, getSprintIssues, getSprintMeta } from "../lib/jiraClient.js";
 import { computeSprintPoints, makeDodPredicate } from "../lib/reportMath.js";
+import { sortClosedSprintsLatestFirst } from "../lib/sprintSelect.js";
 
 const schema = z.object({
   boardId: z.number().int().positive().optional(),
@@ -66,17 +67,9 @@ async function handler(input: unknown): Promise<GetVelocityOutput> {
   const rawPool = [...rawClosed, ...rawActive];
 
   // Sort latest-first (by completeDate fallback endDate — active sprints have no
-  // completeDate, so they sort by their planned endDate).
-  const sortedPool = [...rawPool].sort((a, b) => {
-    const aDate = a.completeDate ?? a.endDate;
-    const bDate = b.completeDate ?? b.endDate;
-    if (aDate === null && bDate === null) return b.id - a.id;
-    if (aDate === null) return 1;
-    if (bDate === null) return -1;
-    if (aDate > bDate) return -1;
-    if (aDate < bDate) return 1;
-    return b.id - a.id;
-  });
+  // completeDate, so they sort by their planned endDate). v1.59 (ADR-071): shared
+  // with get_multi_sprint_report via sprintSelect.ts (was duplicated inline).
+  const sortedPool = sortClosedSprintsLatestFirst(rawPool);
 
   // v1.5 (ADR-015): when beforeSprintId is provided, filter to only sprints
   // that come strictly before the selected sprint.

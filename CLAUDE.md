@@ -44,6 +44,31 @@ npm run dev:github            # stdio server for Copilot — do not start manual
 
 ---
 
+## Delivery workflow: commit → push → PR (every phase)
+
+When a phase is delivered (all gates green) — or whenever the user asks — ship it to GitHub
+(`origin` = https://github.com/jrglomar/loopboard.git):
+
+1. **Gates first, never commit red.** `npm run typecheck && npm run test && npm run build` +
+   `node scripts/smoke.mjs` all green — judge by EXIT CODES / `grep "error TS"`, never by output tails
+   (npm `--workspaces` keeps going past a failing package).
+2. **Branch from `main`**: `phase/v<version>-<short-slug>` (e.g. `phase/v1.59-p4-trends-kpis`).
+   Phase work is never committed directly to `main`.
+3. **Commit only the phase's files.** Subject: `v<version>[-P<n>]: <what shipped> (ADR-<nnn>)`;
+   body: surface changes, test-count delta, smoke count; end with the Co-Authored-By footer.
+4. **Secrets check, then push.** `git status` must show no `.env` / `.loopboard-*` files staged
+   (they are git-ignored — if one ever appears, STOP and fix before pushing). `git push -u origin <branch>`.
+5. **Open a PR** with `gh pr create` — title = commit subject; body = summary, test counts,
+   ADR/contract refs, honest caveats (e.g. "not live-eyeballed"). Claude NEVER merges the PR —
+   the user reviews and merges. gh lives at `C:\Program Files\GitHub CLI\gh.exe` (full path may be
+   needed in shells started before the install). If gh is unauthenticated (`gh auth status`), push
+   anyway and give the user the one-click compare URL
+   `https://github.com/jrglomar/loopboard/compare/main...<branch>?expand=1` plus a paste-ready
+   title/body, and note that `gh auth login` (user-run, once) makes this automatic.
+6. **Report the PR URL** in chat.
+
+---
+
 ## Architecture in 5 lines
 
 1. **3 packages** — `mcp-jira` (Jira tools), `mcp-github` (GitHub PR tools), `react-app` (dashboard); connected via npm workspaces.
@@ -102,6 +127,6 @@ Do not add tests that require real credentials or network calls.
 | Chat command router (pure function) | `packages/react-app/src/lib/chatRouter.ts` |
 | MCP tool catalog (Guide reference data) | `packages/react-app/src/lib/toolCatalog.ts` |
 | Ticket draft builder (deterministic, no network) | `packages/react-app/src/lib/ticketTemplates.ts` |
-| Architectural Decision Records | `docs/adr/ADR-001.md` through `ADR-005.md` |
+| Architectural Decision Records | `docs/adr/ADR-001.md` through `ADR-070.md` |
 | Integration contract | `docs/CONTRACTS.md` |
 | Setup guide | `docs/SETUP.md` |

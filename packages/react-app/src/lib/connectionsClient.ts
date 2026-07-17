@@ -46,6 +46,8 @@ export interface MyContext {
   boards: { dev: UserBoardRef[]; po: UserBoardRef[] };
   /** v1.51 (ADR-062): the user's EFFECTIVE offset policy (per-user config, not global .env). */
   policy?: { requiredPoints: number; offsetThreshold: number };
+  /** v1.58 (ADR-070): the user's EFFECTIVE ticket-aging policy (per-user config, not global .env). */
+  aging?: { baseDays: number; daysPerPoint: number };
   /** v1.53 (ADR-064): the user's EFFECTIVE AI status (own token OR inherited/global), not global .env. */
   ai?: { enabled: boolean; provider: string | null; model: string | null };
   /** v1.45 (ADR-055) — "admin" unlocks the Admin console tab. */

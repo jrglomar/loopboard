@@ -8,6 +8,7 @@ import { LeaveStatusCard } from "../components/LeaveStatusCard";
 import { PullRequestsCard } from "../components/PullRequestsCard";
 import { MeetingGoalCard } from "../components/MeetingGoalCard";
 import { AttentionCard } from "../components/AttentionCard";
+import { AgingCard } from "../components/AgingCard";
 import { MeetingNotesCard } from "../components/MeetingNotesCard";
 import { FlyInCard, selectFlyIns, matchFlyIn } from "../components/FlyInCard";
 import {
@@ -16,7 +17,7 @@ import {
   useIssuePullRequests,
   useLinkedIssues,
 } from "../hooks/useJira";
-import { useBoards } from "../lib/boards";
+import { useBoards, useAgingPolicy } from "../lib/boards";
 import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import type { BoardKey, SharedSprintProps, LinkedIssue } from "../lib/types";
 
@@ -32,6 +33,7 @@ export function Dashboard({
 }: SharedSprintProps = {}) {
   // v1.6: Board context — load once from health (ADR-017)
   const { boards, loading: boardsLoading } = useBoards();
+  const agingPolicy = useAgingPolicy(); // v1.58 (ADR-070) — per-user; drives the Aging card + chips
 
   // v1.6/v1.13: Selected board key (default = "dev"); shared when controlled.
   const [localBoardKey, setLocalBoardKey] = useState<BoardKey>("dev");
@@ -62,7 +64,9 @@ export function Dashboard({
   // v1.2: Dashboard owns assigneeFilter (ADR-008); null = All
   const [assigneeFilter, setAssigneeFilter] = useState<string | null>(null);
 
-  const sprint = useActiveSprint(selectedBoardId, selectedSprintId);
+  // v1.58 (ADR-070): the Huddle is the only caller that needs Work Item Age, so it alone pays
+  // for the changelog enrichment (withAging). The opposite-board fly-in fetch below does not.
+  const sprint = useActiveSprint(selectedBoardId, selectedSprintId, true);
   const huddle = useDailyHuddle(selectedBoardId, selectedSprintId);
 
   // v1.40 (ADR-050): freshness — refetch every 5 minutes; stamp the last data arrival.
@@ -303,6 +307,7 @@ export function Dashboard({
               assigneeFilter={assigneeFilter}
               onAssigneeFilterChange={setAssigneeFilter}
               prsByKey={issuePrs.data}
+              agingPolicy={agingPolicy}
             />
           )}
         </section>
@@ -313,6 +318,12 @@ export function Dashboard({
           {/* v1.42 (ADR-052): prioritized nudges — stale, unassigned, PRs awaiting review */}
           <section aria-label="Needs attention">
             <AttentionCard issues={sprintIssues} prsByKey={issuePrs.data} />
+          </section>
+
+          {/* v1.58 (ADR-070): Work Item Age — how long in-flight tickets have sat, vs a
+              points-scaled expectation. Rides the already-fetched sprintIssues; no extra call. */}
+          <section aria-label="Ticket aging">
+            <AgingCard issues={sprintIssues} policy={agingPolicy} />
           </section>
 
           {/* v1.20 (ADR-031): today's meeting focus, above the daily widgets */}

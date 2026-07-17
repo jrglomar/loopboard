@@ -99,3 +99,60 @@ export function computeByAssignee(
 
   return [...map.values()].sort((a, b) => b.totalPoints - a.totalPoints);
 }
+
+export interface MultiSprintAssigneeSummary {
+  name: string;
+  sprintsActive: number; // sprints where the person had >=1 issue
+  donePoints: number;
+  totalPoints: number;
+  avgDonePoints: number; // donePoints / sprintCount — FULL window, not sprintsActive
+}
+
+/**
+ * Aggregate per-assignee stats ACROSS a window of sprints (v1.59, ADR-071 —
+ * get_multi_sprint_report). `perSprint` is one AssigneeStats[] per sprint (as
+ * produced by computeByAssignee); `sprintCount` is the size of the whole window
+ * (not just the sprints a person appears in), so avgDonePoints reflects the
+ * full-window velocity convention (a quiet sprint still drags the average down).
+ *
+ * - sprintsActive: number of the input arrays the name appears in.
+ * - donePoints/totalPoints: summed across all sprints.
+ * - avgDonePoints: donePoints / sprintCount (0 when sprintCount is 0).
+ *
+ * Sorted by donePoints descending, tie → totalPoints descending, tie → name ascending
+ * (deterministic — no dependence on Map iteration order).
+ */
+export function aggregateByAssigneeAcrossSprints(
+  perSprint: AssigneeStats[][],
+  sprintCount: number
+): MultiSprintAssigneeSummary[] {
+  const map = new Map<string, { donePoints: number; totalPoints: number; sprintsActive: number }>();
+
+  for (const sprintStats of perSprint) {
+    for (const stat of sprintStats) {
+      const existing = map.get(stat.name) ?? {
+        donePoints: 0,
+        totalPoints: 0,
+        sprintsActive: 0,
+      };
+      existing.donePoints += stat.donePoints;
+      existing.totalPoints += stat.totalPoints;
+      existing.sprintsActive += 1;
+      map.set(stat.name, existing);
+    }
+  }
+
+  const summaries: MultiSprintAssigneeSummary[] = [...map.entries()].map(([name, v]) => ({
+    name,
+    sprintsActive: v.sprintsActive,
+    donePoints: v.donePoints,
+    totalPoints: v.totalPoints,
+    avgDonePoints: sprintCount > 0 ? v.donePoints / sprintCount : 0,
+  }));
+
+  return summaries.sort((a, b) => {
+    if (b.donePoints !== a.donePoints) return b.donePoints - a.donePoints;
+    if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
+    return a.name.localeCompare(b.name);
+  });
+}

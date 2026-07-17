@@ -21,7 +21,7 @@ import { fileURLToPath } from "url";
 import * as path from "path";
 import { z } from "zod";
 import { tools } from "./tools/index.js";
-import { getConfig, getProjects, getOffsetPolicy, type ProjectRef } from "./lib/config.js";
+import { getConfig, getProjects, getOffsetPolicy, getAgingPolicy, type ProjectRef } from "./lib/config.js";
 import { UpstreamError, ConfigError } from "./lib/errors.js";
 import { ZodError } from "zod";
 import { getAiProvider, getAiStatus } from "./lib/ai/provider.js";
@@ -241,6 +241,14 @@ app.get("/api/health", (_req, res) => {
     policy = { requiredPoints: 8, offsetThreshold: 2 };
   }
 
+  // v1.58 (ADR-070): ticket-aging policy — pure config, sibling of `policy`.
+  let aging: { baseDays: number; daysPerPoint: number };
+  try {
+    aging = getAgingPolicy();
+  } catch {
+    aging = { baseDays: 1, daysPerPoint: 1 };
+  }
+
   res.json({
     ok: true,
     service: "mcp-jira",
@@ -248,6 +256,7 @@ app.get("/api/health", (_req, res) => {
     ai,
     boards,
     policy,
+    aging,
   });
 });
 

@@ -36,6 +36,8 @@ vi.mock("../lib/boards", () => ({
   getBoards: vi.fn().mockResolvedValue(
     { dev: [{ id: 10, projectKey: "DEV" }], po: [{ id: 20, projectKey: "PO" }] }
   ),
+  // v1.58 (ADR-070): the Aging card + board chips read the per-user aging policy.
+  useAgingPolicy: vi.fn().mockReturnValue({ baseDays: 1, daysPerPoint: 1 }),
 }));
 
 // Mock child components to avoid complex dependency chains
@@ -166,6 +168,17 @@ describe("Dashboard — board toggle (v1.6, ADR-017)", () => {
       const hasPOCall = calls.some((args) => args[0] === 20);
       expect(hasPOCall).toBe(true);
     });
+  });
+
+  it("v1.58 (ADR-070): requests aging ONLY for the primary sprint, not the fly-in board", async () => {
+    render(<Dashboard />);
+    await waitFor(() => screen.getByRole("button", { name: "PO" }));
+
+    const calls = vi.mocked(useJiraModule.useActiveSprint).mock.calls;
+    // The Huddle's own sprint pays for the changelog enrichment…
+    expect(calls.some((args) => args[0] === 10 && args[2] === true)).toBe(true);
+    // …the opposite-board fly-in fetch must not (it only needs keys/summaries).
+    expect(calls.some((args) => args[0] === 20 && args[2] === true)).toBe(false);
   });
 
   it("PO button has aria-pressed=true after clicking PO", async () => {

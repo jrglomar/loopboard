@@ -24,6 +24,9 @@ export interface AdminConfig {
   JIRA_VELOCITY_SPRINTS?: number;
   JIRA_REQUIRED_POINTS?: number;
   JIRA_OFFSET_THRESHOLD?: number;
+  // v1.58 (ADR-070) — ticket-aging expectation policy (mirrors mcp-jira's adminConfigSchema).
+  JIRA_AGING_BASE_DAYS?: number;
+  JIRA_AGING_DAYS_PER_POINT?: number;
 }
 
 export interface AdminUser {

@@ -38,6 +38,8 @@ export const READ_TOOLS: ReadonlySet<string> = new Set([
   "get_meeting_notes",
   // v1.42 (ADR-052): the persisted retrospective.
   "get_retro",
+  // v1.59 (ADR-071): windowed multi-sprint report for trends/KPI questions.
+  "get_multi_sprint_report",
 ]);
 
 /**
