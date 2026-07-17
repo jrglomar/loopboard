@@ -9,6 +9,7 @@ import { createSprintTool } from "./createSprint.js";
 import { listSprintsTool } from "./listSprints.js";
 import { getSprintReportTool } from "./getSprintReport.js";
 import { getVelocityTool } from "./getVelocity.js";
+import { getMultiSprintReportTool } from "./getMultiSprintReport.js";
 import { getLeavesTool } from "./getLeaves.js";
 import { getAllLeavesTool } from "./getAllLeaves.js";
 import { setLeavesTool } from "./setLeaves.js";
@@ -53,6 +54,7 @@ export const tools: ToolDef[] = [
   listSprintsTool,
   getSprintReportTool,
   getVelocityTool,
+  getMultiSprintReportTool,
   getLeavesTool,
   getAllLeavesTool,
   setLeavesTool,

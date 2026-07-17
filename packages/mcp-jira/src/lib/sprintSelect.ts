@@ -76,6 +76,34 @@ export function sortSprintsEarliestFirst<T extends SprintStub>(sprints: T[]): T[
 }
 
 /**
+ * Sort an array of closed (or closed+active) sprint stubs latest-first:
+ *  - descending `completeDate ?? endDate` (ISO string compare);
+ *  - null date (both completeDate and endDate null) sorts last;
+ *  - ties broken by descending id.
+ *
+ * v1.59 (ADR-071): extracted from the identical inline sort previously duplicated
+ * in getVelocity.ts and listSprints.ts. Active sprints have no completeDate, so
+ * they sort by their planned endDate — this is what lets get_velocity's
+ * includeActive pool active sprints alongside closed ones in one latest-first list.
+ *
+ * Returns a new array (does not mutate input).
+ */
+export function sortClosedSprintsLatestFirst<
+  T extends { id: number; endDate: string | null; completeDate: string | null }
+>(sprints: T[]): T[] {
+  return [...sprints].sort((a, b) => {
+    const aDate = a.completeDate ?? a.endDate;
+    const bDate = b.completeDate ?? b.endDate;
+    if (aDate === null && bDate === null) return b.id - a.id;
+    if (aDate === null) return 1;
+    if (bDate === null) return -1;
+    if (aDate > bDate) return -1;
+    if (aDate < bDate) return 1;
+    return b.id - a.id;
+  });
+}
+
+/**
  * Select the target sprint from active∪future lists (v1.4).
  *
  * @param activeSorted   Sorted active sprints (latest-first).

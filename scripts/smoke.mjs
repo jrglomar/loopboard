@@ -82,6 +82,8 @@ const EXPECTED_JIRA_TOOLS = [
   "list_sprints",
   "get_sprint_report",
   "get_velocity",
+  // v1.59 (ADR-071) — windowed multi-sprint report for trends/KPIs
+  "get_multi_sprint_report",
   // v1.5 — leaves/offset tracker
   "get_leaves",
   "get_all_leaves",
