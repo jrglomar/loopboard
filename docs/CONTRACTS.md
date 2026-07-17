@@ -2860,3 +2860,14 @@ Tool/route/env surface: ONE amendment (§4.3 step 8 — aging bucket scope). Eve
     frontend-only clients). The §7/§8 backend endpoints and stores remain in place but DORMANT
     (unchanged contract surface; no smoke changes) — login, Connections, Admin, and
     `GET /api/me/context` are app-wide infrastructure and unaffected. (ADR-073.)
+
+## Changelog v1.62 (2026-07-18 — team trends workbook: per-developer aggregate section; ADR-074)
+
+UI-only (export layer); no tool/route/env changes.
+
+180. **The styled "Team trends" workbook gains a BY DEVELOPER section** below the AVERAGE row —
+    the §4.29 cross-sprint `byAssignee` aggregate that the markdown/CSV exports have carried since
+    v1.59, now in the styled .xlsx too: Assignee · Sprints active · Done pts · Total pts ·
+    Avg done / sprint (raw `avgDonePoints` — the FULL-window velocity convention, NOT
+    leave-adjusted; the leave-adjusted view stays in the Developer KPIs workbook). "Unassigned"
+    is filtered (v1.61 item 176 rule). Same styling pass as the existing sections.

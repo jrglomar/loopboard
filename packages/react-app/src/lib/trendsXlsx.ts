@@ -48,6 +48,7 @@ function toArrayBuffer(out: ArrayBuffer | Uint8Array): ArrayBuffer {
 
 const TEAM_TRENDS_SHEET_NAME = "Team trends";
 const TEAM_TRENDS_COLUMNS = ["Sprint", "Start", "End", "Committed", "Completed", "Rate %", "Carryover", "Blocked"];
+const BY_DEVELOPER_COLUMNS = ["Assignee", "Sprints active", "Done pts", "Total pts", "Avg done / sprint"];
 
 export interface TeamTrendsSheet {
   aoa: Cell[][];
@@ -59,6 +60,10 @@ export interface TeamTrendsSheet {
   lastDataRow: number; // inclusive — sprint rows only, excludes TOTAL/AVERAGE
   totalRow: number;
   averageRow: number;
+  devSectionTitleRow: number; // "BY DEVELOPER" section title, below AVERAGE + a blank spacer
+  devHeaderRow: number; // the BY_DEVELOPER_COLUMNS row
+  devFirstDataRow: number;
+  devLastDataRow: number; // inclusive; devFirstDataRow − 1 when byAssignee (minus Unassigned) is empty
 }
 
 /**
@@ -68,6 +73,13 @@ export interface TeamTrendsSheet {
  * (the report doesn't compute one). Points are real numbers (Excel can sum them), matching
  * sprintReviewXlsx.ts's member-table convention; the rate columns are pre-formatted percentage
  * text, matching reportMarkdown.ts's pct() convention.
+ *
+ * Below the AVERAGE row, a BY DEVELOPER section: report.byAssignee, the cross-sprint per-assignee
+ * aggregate (§4.29) that markdown/CSV exports already carry, one row per developer. avgDonePoints
+ * is the FULL-window average (donePoints / sprintCount), NOT leave-adjusted — the leave-adjusted
+ * view lives in the separate Developer KPIs workbook (developerKpisAoa below). "Unassigned" is
+ * filtered out (v1.61, ADR-073, item 176 — a ticket state, not a developer). All four numeric
+ * columns stay raw numbers, same convention as the sprint rows above.
  */
 export function teamTrendsAoa(report: MultiSprintReport, boardLabel: string): TeamTrendsSheet {
   const aoa: Cell[][] = [];
@@ -105,6 +117,20 @@ export function teamTrendsAoa(report: MultiSprintReport, boardLabel: string): Te
   const averageRow = aoa.length;
   aoa.push(["AVERAGE", "", "", "", report.averageCompleted, pctStr(report.averageCompletionRate), "", ""]);
 
+  aoa.push([]); // blank spacer
+  const devSectionTitleRow = aoa.length;
+  aoa.push(["BY DEVELOPER"]);
+  const devHeaderRow = aoa.length;
+  aoa.push([...BY_DEVELOPER_COLUMNS]);
+  const devFirstDataRow = aoa.length;
+  // v1.61 (ADR-073, item 176): "Unassigned" is a ticket state, not a developer — excluded here,
+  // same rule as the markdown/CSV by-assignee sections (reportMarkdown.ts).
+  const byDeveloper = report.byAssignee.filter((a) => a.name !== "Unassigned");
+  for (const a of byDeveloper) {
+    aoa.push([a.name, a.sprintsActive, a.donePoints, a.totalPoints, a.avgDonePoints]);
+  }
+  const devLastDataRow = byDeveloper.length > 0 ? aoa.length - 1 : devFirstDataRow - 1;
+
   return {
     aoa,
     cols: TEAM_TRENDS_COLUMNS.length,
@@ -115,6 +141,10 @@ export function teamTrendsAoa(report: MultiSprintReport, boardLabel: string): Te
     lastDataRow,
     totalRow,
     averageRow,
+    devSectionTitleRow,
+    devHeaderRow,
+    devFirstDataRow,
+    devLastDataRow,
   };
 }
 
@@ -127,6 +157,7 @@ export function buildTeamTrendsWorkbook(report: MultiSprintReport, boardLabel: s
     s: { r, c: 0 },
     e: { r, c: layout.cols - 1 },
   }));
+  merges.push({ s: { r: layout.devSectionTitleRow, c: 0 }, e: { r: layout.devSectionTitleRow, c: layout.cols - 1 } });
   ws["!merges"] = merges;
   ws["!cols"] = [{ wch: 22 }, { wch: 12 }, { wch: 12 }, { wch: 11 }, { wch: 11 }, { wch: 9 }, { wch: 11 }, { wch: 9 }];
 
@@ -162,6 +193,31 @@ export function buildTeamTrendsWorkbook(report: MultiSprintReport, boardLabel: s
         border: allBorders,
         alignment: { horizontal: c === 0 ? "left" : "right" },
         ...(isSummary ? { font: { bold: true }, fill: { fgColor: { rgb: INDIGO } } } : {}),
+      });
+    }
+  }
+
+  // BY DEVELOPER section — styled separately since it only spans BY_DEVELOPER_COLUMNS.length
+  // (5) columns, narrower than the sprint table's layout.cols (8). Section title mirrors the
+  // Developer-KPIs workbook's per-dev block header (buildDeveloperKpisWorkbook's b.headerRow);
+  // the header/data rows mirror this sheet's own header/data styling above.
+  styleCell(layout.devSectionTitleRow, 0, {
+    font: { bold: true, sz: 12, color: { rgb: NAVY } },
+    fill: { fgColor: { rgb: INDIGO } },
+  });
+  for (let c = 0; c < BY_DEVELOPER_COLUMNS.length; c++) {
+    styleCell(layout.devHeaderRow, c, {
+      font: { bold: true, color: { rgb: NAVY } },
+      fill: { fgColor: { rgb: INDIGO } },
+      border: allBorders,
+      alignment: { horizontal: c === 0 ? "left" : "right" },
+    });
+  }
+  for (let r = layout.devFirstDataRow; r <= layout.devLastDataRow; r++) {
+    for (let c = 0; c < BY_DEVELOPER_COLUMNS.length; c++) {
+      styleCell(r, c, {
+        border: allBorders,
+        alignment: { horizontal: c === 0 ? "left" : "right" },
       });
     }
   }

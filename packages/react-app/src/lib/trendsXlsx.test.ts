@@ -38,7 +38,11 @@ const REPORT: MultiSprintReport = {
   totals: { committedPoints: 70, completedPoints: 60 },
   averageCompleted: 30,
   averageCompletionRate: 0.8666665,
-  byAssignee: [{ name: "Alice", sprintsActive: 2, donePoints: 26, totalPoints: 33, avgDonePoints: 13 }],
+  byAssignee: [
+    { name: "Alice", sprintsActive: 2, donePoints: 26, totalPoints: 33, avgDonePoints: 13 },
+    { name: "Bob", sprintsActive: 1, donePoints: 7, totalPoints: 10, avgDonePoints: 3.5 },
+    { name: "Unassigned", sprintsActive: 2, donePoints: 4, totalPoints: 9, avgDonePoints: 2 },
+  ],
 };
 
 const EMPTY_REPORT: MultiSprintReport = {
@@ -107,8 +111,9 @@ describe("teamTrendsAoa (layout)", () => {
     expect(layout.aoa[layout.averageRow]).toEqual(["AVERAGE", "", "", "", 30, "87%", "", ""]);
   });
 
-  it("row count = 2 title rows + 1 blank + 1 header + N sprint rows + TOTAL + AVERAGE", () => {
-    expect(layout.aoa.length).toBe(2 + 1 + 1 + REPORT.sprints.length + 1 + 1);
+  it("row count = 2 title rows + 1 blank + 1 header + N sprint rows + TOTAL + AVERAGE + BY DEVELOPER (blank + title + header + M dev rows)", () => {
+    const byDeveloperCount = REPORT.byAssignee.filter((a) => a.name !== "Unassigned").length;
+    expect(layout.aoa.length).toBe(2 + 1 + 1 + REPORT.sprints.length + 1 + 1 + 1 + 1 + 1 + byDeveloperCount);
   });
 
   it("handles an empty window without throwing (no sprint rows, totals all zero)", () => {
@@ -116,6 +121,45 @@ describe("teamTrendsAoa (layout)", () => {
     expect(empty.lastDataRow).toBeLessThan(empty.firstDataRow);
     expect(empty.aoa[empty.totalRow]).toEqual(["TOTAL", "", "", 0, 0, "", 0, 0]);
     expect(empty.aoa[empty.averageRow]).toEqual(["AVERAGE", "", "", "", 0, "0%", "", ""]);
+  });
+
+  // v1.62 (ADR-074, item 180): BY DEVELOPER section below AVERAGE.
+  it("adds a BY DEVELOPER section title one blank row after AVERAGE, with the exact 5-column header", () => {
+    expect(layout.devSectionTitleRow).toBe(layout.averageRow + 2); // AVERAGE row + 1 blank spacer
+    expect(layout.aoa[layout.devSectionTitleRow]).toEqual(["BY DEVELOPER"]);
+    expect(layout.devHeaderRow).toBe(layout.devSectionTitleRow + 1);
+    expect(layout.aoa[layout.devHeaderRow]).toEqual([
+      "Assignee", "Sprints active", "Done pts", "Total pts", "Avg done / sprint",
+    ]);
+  });
+
+  it("writes one BY DEVELOPER row per assignee in byAssignee order, raw numeric values (decimal avg included)", () => {
+    expect(layout.devFirstDataRow).toBe(layout.devHeaderRow + 1);
+    expect(layout.devLastDataRow).toBe(layout.devFirstDataRow + 1); // Alice + Bob; Unassigned filtered
+    expect(layout.aoa[layout.devFirstDataRow]).toEqual(["Alice", 2, 26, 33, 13]);
+    expect(layout.aoa[layout.devFirstDataRow + 1]).toEqual(["Bob", 1, 7, 10, 3.5]);
+  });
+
+  it("filters 'Unassigned' out of the BY DEVELOPER section even though the fixture's byAssignee includes it", () => {
+    expect(REPORT.byAssignee.map((a) => a.name)).toContain("Unassigned"); // fixture sanity check
+    const flat = layout.aoa.flat().map(String);
+    expect(flat).not.toContain("Unassigned");
+    expect(flat.some((c) => c.includes("Unassigned"))).toBe(false);
+  });
+
+  it("handles an empty byAssignee list in the BY DEVELOPER section (no dev rows)", () => {
+    const empty = teamTrendsAoa(EMPTY_REPORT, "Dev");
+    expect(empty.devLastDataRow).toBe(empty.devFirstDataRow - 1);
+    expect(empty.aoa[empty.devSectionTitleRow]).toEqual(["BY DEVELOPER"]);
+    expect(empty.aoa[empty.devHeaderRow]).toEqual([
+      "Assignee", "Sprints active", "Done pts", "Total pts", "Avg done / sprint",
+    ]);
+  });
+
+  it("keeps devSectionTitleRow < devHeaderRow < devFirstDataRow, and the section is the tail of the AoA", () => {
+    expect(layout.devSectionTitleRow).toBeLessThan(layout.devHeaderRow);
+    expect(layout.devHeaderRow).toBeLessThan(layout.devFirstDataRow);
+    expect(layout.aoa.length).toBe(layout.devLastDataRow + 1);
   });
 });
 
