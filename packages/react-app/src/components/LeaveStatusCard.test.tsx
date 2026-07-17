@@ -4,7 +4,12 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import { LeaveStatusCard } from "./LeaveStatusCard";
 
-vi.mock("../hooks/useJira", () => ({ useAllLeaves: vi.fn() }));
+// v1.59 (ADR-071): idle/empty shape — this factory has no importOriginal spread, so every
+// export other test files transitively need (via a shared module graph) must be listed here.
+vi.mock("../hooks/useJira", () => ({
+  useAllLeaves: vi.fn(),
+  useMultiSprintReport: vi.fn().mockReturnValue({ data: null, loading: false, error: null, run: vi.fn() }),
+}));
 import * as useJiraModule from "../hooks/useJira";
 
 function setLeaves(data: Record<string, Record<string, Record<string, string>>>) {

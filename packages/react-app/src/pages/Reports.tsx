@@ -53,6 +53,7 @@ import { LeavesCalendarCard } from "../components/LeavesCalendarCard";
 import { PrBadge } from "../components/PrBadge";
 import { SprintReviewExport } from "../components/SprintReviewExport";
 import { RetroCard } from "../components/RetroCard";
+import { TrendsView } from "../components/trends/TrendsView"; // v1.59 (ADR-071)
 import type {
   SprintRef,
   SprintReport,
@@ -1339,6 +1340,45 @@ function ReportsBoardToggle({ selectedKey, onChange }: ReportsBoardToggleProps) 
   );
 }
 
+// ── Report mode toggle (v1.59, ADR-071) — segmented control in the Reports header ────
+
+interface ReportsModeToggleProps {
+  mode: "sprint" | "trends";
+  onChange: (mode: "sprint" | "trends") => void;
+}
+
+function ReportsModeToggle({ mode, onChange }: ReportsModeToggleProps) {
+  // a11y: role="group" with label; each segment has aria-pressed — same pattern as the board toggle
+  return (
+    <div
+      role="group"
+      aria-label="Report mode"
+      className="flex items-center gap-1 rounded-md border border-border bg-muted p-0.5"
+    >
+      {(["sprint", "trends"] as const).map((key) => {
+        const label = key === "sprint" ? "Sprint report" : "Trends & KPIs";
+        const pressed = mode === key;
+        return (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={pressed}
+            onClick={() => onChange(key)}
+            className={`
+              px-3 py-1 rounded-sm text-xs font-semibold transition-colors
+              ${pressed
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground hover:bg-background/60"}
+            `}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Main Reports page ─────────────────────────────────────────────────────────
 
 // v1.13 (ADR-024): controlled by App's shared board+sprint when props present.
@@ -1361,6 +1401,12 @@ export function Reports({
 
   // ── Sprint picker state ─────────────────────────────────────────────────────
   const sprintList = useSprintList("all", selectedBoardId);
+
+  // v1.59 (ADR-071): page mode — "sprint" (existing per-sprint report, default) vs "trends"
+  // (Trends & KPIs). trendsBoardId falls back to the resolved sprint-list boardId when the
+  // boards context hasn't loaded yet (legacy/older-bridge flows still need a concrete id).
+  const [mode, setMode] = useState<"sprint" | "trends">("sprint");
+  const trendsBoardId = selectedBoardId ?? sprintList.data?.boardId;
   // localSprintId holds the page DEFAULT (set by the effect) + uncontrolled picks.
   const [localSprintId, setLocalSprintId] = useState<number | null>(null);
   // Effective sprint (v1.13): an explicit shared pick (controlled) overrides the default.
@@ -1499,8 +1545,18 @@ export function Reports({
             onChange={handleBoardChange}
           />
         )}
+        {/* v1.59 (ADR-071): Sprint report vs Trends & KPIs mode toggle */}
+        <ReportsModeToggle mode={mode} onChange={setMode} />
       </div>
 
+      {/* v1.59 (ADR-071): Trends & KPIs mode — the entire sprint-report path below is
+          untouched; it only renders in "sprint" mode (the default). */}
+      {mode === "trends" && trendsBoardId !== undefined && (
+        <TrendsView boardId={trendsBoardId} boardKey={selectedBoardKey} />
+      )}
+
+      {mode === "sprint" && (
+      <>
       {/* ── (1) Sprint picker card (full-width) ─────────────────────────── */}
       <Card className="shadow-sm print:hidden">
         <CardContent className="pt-4 pb-4">
@@ -1575,6 +1631,8 @@ export function Reports({
             Sprint reports appear here once you have at least one sprint in Jira.
           </p>
         </div>
+      )}
+      </>
       )}
     </div>
   );

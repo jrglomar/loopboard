@@ -12,6 +12,8 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
     useActiveSprint: vi.fn(),
     useTeamMembers: vi.fn(),        // v1.36 (ADR-046): Dev-board roster for the assignee picker
     createLinkedDevTicket: vi.fn(),
+    // v1.59 (ADR-071): idle/empty shape (anti-drift parity — see Reports.test.tsx's comment).
+    useMultiSprintReport: vi.fn().mockReturnValue({ data: null, loading: false, error: null, run: vi.fn() }),
   };
 });
 vi.mock("../lib/boards", () => ({ useBoards: vi.fn() }));

@@ -24,6 +24,15 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
       run: vi.fn(),
       save: vi.fn().mockResolvedValue(undefined),
     }),
+    // v1.59 (ADR-071): Trends & KPIs — idle/empty shape (no sprints selected yet). Required —
+    // TrendsView statically imports useMultiSprintReport, so any test file mocking this module
+    // without it hits "No export defined on the mock" the moment Reports (or TrendsView) renders.
+    useMultiSprintReport: vi.fn().mockReturnValue({
+      data: null,
+      loading: false,
+      error: null,
+      run: vi.fn(),
+    }),
   };
 });
 
@@ -685,7 +694,14 @@ describe("Reports page — leaves are editable/clickable (v1.8.1)", () => {
     const { container } = render(<Reports />);
     await waitFor(() => screen.getByText("Reports"));
 
-    const toggle = container.querySelector<HTMLButtonElement>("button[aria-pressed]");
+    // v1.59 (ADR-071): scoped to the leaves calendar table (same lookup pattern as the
+    // "leaves calendar table" test above) — the page header now ALSO has an aria-pressed
+    // segmented control (Sprint report / Trends & KPIs), so an unscoped container-wide query
+    // would grab that instead of a leave-day toggle. The assertions below are unchanged.
+    const leavesTable =
+      container.querySelector('table[aria-label*="leaves" i]') ??
+      container.querySelector('table[aria-label*="Team" i]');
+    const toggle = leavesTable?.querySelector<HTMLButtonElement>("button[aria-pressed]");
     expect(toggle).toBeTruthy();
     fireEvent.click(toggle!);
     expect(mockSave).toHaveBeenCalled();
@@ -759,5 +775,38 @@ describe("Reports page — board toggle (v1.6, ADR-017)", () => {
       const hasPOCall = calls.some((args) => args[1] === 20);
       expect(hasPOCall).toBe(true);
     });
+  });
+});
+
+// ── v1.59 (ADR-071): Sprint report vs Trends & KPIs mode toggle ───────────────
+
+describe("Reports page — Trends & KPIs mode toggle (v1.59, ADR-071)", () => {
+  it("defaults to Sprint report mode — the existing per-sprint report renders", async () => {
+    await renderReports();
+    expect(screen.getByRole("button", { name: "Sprint report" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Trends & KPIs" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("combobox", { name: /select sprint/i })).toBeTruthy();
+  });
+
+  it("clicking Trends & KPIs renders the trends surface and hides the sprint-report picker", async () => {
+    await renderReports();
+    fireEvent.click(screen.getByRole("button", { name: "Trends & KPIs" }));
+    await waitFor(() => {
+      expect(screen.getByRole("group", { name: /sprint selection mode/i })).toBeTruthy();
+    });
+    expect(screen.getByRole("button", { name: "Trends & KPIs" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByRole("combobox", { name: /select sprint/i })).toBeNull();
+  });
+
+  it("clicking back to Sprint report restores the original view", async () => {
+    await renderReports();
+    fireEvent.click(screen.getByRole("button", { name: "Trends & KPIs" }));
+    await waitFor(() => screen.getByRole("group", { name: /sprint selection mode/i }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Sprint report" }));
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: /select sprint/i })).toBeTruthy();
+    });
+    expect(screen.queryByRole("group", { name: /sprint selection mode/i })).toBeNull();
   });
 });

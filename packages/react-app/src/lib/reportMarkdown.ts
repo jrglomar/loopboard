@@ -7,7 +7,7 @@
 // v1.5 (ADR-016): optional Leaves & capacity section with per-assignee leave days
 // and the capacity-adjusted possible committed velocity.
 
-import type { SprintReport, VelocityData } from "./types";
+import type { SprintReport, VelocityData, MultiSprintReport } from "./types";
 import { formatPoints } from "./format";
 import { sprintWorkingDays } from "./capacity";
 
@@ -347,4 +347,121 @@ export function buildSprintReviewCsv(
 ): string {
   const pairs = buildSprintReviewMeta(report, form, flyIns);
   return [csvRow(["Field", "Value"]), ...pairs.map((p) => csvRow(p))].join("\r\n");
+}
+
+// ── Multi-sprint (Trends & KPIs) builders (v1.59, ADR-071) ────────────────────
+//
+// Mirrors buildReportMarkdown/buildReportCsv's style for get_multi_sprint_report's windowed
+// report (CONTRACTS.md §4.29) — the Reports page's "Trends & KPIs" export bar. Pure +
+// deterministic; reuses this file's formatDate/pct/csvCell/csvRow helpers.
+
+/**
+ * Build a Markdown document for a multi-sprint window report.
+ *
+ * Sections:
+ *  1. Title + a one-line window summary (totals + averages)
+ *  2. Sprint History table (name, dates, committed, completed, rate, carryover, blocked)
+ *  3. Team KPIs (avg completed/sprint, avg completion rate)
+ *  4. By-assignee window aggregate table (sprints active, done/total pts, avg done pts)
+ */
+export function buildMultiSprintMarkdown(report: MultiSprintReport): string {
+  const lines: string[] = [];
+
+  lines.push(`# Trends & KPIs — ${report.sprintCount} sprint${report.sprintCount !== 1 ? "s" : ""}`);
+  lines.push("");
+  lines.push(
+    `_Window totals: **${formatPoints(report.totals.completedPoints)} / ${formatPoints(report.totals.committedPoints)} pts** completed. ` +
+      `Average completed: **${formatPoints(report.averageCompleted)} pts/sprint**. ` +
+      `Average completion rate: **${pct(report.averageCompletionRate)}**._`
+  );
+  lines.push("");
+
+  lines.push("## Sprint History");
+  lines.push("");
+  if (report.sprints.length === 0) {
+    lines.push("_No sprints in this window._");
+  } else {
+    lines.push("| Sprint | Dates | Committed | Completed | Rate | Carryover | Blocked |");
+    lines.push("|---|---|---|---|---|---|---|");
+    for (const e of report.sprints) {
+      lines.push(
+        `| ${e.sprint.name} | ${formatDate(e.sprint.startDate)} – ${formatDate(e.sprint.endDate)} | ` +
+          `${formatPoints(e.committedPoints)} | ${formatPoints(e.completedPoints)} | ${pct(e.completionRate)} | ` +
+          `${e.carryoverCount} | ${e.blockedCount} |`
+      );
+    }
+  }
+  lines.push("");
+
+  lines.push("## Team KPIs");
+  lines.push("");
+  lines.push(`- Avg completed / sprint: **${formatPoints(report.averageCompleted)} pts**`);
+  lines.push(`- Avg completion rate: **${pct(report.averageCompletionRate)}**`);
+  lines.push("");
+
+  lines.push("## By Assignee (window aggregate)");
+  lines.push("");
+  if (report.byAssignee.length === 0) {
+    lines.push("_No assignee data._");
+  } else {
+    lines.push("| Assignee | Sprints active | Done pts | Total pts | Avg done pts/sprint |");
+    lines.push("|---|---|---|---|---|");
+    for (const a of report.byAssignee) {
+      lines.push(
+        `| ${a.name} | ${a.sprintsActive} | ${formatPoints(a.donePoints)} | ${formatPoints(a.totalPoints)} | ${formatPoints(a.avgDonePoints)} |`
+      );
+    }
+  }
+  lines.push("");
+
+  return lines.join("\n");
+}
+
+/**
+ * Build a spreadsheet-friendly CSV of a multi-sprint window report.
+ *
+ * Two blocks in one CSV, separated by a blank line: per-sprint rows + a TOTAL/AVERAGE row,
+ * then the by-assignee window-aggregate block. Kept flat/simple so it opens cleanly in a
+ * spreadsheet — mirrors buildReportCsv's csvCell/csvRow reuse.
+ */
+export function buildMultiSprintCsv(report: MultiSprintReport): string {
+  const rows: string[] = [];
+
+  rows.push(
+    csvRow(["Sprint", "Start", "End", "Committed Points", "Completed Points", "Completion Rate", "Carryover Count", "Blocked Count"])
+  );
+  for (const e of report.sprints) {
+    rows.push(
+      csvRow([
+        e.sprint.name,
+        formatDate(e.sprint.startDate),
+        formatDate(e.sprint.endDate),
+        e.committedPoints,
+        e.completedPoints,
+        pct(e.completionRate),
+        e.carryoverCount,
+        e.blockedCount,
+      ])
+    );
+  }
+  rows.push(
+    csvRow([
+      "TOTAL / AVERAGE",
+      "",
+      "",
+      report.totals.committedPoints,
+      report.totals.completedPoints,
+      pct(report.averageCompletionRate),
+      report.sprints.reduce((n, e) => n + e.carryoverCount, 0),
+      report.sprints.reduce((n, e) => n + e.blockedCount, 0),
+    ])
+  );
+
+  rows.push("");
+  rows.push(csvRow(["Assignee", "Sprints Active", "Done Points", "Total Points", "Avg Done Points/Sprint"]));
+  for (const a of report.byAssignee) {
+    rows.push(csvRow([a.name, a.sprintsActive, a.donePoints, a.totalPoints, a.avgDonePoints]));
+  }
+
+  return rows.join("\r\n");
 }

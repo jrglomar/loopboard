@@ -111,6 +111,15 @@ const SECTIONS: Section[] = [
           <li><T>Daily huddle digest</T> — a copy-pastable summary, viewable by status or <T>by person</T> for walk-the-board standups.</li>
           <li><T>Sidebar cards</T> (each collapses via the chevron; your choices are remembered): <T>Needs attention</T> (stale, unassigned, PRs awaiting review), <T>Meeting goal</T>, <T>Meeting notes</T> (rich text), <T>Impediments</T>, <T>On leave</T>, and <T>Code review</T> (linked PRs + approval status).</li>
           <li><T>Fly-in tracker</T> across the Dev and PO boards, plus auto-refresh with a “last updated” stamp.</li>
+          <li>
+            <T>Ticket aging</T> — the sprint board's in-progress and code-review tickets each show an age
+            chip, and the sidebar's <T>Ticket aging</T> card lists them worst-first. Age is measured from
+            the Jira changelog (time since the ticket entered its current column); the “expected” days is
+            base days + days-per-point × story points (an unpointed ticket uses base days alone), both
+            admin-configurable. A ticket is <T>ok</T> under 100% of that expectation, <T>watch</T> from
+            100–150%, and <T>overdue</T> beyond 150%. Tickets with no changelog history show no age at
+            all — never a guess.
+          </li>
         </ul>
       </>
     ),
@@ -163,6 +172,13 @@ const SECTIONS: Section[] = [
         <li><T>Retrospective</T> — a persisted retro that also pre-fills the full-report export.</li>
         <li><T>Export</T> — Copy (Markdown), a printable <T>PDF</T>, or a styled <T>Excel</T> workbook with a per-member table (points + leaves by type + offset balance).</li>
         <li><T>AI executive summary</T> — an on-demand narrative of the sprint (when AI is on).</li>
+        <li>
+          <T>Trends & KPIs</T> — a second mode (toggle next to the board switcher) that reports across a
+          whole window of sprints instead of just one: committed/completed points, rate, carryover and
+          blocked counts per sprint, team-wide averages, and a per-developer view (pick a name to see
+          their trend). Choose the window as the <T>last N</T> closed sprints (10 by default), <T>pick
+          sprints</T> individually, or a <T>date range</T> — then export the same way (Copy, .md, .csv).
+        </li>
       </ul>
     ),
   },
@@ -232,14 +248,14 @@ const SECTIONS: Section[] = [
     body: (
       <>
         <p>
-          Everything in Loopboard runs on <T>47 MCP tools</T> spread across two servers —{" "}
+          Everything in Loopboard runs on <T>48 MCP tools</T> spread across two servers —{" "}
           <T>mcp-jira</T> and <T>mcp-github</T>. There are two ways to reach them.
         </p>
 
         <p className="mt-3">
           <T>1. VS Code Copilot Chat.</T> Open the repo in VS Code and Copilot auto-loads both
           servers from <code className="font-mono text-xs">.vscode/mcp.json</code> — nothing to
-          configure. All 47 tools are available there, including a few with no dashboard button at
+          configure. All 48 tools are available there, including a few with no dashboard button at
           all, like <code className="font-mono text-xs">sync_pr_links</code>,{" "}
           <code className="font-mono text-xs">get_pr</code> and{" "}
           <code className="font-mono text-xs">get_pr_reviews</code>. Try asking:
@@ -252,7 +268,7 @@ const SECTIONS: Section[] = [
 
         <p className="mt-3">
           <T>2. The floating AI assistant</T> (bottom-right, every page). Ask a question and it
-          answers using 18 read-only tools; ask for a change and it proposes one of <T>7 writes</T>{" "}
+          answers using 19 read-only tools; ask for a change and it proposes one of <T>7 writes</T>{" "}
           — always shown for confirmation before anything happens. It calls no GitHub tools today.
           Try asking:
         </p>

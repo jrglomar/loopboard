@@ -15,6 +15,10 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
     ...actual,
     useActiveSprint: vi.fn(),
     useDailyHuddle: vi.fn(),
+    // v1.59 (ADR-071): idle/empty shape — Reports' Trends view isn't rendered here, but every
+    // vi.mock("../hooks/useJira") factory must define it or a shared importer can hit "No
+    // export defined on the mock".
+    useMultiSprintReport: vi.fn().mockReturnValue({ data: null, loading: false, error: null, run: vi.fn() }),
   };
 });
 

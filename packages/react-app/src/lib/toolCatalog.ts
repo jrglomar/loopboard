@@ -180,7 +180,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     aiAssistant: "propose",
   },
 
-  // ── Reports & velocity (2) ──────────────────────────────────────────────────
+  // ── Reports & velocity (3) ──────────────────────────────────────────────────
   {
     name: "get_sprint_report",
     server: "mcp-jira",
@@ -199,6 +199,16 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     access: "read",
     blurb: "Average completed points over recent sprints, with a simple forecast.",
     appSurface: "Reports",
+    aiAssistant: "read",
+  },
+  {
+    name: "get_multi_sprint_report",
+    server: "mcp-jira",
+    group: "Reports & velocity",
+    surface: "jira",
+    access: "read",
+    blurb: "Aggregated committed/completed points, rate and by-assignee stats across a window of sprints.",
+    appSurface: "Reports · Trends & KPIs",
     aiAssistant: "read",
   },
 

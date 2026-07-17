@@ -7,7 +7,12 @@ import { MeetingNotesCard } from "./MeetingNotesCard";
 
 vi.mock("../hooks/useJira", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../hooks/useJira")>();
-  return { ...actual, useMeetingNotes: vi.fn() };
+  return {
+    ...actual,
+    useMeetingNotes: vi.fn(),
+    // v1.59 (ADR-071): idle/empty shape (anti-drift parity — see Reports.test.tsx's comment).
+    useMultiSprintReport: vi.fn().mockReturnValue({ data: null, loading: false, error: null, run: vi.fn() }),
+  };
 });
 
 // Stub the WYSIWYG editor: a textarea that forwards raw HTML through onChange.

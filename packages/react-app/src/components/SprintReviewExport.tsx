@@ -22,7 +22,9 @@ import type { LeavesMap } from "../lib/leavesClient";
 import type { OffsetLedger } from "../lib/offsetClient";
 import type { RetroFields } from "../lib/retroClient";
 
-function slugify(name: string): string {
+// v1.59 (ADR-071): exported so the Trends & KPIs export bar (components/trends/TrendsView.tsx)
+// can reuse the exact same filename/download conventions instead of duplicating them.
+export function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
@@ -50,8 +52,8 @@ function retroFromForm(form: SprintReviewForm): RetroFields {
   };
 }
 
-/** Trigger a browser download of a Blob under a filename. */
-function saveBlob(blob: Blob, filename: string) {
+/** Trigger a browser download of a Blob under a filename. v1.59: exported (see slugify above). */
+export function saveBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

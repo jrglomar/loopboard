@@ -40,6 +40,12 @@ Your run‑the‑standup home screen.
   - **Code review** — pull requests linked to the sprint's tickets (multi‑repo), with approval status.
 - **Fly‑in tracker** — a strip highlighting "fly‑in" tickets across the Dev and PO boards.
 - **Auto‑refresh** every few minutes, with a "last updated" stamp.
+- **Ticket aging** — the sprint board's in‑progress and code‑review tickets each carry an age chip, and
+  the sidebar's **Ticket aging** card lists them worst‑first. Age is the time since the ticket entered
+  its current column (from the Jira changelog); the expected time is `base days + days‑per‑point ×
+  story points` (unpointed tickets use base days alone) — both admin‑configurable. A ticket reads **ok**
+  under 100% of that expectation, **watch** from 100–150%, and **overdue** past 150%. Tickets with no
+  changelog history show no age at all, rather than a guess.
 
 ### 🗓️ Planning — grooming & sprint prep
 
@@ -79,6 +85,11 @@ Everything you need to prepare the next sprint.
 - **Export** — Copy (Markdown), a **printable PDF**, or a **styled Excel** workbook with a per‑member
   table (committed/completed points + leaves by type + offset balance).
 - **AI executive summary** — an on‑demand narrative of the sprint (when AI is enabled).
+- **Trends & KPIs** — a second mode (toggle next to the board switcher) that reports across a *window*
+  of sprints instead of one: committed/completed points, rate, carryover and blocked counts per sprint,
+  team‑wide averages, and a per‑developer view (pick a name to see their trend). Choose the window as
+  the **last N** closed sprints (10 by default), **pick sprints** individually, or a **date range** —
+  then export the same way (Copy, .md, .csv).
 
 ### ✨ Task Helper — your personal ticket → prompt assistant
 
@@ -101,18 +112,18 @@ change is shown for **confirmation before it's applied**. Nothing is changed wit
 
 ### 🧰 Using the MCP tools
 
-Every tab above is a thin UI over **47 MCP tools**, split across two servers: `mcp-jira` (42
+Every tab above is a thin UI over **48 MCP tools**, split across two servers: `mcp-jira` (43
 tools — tickets, sprints, reports, leaves, the offset wallet, the Huddle stores) and `mcp-github`
 (5 tools — pull requests). There are two ways to reach them:
 
-- **VS Code Copilot Chat** gets **all 47**. This repo's `.vscode/mcp.json` registers both servers,
+- **VS Code Copilot Chat** gets **all 48**. This repo's `.vscode/mcp.json` registers both servers,
   and VS Code loads them automatically the moment you open the workspace folder — see **Step 3**
   of [`docs/SETUP.md`](SETUP.md). Copilot talks to them over **stdio**; the dashboard instead
   talks to an HTTP bridge in front of the same tool registry (see `docs/ARCHITECTURE.md`, §7, for
   the split). Three tools have **no dashboard button at all** and are Copilot‑only: `get_pr`
   (full detail on one pull request), `get_pr_reviews` (batch approval status), and
   `sync_pr_links` (auto‑link every open PR in a repo to its Jira ticket).
-- **The floating AI assistant** (bottom‑right, every tab) reaches a curated subset: **18 read
+- **The floating AI assistant** (bottom‑right, every tab) reaches a curated subset: **19 read
   tools** it can call on its own to answer a question, and **7 write tools** it can only
   *propose* — every proposed change waits in a confirmation dialog until you approve it (see "AI
   assistant", above). It never calls a GitHub tool; anything it tells you about PRs comes from
@@ -140,7 +151,7 @@ A few prompts that work well in Copilot Chat:
 
 ### 📋 Tool reference
 
-All 47 tools, grouped the same way the in‑app Guide groups them. **Type** marks which system a
+All 48 tools, grouped the same way the in‑app Guide groups them. **Type** marks which system a
 tool acts on and whether it reads or writes; **AI** marks whether the floating assistant can call
 it itself (`Ask`), only propose it for your confirmation (`Propose`), or not reach it at all
 (`—` — dashboard-only or Copilot‑only).
@@ -173,12 +184,13 @@ it itself (`Ask`), only propose it for your confirmation (`Propose`), or not rea
 | `transition_issue` | Move a ticket to a new status using a transition id. | Jira·Write | Propose | Planning · Assignment list |
 | `move_issue_to_sprint` | Move a ticket into a different sprint. | Jira·Write | Propose | Planning · Assignment list |
 
-#### Reports & velocity (2)
+#### Reports & velocity (3)
 
 | Tool | What it does | Type | AI | Used in the app |
 |---|---|---|---|---|
 | `get_sprint_report` | Committed vs completed points, completion rate and a by‑assignee breakdown. | Jira·Read | Ask | Reports |
 | `get_velocity` | Average completed points over recent sprints, with a simple forecast. | Jira·Read | Ask | Reports |
+| `get_multi_sprint_report` | One report across a window of sprints (default last 10 closed): per‑sprint points and counts plus team and per‑developer aggregates. | Jira·Read | Ask | Reports · Trends & KPIs |
 
 #### Assignment & roster (5)
 
@@ -237,8 +249,8 @@ it itself (`Ask`), only propose it for your confirmation (`Propose`), or not rea
 | `link_pr_to_ticket` | Link a PR to Jira ticket(s) — a remote link plus a PR comment (idempotent). | GitHub·Write | — | Huddle chat · `link pr <n> [KEY]` |
 | `sync_pr_links` | Auto‑link every open PR in a repo to its detected Jira ticket(s). | GitHub·Write | — | VS Code Copilot only |
 
-**42** tools live on `mcp-jira`, **5** on `mcp-github` — **47** in total. The floating assistant
-can read 18 of them and propose 7 more with your confirmation; the rest are driven directly by
+**43** tools live on `mcp-jira`, **5** on `mcp-github` — **48** in total. The floating assistant
+can read 19 of them and propose 7 more with your confirmation; the rest are driven directly by
 the dashboard's UI (or, for three GitHub tools, reachable only via Copilot).
 
 ---

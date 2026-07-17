@@ -53,7 +53,10 @@ When a phase is delivered (all gates green) — or whenever the user asks — sh
    `node scripts/smoke.mjs` all green — judge by EXIT CODES / `grep "error TS"`, never by output tails
    (npm `--workspaces` keeps going past a failing package).
 2. **Branch from `main`**: `phase/v<version>-<short-slug>` (e.g. `phase/v1.59-p4-trends-kpis`).
-   Phase work is never committed directly to `main`.
+   Phase work is never committed directly to `main`. If the previous phase's PR is not yet merged
+   and the new phase builds on it, branch from that phase's branch instead (stacked PR — set the
+   PR base to the earlier branch and say so in the PR body; GitHub retargets to `main` when the
+   base branch is deleted on merge).
 3. **Commit only the phase's files.** Subject: `v<version>[-P<n>]: <what shipped> (ADR-<nnn>)`;
    body: surface changes, test-count delta, smoke count; end with the Co-Authored-By footer.
 4. **Secrets check, then push.** `git status` must show no `.env` / `.loopboard-*` files staged
@@ -127,6 +130,6 @@ Do not add tests that require real credentials or network calls.
 | Chat command router (pure function) | `packages/react-app/src/lib/chatRouter.ts` |
 | MCP tool catalog (Guide reference data) | `packages/react-app/src/lib/toolCatalog.ts` |
 | Ticket draft builder (deterministic, no network) | `packages/react-app/src/lib/ticketTemplates.ts` |
-| Architectural Decision Records | `docs/adr/ADR-001.md` through `ADR-070.md` |
+| Architectural Decision Records | `docs/adr/ADR-001.md` through `ADR-071.md` |
 | Integration contract | `docs/CONTRACTS.md` |
 | Setup guide | `docs/SETUP.md` |

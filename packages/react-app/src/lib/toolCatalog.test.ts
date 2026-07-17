@@ -29,6 +29,7 @@ const ASK_SERVICE_READ_TOOLS: readonly string[] = [
   "get_offset_ledger",
   "get_meeting_notes",
   "get_retro",
+  "get_multi_sprint_report",
 ];
 
 // hand-synced copy — must match packages/mcp-jira/src/lib/ai/askService.ts (WRITE_TOOLS)
@@ -58,7 +59,7 @@ const EXPECTED_GROUP_COUNTS: Record<ToolGroup, number> = {
   "Ticket CRUD": 5,
   "Sprint reads": 3,
   "Sprint management": 5,
-  "Reports & velocity": 2,
+  "Reports & velocity": 3,
   "Assignment & roster": 5,
   "Leaves & offset wallet": 8,
   "Huddle stores": 12,
@@ -72,8 +73,8 @@ function sortedNames(entries: { name: string }[]): string[] {
 }
 
 describe("TOOL_CATALOG", () => {
-  it("has exactly 47 rows", () => {
-    expect(TOOL_CATALOG.length).toBe(47);
+  it("has exactly 48 rows", () => {
+    expect(TOOL_CATALOG.length).toBe(48);
   });
 
   it("has the expected count per group", () => {
@@ -84,13 +85,13 @@ describe("TOOL_CATALOG", () => {
 
   it("has unique tool names", () => {
     const names = new Set(TOOL_CATALOG.map((t) => t.name));
-    expect(names.size).toBe(47);
+    expect(names.size).toBe(48);
   });
 
-  it("splits 42 mcp-jira / 5 mcp-github by server", () => {
+  it("splits 43 mcp-jira / 5 mcp-github by server", () => {
     const jira = TOOL_CATALOG.filter((t) => t.server === "mcp-jira");
     const github = TOOL_CATALOG.filter((t) => t.server === "mcp-github");
-    expect(jira.length).toBe(42);
+    expect(jira.length).toBe(43);
     expect(github.length).toBe(5);
   });
 
@@ -98,7 +99,7 @@ describe("TOOL_CATALOG", () => {
     const count = (surface: string, access: string) =>
       TOOL_CATALOG.filter((t) => t.surface === surface && t.access === access).length;
 
-    expect(count("jira", "read")).toBe(12);
+    expect(count("jira", "read")).toBe(13);
     expect(count("jira", "write")).toBe(8);
     expect(count("local", "read")).toBe(10);
     expect(count("local", "write")).toBe(12);
