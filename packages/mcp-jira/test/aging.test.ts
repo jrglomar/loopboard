@@ -2,6 +2,9 @@
 //
 // Covers the pure resolver (resolveInProgressSince) and the get_active_sprint `withAging`
 // opt-in, including the guarantee that withAging:false performs ZERO changelog calls.
+//
+// v1.61 (ADR-073): scope amended to enrich ONLY the inprogress bucket — code review counts as
+// done per the ADR-014 DoD, so code-review issues are never "aging" and never fetch changelogs.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -109,7 +112,7 @@ describe("resolveInProgressSince (pure)", () => {
   });
 });
 
-describe("get_active_sprint withAging (v1.58, ADR-070)", () => {
+describe("get_active_sprint withAging — enriches ONLY the in-progress bucket (v1.58 ADR-070; scope amended v1.61 ADR-073)", () => {
   beforeEach(() => {
     api.getActiveAndFutureSprints.mockResolvedValue([
       { id: 5, name: "Sprint 5", state: "active", startDate: "2026-07-01", endDate: "2026-07-14", goal: null },
@@ -128,20 +131,22 @@ describe("get_active_sprint withAging (v1.58, ADR-070)", () => {
     expect(out.issuesByStatus.inprogress[0]!.inProgressSince).toBeUndefined();
   });
 
-  it("enriches ONLY the in-progress + code-review buckets when withAging: true", async () => {
+  it("enriches ONLY the in-progress bucket when withAging: true (code review counts as done, ADR-014 DoD)", async () => {
     api.getIssueChangelogRaw.mockImplementation((key: string) =>
       Promise.resolve({ values: [statusEntry("2026-07-08T10:00:00.000Z", key === "DEV-2" ? "Code Review" : "In Progress")], total: 1, isLast: true })
     );
 
     const out = await runGetSprint({ boardId: 10002, withAging: true });
 
-    // 2 in-flight issues → 2 calls; todo/done are never aged.
-    expect(api.getIssueChangelogRaw).toHaveBeenCalledTimes(2);
+    // only DEV-1 is genuinely in-progress → 1 call; DEV-2 (Code Review) is never enriched.
+    expect(api.getIssueChangelogRaw).toHaveBeenCalledTimes(1);
     const keys = api.getIssueChangelogRaw.mock.calls.map((c) => c[0]).sort();
-    expect(keys).toEqual(["DEV-1", "DEV-2"]);
+    expect(keys).toEqual(["DEV-1"]);
 
     expect(out.issuesByStatus.inprogress[0]!.inProgressSince).toBe("2026-07-08T10:00:00.000Z");
-    expect(out.issuesByStatus.codereview[0]!.inProgressSince).toBe("2026-07-08T10:00:00.000Z");
+    // codereview is never touched — inProgressSince stays undefined, distinct from the
+    // enriched-but-unresolvable `null` an in-progress issue would get.
+    expect(out.issuesByStatus.codereview[0]!.inProgressSince).toBeUndefined();
     expect(out.issuesByStatus.todo[0]!.inProgressSince).toBeUndefined();
   });
 
@@ -154,8 +159,8 @@ describe("get_active_sprint withAging (v1.58, ADR-070)", () => {
 
     const out = await runGetSprint({ boardId: 10002, withAging: true });
 
-    // page 1 + tail page at total-100 = 50, for each of the 2 in-flight issues
-    expect(api.getIssueChangelogRaw).toHaveBeenCalledTimes(4);
+    // page 1 + tail page at total-100 = 50, for the single in-flight issue (DEV-1 only)
+    expect(api.getIssueChangelogRaw).toHaveBeenCalledTimes(2);
     expect(api.getIssueChangelogRaw).toHaveBeenCalledWith("DEV-1", 50, 100);
     // the tail page's newer transition wins
     expect(out.issuesByStatus.inprogress[0]!.inProgressSince).toBe("2026-07-07T10:00:00.000Z");
@@ -165,7 +170,8 @@ describe("get_active_sprint withAging (v1.58, ADR-070)", () => {
     api.getIssueChangelogRaw.mockRejectedValue(new Error("Jira 500"));
     const out = await runGetSprint({ boardId: 10002, withAging: true });
     expect(out.issuesByStatus.inprogress[0]!.inProgressSince).toBeNull();
-    expect(out.issuesByStatus.codereview[0]!.inProgressSince).toBeNull();
+    // codereview was never fetched at all — stays undefined, not the fetched-and-failed null.
+    expect(out.issuesByStatus.codereview[0]!.inProgressSince).toBeUndefined();
   });
 
   it("resolves null when the changelog has no transition into the current status", async () => {

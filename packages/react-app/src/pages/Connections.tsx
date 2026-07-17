@@ -1,5 +1,5 @@
 // Connections page (v1.47, ADR-057) — manage the signed-in user's own Jira / GitHub / AI tokens.
-// Split out of the Task Helper so account setup lives in one obvious place.
+// Split out into its own tab so account setup lives in one obvious place.
 //
 // Tokens are typed once and sent to the server; they are never displayed back (only a masked
 // "…last4" hint). A connection inherited from a credential source (ADR-056) shows its origin and

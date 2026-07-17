@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 import { SprintBoard } from "./SprintBoard";
 import type { GetActiveSprintOutput } from "../lib/types";
 
@@ -960,5 +960,44 @@ describe("SprintBoard — work-item age chip (v1.58)", () => {
     };
     render(<SprintBoard data={data} loading={false} error={null} onRefresh={() => undefined} />);
     expect(screen.queryByTitle(/expected ~/)).toBeNull();
+  });
+
+  // v1.61 (ADR-073, item 173): the tool no longer enriches code review with inProgressSince, but
+  // the UI scopes the chip structurally too — the column render itself knows its bucket.
+  it("renders the chip inside the In Progress column specifically", () => {
+    render(
+      <SprintBoard
+        data={withAge(3)}
+        loading={false}
+        error={null}
+        onRefresh={() => undefined}
+        agingPolicy={{ baseDays: 1, daysPerPoint: 1 }}
+      />
+    );
+    const inProgressColumn = screen.getByRole("region", { name: "In Progress column" });
+    expect(within(inProgressColumn).getByTitle("3d in In Progress (expected ~6d for 5 pts)")).toBeTruthy();
+  });
+
+  it("NEVER chips a Code Review issue, even when the fixture carries inProgressSince (v1.61, ADR-073, item 173)", () => {
+    const since = new Date(Date.now() - 12 * 86_400_000).toISOString();
+    const data = {
+      ...SAMPLE_SPRINT,
+      issuesByStatus: {
+        ...SAMPLE_SPRINT.issuesByStatus,
+        codereview: [{ ...SAMPLE_SPRINT.issuesByStatus.codereview[0]!, inProgressSince: since }],
+      },
+    };
+    render(
+      <SprintBoard
+        data={data}
+        loading={false}
+        error={null}
+        onRefresh={() => undefined}
+        agingPolicy={{ baseDays: 1, daysPerPoint: 1 }}
+      />
+    );
+    const codeReviewColumn = screen.getByRole("region", { name: "Code Review column" });
+    expect(within(codeReviewColumn).queryByTitle(/expected ~/)).toBeNull();
+    expect(screen.queryByTitle(/in Code Review \(expected/)).toBeNull();
   });
 });

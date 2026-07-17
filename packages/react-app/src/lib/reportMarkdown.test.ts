@@ -538,6 +538,29 @@ describe("buildMultiSprintMarkdown", () => {
     expect(md).toContain("_No sprints in this window._");
     expect(md).toContain("_No assignee data._");
   });
+
+  // v1.61 (ADR-073, item 176): "Unassigned" is a ticket state, not a developer.
+  it("excludes Unassigned from the by-assignee aggregate table", () => {
+    const withUnassigned: MultiSprintReport = {
+      ...BASE_MULTI_SPRINT,
+      byAssignee: [
+        ...BASE_MULTI_SPRINT.byAssignee,
+        { name: "Unassigned", sprintsActive: 2, donePoints: 4, totalPoints: 9, avgDonePoints: 2 },
+      ],
+    };
+    const md = buildMultiSprintMarkdown(withUnassigned);
+    expect(md).not.toContain("Unassigned");
+  });
+
+  it("falls back to the empty-assignee message when only Unassigned remains", () => {
+    const onlyUnassigned: MultiSprintReport = {
+      ...BASE_MULTI_SPRINT,
+      byAssignee: [{ name: "Unassigned", sprintsActive: 2, donePoints: 4, totalPoints: 9, avgDonePoints: 2 }],
+    };
+    const md = buildMultiSprintMarkdown(onlyUnassigned);
+    expect(md).toContain("_No assignee data._");
+    expect(md).not.toContain("Unassigned");
+  });
 });
 
 describe("buildMultiSprintCsv", () => {
@@ -569,6 +592,19 @@ describe("buildMultiSprintCsv", () => {
     };
     const csv = buildMultiSprintCsv(tricky);
     expect(csv).toContain('"Doe, John ""JD""",1,3,3,1.5');
+  });
+
+  // v1.61 (ADR-073, item 176): "Unassigned" is a ticket state, not a developer.
+  it("excludes Unassigned from the by-assignee CSV block", () => {
+    const withUnassigned: MultiSprintReport = {
+      ...BASE_MULTI_SPRINT,
+      byAssignee: [
+        ...BASE_MULTI_SPRINT.byAssignee,
+        { name: "Unassigned", sprintsActive: 2, donePoints: 4, totalPoints: 9, avgDonePoints: 2 },
+      ],
+    };
+    const csv = buildMultiSprintCsv(withUnassigned);
+    expect(csv).not.toContain("Unassigned");
   });
 
   it("emits header + TOTAL row (all zero) + empty assignee header when the window is empty", () => {

@@ -1,4 +1,5 @@
-// Task Helper auth client (v1.44, ADR-054) — talks to the mcp-jira bridge's /api/auth/*.
+// Auth client (v1.44, ADR-054) — the app-wide login session (AppGate/AuthContext); talks to the
+// mcp-jira bridge's /api/auth/*.
 // All calls use `credentials: "include"` so the httpOnly session cookie flows both ways.
 
 const JIRA_BASE =

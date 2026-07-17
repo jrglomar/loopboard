@@ -108,6 +108,65 @@ describe("SprintRangePicker — pick mode", () => {
     render(<SprintRangePicker {...baseProps()} mode="pick" active={[]} />);
     expect(screen.getByText(/No active sprints/i)).toBeTruthy();
   });
+
+  // v1.61 (ADR-073, item 175): get_multi_sprint_report rejects sprintIds arrays over 26.
+  it("shows a (max 26) hint next to the group label", () => {
+    render(<SprintRangePicker {...baseProps()} mode="pick" />);
+    expect(screen.getByText("Select sprints")).toBeTruthy();
+    expect(screen.getByText("(max 26)")).toBeTruthy();
+  });
+
+  it("does not disable any checkbox while under the 26 cap", () => {
+    render(<SprintRangePicker {...baseProps()} mode="pick" pickedIds={[6]} />);
+    const checkboxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
+    expect(checkboxes.every((c) => !c.disabled)).toBe(true);
+  });
+
+  // ids start at 100 — ACTIVE (id 7) / CLOSED (id 6) fixtures must stay OUTSIDE the picked set.
+  it("disables UNCHECKED checkboxes once 26 are picked, but leaves checked ones enabled", () => {
+    const manyClosed = Array.from({ length: 26 }, (_, i) => sprint({ id: 100 + i, name: `Sprint ${100 + i}` }));
+    const pickedIds = manyClosed.map((s) => s.id); // all 26 closed sprints picked
+    render(
+      <SprintRangePicker
+        {...baseProps()}
+        mode="pick"
+        active={ACTIVE} // Sprint 7 — NOT in pickedIds, must be disabled
+        closed={manyClosed}
+        pickedIds={pickedIds}
+      />
+    );
+    const checkboxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
+    expect(checkboxes).toHaveLength(27);
+    const unchecked = checkboxes.filter((c) => !c.checked);
+    const checked = checkboxes.filter((c) => c.checked);
+    expect(unchecked).toHaveLength(1); // Sprint 7
+    expect(unchecked.every((c) => c.disabled)).toBe(true);
+    expect(checked).toHaveLength(26);
+    expect(checked.every((c) => !c.disabled)).toBe(true);
+  });
+
+  // Note: a real browser never dispatches click/change on a `disabled` form control, so setting
+  // the `disabled` HTML attribute (verified above) is what actually blocks the user — jsdom's
+  // fireEvent.click bypasses that browser-level gate via direct dispatchEvent, so it is not a
+  // reliable way to assert the negative here.
+  it("unchecking an already-picked sprint still works at the cap (never blocks removal)", () => {
+    const onTogglePicked = vi.fn();
+    const manyClosed = Array.from({ length: 26 }, (_, i) => sprint({ id: 100 + i, name: `Sprint ${100 + i}` }));
+    render(
+      <SprintRangePicker
+        {...baseProps()}
+        mode="pick"
+        active={[]}
+        closed={manyClosed}
+        pickedIds={manyClosed.map((s) => s.id)}
+        onTogglePicked={onTogglePicked}
+      />
+    );
+    const [firstChecked] = screen.getAllByRole("checkbox") as HTMLInputElement[];
+    expect(firstChecked!.disabled).toBe(false);
+    fireEvent.click(firstChecked!);
+    expect(onTogglePicked).toHaveBeenCalledWith(100);
+  });
 });
 
 describe("SprintRangePicker — range mode", () => {

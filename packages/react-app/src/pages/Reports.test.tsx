@@ -241,9 +241,18 @@ afterEach(() => {
 
 // ── Render helper ─────────────────────────────────────────────────────────────
 
+// v1.61 (ADR-073, item 178): Trends & KPIs is now the DEFAULT landing mode (see the
+// "Trends & KPIs mode toggle" describe block below for the test that verifies the true default).
+// Every other describe block in this file exercises the Sprint report surface, so this shared
+// helper explicitly navigates there right after mount — the rest of the file's assertions keep
+// their original intent unchanged, as if "sprint" were still the default. Returns the RTL render
+// result so call sites that need `container` (querySelector-based assertions) can still get it.
 async function renderReports() {
-  render(<Reports />);
+  const result = render(<Reports />);
   await waitFor(() => screen.getByText("Reports"));
+  fireEvent.click(screen.getByRole("button", { name: "Sprint report" }));
+  await waitFor(() => screen.getByRole("combobox", { name: /select sprint/i }));
+  return result;
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -261,15 +270,13 @@ describe("Reports page — sprint picker", () => {
   });
 
   it("renders closed sprints in an optgroup", async () => {
-    const { container } = render(<Reports />);
-    await waitFor(() => screen.getByText("Reports"));
+    const { container } = await renderReports();
     const closedGroup = container.querySelector('optgroup[label="Closed"]');
     expect(closedGroup).toBeTruthy();
   });
 
   it("renders active sprints in an optgroup", async () => {
-    const { container } = render(<Reports />);
-    await waitFor(() => screen.getByText("Reports"));
+    const { container } = await renderReports();
     const activeGroup = container.querySelector('optgroup[label="Active"]');
     expect(activeGroup).toBeTruthy();
   });
@@ -288,8 +295,7 @@ describe("Reports page — sprint picker", () => {
       error: null,
       run: vi.fn(),
     });
-    const { container } = render(<Reports />);
-    await waitFor(() => screen.getByText("Reports"));
+    const { container } = await renderReports();
     expect(container.querySelector('optgroup[label="Closed"]')).toBeNull();
     expect(container.querySelector('optgroup[label="Active"]')).toBeTruthy();
   });
@@ -313,8 +319,7 @@ describe("Reports page — per-sprint report", () => {
   });
 
   it("renders the completion progressbar with aria-valuenow", async () => {
-    const { container } = render(<Reports />);
-    await waitFor(() => screen.getByText("Reports"));
+    const { container } = await renderReports();
     const bar = container.querySelector('[role="progressbar"]');
     expect(bar).toBeTruthy();
     expect(bar?.getAttribute("aria-valuenow")).toBe("80");
@@ -596,8 +601,7 @@ describe("Reports page — loading / error states", () => {
       error: null,
       run: vi.fn(),
     });
-    const { container } = render(<Reports />);
-    await waitFor(() => screen.getByText("Reports"));
+    const { container } = await renderReports();
     const busyEl = container.querySelector('[aria-busy="true"]');
     expect(busyEl).toBeTruthy();
   });
@@ -612,8 +616,7 @@ describe("Reports page — loading / error states", () => {
       },
       run: vi.fn(),
     });
-    render(<Reports />);
-    await waitFor(() => screen.getByText("Reports"));
+    await renderReports();
     // "dev:jira:http" appears in the error message and the code block
     expect(screen.getAllByText(/dev:jira:http/).length).toBeGreaterThanOrEqual(1);
   });
@@ -676,8 +679,7 @@ describe("Reports page — leaves calendar card (v1.5)", () => {
   });
 
   it("renders the leaves calendar table with scope headers when sprint has dates", async () => {
-    const { container } = render(<Reports />);
-    await waitFor(() => screen.getByText("Reports"));
+    const { container } = await renderReports();
     // The leaves grid table should be present (sprint has dates in DEFAULT_SPRINT_REPORT)
     // We look for a table with the leaves-calendar label
     const leavesTable = container.querySelector(
@@ -699,11 +701,16 @@ describe("Reports page — leaves are editable/clickable (v1.8.1)", () => {
       save: vi.fn().mockResolvedValue(undefined),
     });
 
-    const { container } = render(<Reports />);
-    await waitFor(() => screen.getByText("Reports"));
+    const { container } = await renderReports();
 
     // Editable calendar → day cells are toggle buttons (aria-pressed). Read-only had none.
-    const toggles = container.querySelectorAll("button[aria-pressed]");
+    // v1.61 (ADR-073, item 178): scope to the leaves calendar table specifically — the page
+    // header's Sprint report / Trends & KPIs mode toggle ALSO carries aria-pressed buttons, so
+    // an unscoped container-wide query would (falsely) pass on those instead of a day toggle.
+    const leavesTable =
+      container.querySelector('table[aria-label*="leaves" i]') ??
+      container.querySelector('table[aria-label*="Team" i]');
+    const toggles = leavesTable?.querySelectorAll("button[aria-pressed]") ?? [];
     expect(toggles.length).toBeGreaterThan(0);
   });
 
@@ -717,8 +724,7 @@ describe("Reports page — leaves are editable/clickable (v1.8.1)", () => {
       save: mockSave,
     });
 
-    const { container } = render(<Reports />);
-    await waitFor(() => screen.getByText("Reports"));
+    const { container } = await renderReports();
 
     // v1.59 (ADR-071): scoped to the leaves calendar table (same lookup pattern as the
     // "leaves calendar table" test above) — the page header now ALSO has an aria-pressed
@@ -807,11 +813,16 @@ describe("Reports page — board toggle (v1.6, ADR-017)", () => {
 // ── v1.59 (ADR-071): Sprint report vs Trends & KPIs mode toggle ───────────────
 
 describe("Reports page — Trends & KPIs mode toggle (v1.59, ADR-071)", () => {
-  it("defaults to Sprint report mode — the existing per-sprint report renders", async () => {
-    await renderReports();
-    expect(screen.getByRole("button", { name: "Sprint report" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "Trends & KPIs" }).getAttribute("aria-pressed")).toBe("false");
-    expect(screen.getByRole("combobox", { name: /select sprint/i })).toBeTruthy();
+  // v1.61 (ADR-073, item 178): Trends & KPIs is now the default landing mode. This test bypasses
+  // the renderReports() helper (which explicitly navigates to Sprint report for the rest of the
+  // file) so it can observe the TRUE initial default.
+  it("defaults to Trends & KPIs mode — the trends surface renders first", async () => {
+    render(<Reports />);
+    await waitFor(() => screen.getByText("Reports"));
+    expect(screen.getByRole("button", { name: "Trends & KPIs" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Sprint report" }).getAttribute("aria-pressed")).toBe("false");
+    await waitFor(() => screen.getByRole("group", { name: /sprint selection mode/i }));
+    expect(screen.queryByRole("combobox", { name: /select sprint/i })).toBeNull();
   });
 
   it("clicking Trends & KPIs renders the trends surface and hides the sprint-report picker", async () => {

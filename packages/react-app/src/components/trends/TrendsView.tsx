@@ -15,15 +15,21 @@
 // prop (Reports.tsx's own usePolicy() — components never call context hooks directly).
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Copy, Download, TrendingUp } from "lucide-react";
+import { AlertCircle, Copy, Download, FileSpreadsheet, TrendingUp } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useSprintList, useMultiSprintReport, useAllLeaves } from "../../hooks/useJira";
-import { lastNClosedSprintIds, sprintIdsInDateRange, defaultRangeFromClosed } from "../../lib/sprintRange";
+import {
+  lastNClosedSprintIds,
+  sprintIdsInDateRange,
+  defaultRangeFromClosed,
+  capSprintWindow,
+} from "../../lib/sprintRange";
 import { buildMultiSprintMarkdown, buildMultiSprintCsv } from "../../lib/reportMarkdown";
 import { computeDevKpis } from "../../lib/kpiAdjust";
+import { buildTeamTrendsWorkbook } from "../../lib/trendsXlsx"; // v1.61 (ADR-073, item 177)
 import { saveBlob, slugify } from "../SprintReviewExport";
 import { SprintRangePicker, type TrendsSelectionMode } from "./SprintRangePicker";
 import { MultiSprintTable } from "./MultiSprintTable";
@@ -147,11 +153,19 @@ export function TrendsView({ boardId, boardKey, requiredPoints }: TrendsViewProp
     setPickedIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
   }
 
-  const sprintIds = useMemo(() => {
+  // v1.61 (ADR-073, item 175): get_multi_sprint_report rejects sprintIds arrays over 26 (§4.29).
+  // "recent" mode already maxes at 26 via the Last-N input's own max; "range" and "pick" have no
+  // such ceiling, so cap them here — keeping the NEWEST 26 — before the ids ever reach the fetch.
+  const resolvedSprintIds = useMemo(() => {
     if (mode === "recent") return lastNClosedSprintIds(closed, lastN);
     if (mode === "pick") return chronologicalIds(allSprints, pickedIds);
     return sprintIdsInDateRange(allSprints, rangeStart, rangeEnd);
   }, [mode, closed, lastN, allSprints, pickedIds, rangeStart, rangeEnd]);
+
+  const { ids: sprintIds, capped } = useMemo(() => {
+    if (mode === "recent") return { ids: resolvedSprintIds, capped: false };
+    return capSprintWindow(resolvedSprintIds);
+  }, [mode, resolvedSprintIds]);
 
   const hasSelection = sprintIds.length > 0;
   const reportState = useMultiSprintReport(hasSelection ? sprintIds : null);
@@ -200,6 +214,19 @@ export function TrendsView({ boardId, boardKey, requiredPoints }: TrendsViewProp
     saveBlob(new Blob([buildMultiSprintCsv(report)], { type: "text/csv;charset=utf-8" }), `${base}.csv`);
   }
 
+  // v1.61 (ADR-073, item 177): friendly board label for the workbook title bands — mirrors
+  // Reports.tsx's own boardLabel convention (selectedBoardKey === "po" ? "PO" : "Dev").
+  const boardLabel = boardKey === "po" ? "PO" : "Dev";
+
+  function handleDownloadXlsx() {
+    if (!report) return;
+    const bytes = buildTeamTrendsWorkbook(report, boardLabel);
+    saveBlob(
+      new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+      `trends-team-${slugify(boardKey ?? String(boardId))}.xlsx`
+    );
+  }
+
   const emptySelectionHint =
     mode === "pick"
       ? "Check one or more sprints above to see trends."
@@ -223,6 +250,13 @@ export function TrendsView({ boardId, boardKey, requiredPoints }: TrendsViewProp
         onRangeStartChange={setRangeStart}
         onRangeEndChange={setRangeEnd}
       />
+
+      {/* v1.61 (ADR-073, item 175): visible cap note — muted quiet-hint idiom (house pattern). */}
+      {capped && (
+        <p className="text-xs text-muted-foreground -mt-2" role="note" aria-live="polite">
+          Showing the latest 26 sprints in this range (report limit).
+        </p>
+      )}
 
       {sprintList.loading && <TrendsSkeleton label="Loading sprints" />}
 
@@ -260,7 +294,7 @@ export function TrendsView({ boardId, boardKey, requiredPoints }: TrendsViewProp
         report &&
         report.sprintCount > 0 && (
           <>
-            {/* Export bar — Copy markdown / Download .md / Download .csv */}
+            {/* Export bar — Copy markdown / Download .md / Download .csv / Download .xlsx (styled) */}
             <div role="toolbar" aria-label="Export trends report" className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide mr-1">
                 Export
@@ -295,6 +329,19 @@ export function TrendsView({ boardId, boardKey, requiredPoints }: TrendsViewProp
                 <Download className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
                 .csv
               </Button>
+              {/* v1.61 (ADR-073, item 177): styled team-trends workbook (xlsx-js-style, the
+                  ADR-048 technique) — a SEPARATE download from the Developer KPIs workbook
+                  (that button lives in DeveloperKpiSection's own header). */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDownloadXlsx}
+                type="button"
+                aria-label="Download trends report as styled Excel workbook"
+              >
+                <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+                .xlsx (styled)
+              </Button>
             </div>
 
             <MultiSprintTable report={report} />
@@ -308,6 +355,8 @@ export function TrendsView({ boardId, boardKey, requiredPoints }: TrendsViewProp
                 report={report}
                 devKpis={devKpis}
                 leavesLoading={allLeaves.loading && Object.keys(allLeaves.data).length === 0}
+                boardLabel={boardLabel}
+                boardSlug={slugify(boardKey ?? String(boardId))}
               />
             </div>
           </>

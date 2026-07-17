@@ -44,9 +44,11 @@ export interface DevKpi {
  * Leave-adjusted per-developer KPIs across a get_multi_sprint_report window.
  *
  * Names = the union of every sprint's byAssignee names ∪ every assignee with a plotted leave in
- * one of the window's sprints. "Unassigned" is excluded from the LEAVES side of that union (it
- * can't take leave) but stays if byAssignee itself reports it. A developer who is fully on leave
- * with zero tickets in every sprint of the window still appears (all-zero done/total points).
+ * one of the window's sprints. "Unassigned" is a ticket state, not a developer (v1.61, ADR-073,
+ * item 176) — excluded from BOTH sides of that union, so it never appears in the developer
+ * picker or KPI tiles/exports even when byAssignee itself reports it. A developer who is fully
+ * on leave with zero tickets in every sprint of the window still appears (all-zero done/total
+ * points).
  *
  * Sorted by totals.donePoints descending, tie → name ascending.
  */
@@ -57,12 +59,15 @@ export function computeDevKpis(
 ): DevKpi[] {
   const names = new Set<string>();
   for (const entry of report.sprints) {
-    for (const a of entry.byAssignee) names.add(a.name);
+    for (const a of entry.byAssignee) {
+      if (a.name === "Unassigned") continue; // a ticket state, not a developer
+      names.add(a.name);
+    }
   }
   for (const entry of report.sprints) {
     const leavesForSprint = allLeaves[String(entry.sprint.id)] ?? {};
     for (const name of Object.keys(leavesForSprint)) {
-      if (name === "Unassigned") continue; // can't take leave — byAssignee-side only
+      if (name === "Unassigned") continue; // can't take leave — and not a developer either way
       names.add(name);
     }
   }

@@ -70,13 +70,23 @@ export function tierFor(ratio: number): AgingTier {
 /**
  * Age every in-flight issue against the points-scaled expectation, worst-first.
  *
- * Included: issues that are NOT done and carry a known `inProgressSince` (i.e. the in-progress
- * and code-review buckets when the sprint was fetched withAging). Everything else is skipped.
+ * Included: issues that are NOT done and carry a known `inProgressSince` (v1.61, ADR-073, item
+ * 173: the tool now enriches ONLY the in-progress bucket — code review counts as done per the
+ * ADR-014 DoD, so a code-review issue never carries `inProgressSince` and is excluded here same
+ * as any other unknown-age issue). Everything else is skipped.
+ *
+ * `sprintStartIso` (v1.61, ADR-073, item 174 — optional, display-only clamp): a ticket carried
+ * in mid-flight from a prior sprint shows its age starting at the CURRENT sprint's start, not its
+ * (older) raw inProgressSince — the effective "since" per issue is the LATER of the two, compared
+ * as calendar days via toUtcMidnight so full ISO timestamps and YYYY-MM-DD dates both work.
+ * Omitted/null → identical to pre-v1.61 behavior (unclamped). The tool's own `inProgressSince`
+ * fact is never mutated by this — only the displayed ageDays/ratio/tier here are.
  */
 export function computeAging(
   issues: IssueSummary[],
   policy: AgingPolicyLike,
-  today: string
+  today: string,
+  sprintStartIso?: string | null
 ): AgingResult {
   const entries: AgingEntry[] = [];
 
@@ -84,7 +94,12 @@ export function computeAging(
     if (issue.statusCategory === "done") continue;
     if (!issue.inProgressSince) continue; // unknown → no age, never a guess
 
-    const ageDays = Math.max(0, daysSince(issue.inProgressSince, today));
+    const effectiveSinceIso =
+      sprintStartIso && toUtcMidnight(sprintStartIso) > toUtcMidnight(issue.inProgressSince)
+        ? sprintStartIso
+        : issue.inProgressSince;
+
+    const ageDays = Math.max(0, daysSince(effectiveSinceIso, today));
     const unpointed = issue.storyPoints == null;
     const expectedDays = policy.baseDays + policy.daysPerPoint * (issue.storyPoints ?? 0);
     // Guard a degenerate all-zero policy: any age against a zero expectation is unbounded.

@@ -135,11 +135,11 @@ describe("computeDevKpis", () => {
     expect(kpis.map((k) => k.name)).toEqual(["Amy", "Zed", "Mid"]);
   });
 
-  it("keeps Unassigned when byAssignee reports it", () => {
+  it("excludes Unassigned even when byAssignee reports it (v1.61, ADR-073 — a ticket state, not a developer)", () => {
     const r = report([entry(1, "S1", [assignee("Unassigned", 2, 4)])]);
     const leaves: AllLeavesMap = { "1": { Unassigned: { "2026-06-01": "VL" } } }; // shouldn't happen in practice
     const kpis = computeDevKpis(r, leaves, 8);
-    expect(kpis.filter((k) => k.name === "Unassigned")).toHaveLength(1);
+    expect(kpis.map((k) => k.name)).not.toContain("Unassigned");
   });
 
   it("never pulls Unassigned into the union from the leaves side alone", () => {

@@ -49,6 +49,23 @@ describe("AgingCard (v1.58)", () => {
     expect(screen.getByText("1")).toBeTruthy(); // only C is flagged
   });
 
+  // v1.61 (ADR-073, item 174): sprintStartDate clamps the displayed age.
+  it("passes sprintStartDate through as the aging clamp", () => {
+    // DEV-1 entered its status 9d ago, but the CURRENT sprint only started 3d ago (carried over).
+    const sprintStart = new Date(Date.now() - 3 * 86_400_000).toISOString();
+    render(
+      <AgingCard
+        issues={[aged("DEV-1", 9, { storyPoints: 1 })]}
+        policy={POLICY}
+        sprintStartDate={sprintStart}
+      />
+    );
+    const list = screen.getByRole("list", { name: /ticket aging/i });
+    // Clamped to 3d (sprint start), not the raw 9d (inProgressSince).
+    expect(list.textContent).toContain("3d in In Progress");
+    expect(list.textContent).not.toContain("9d in In Progress");
+  });
+
   it("shows an empty state when nothing has a known age", () => {
     render(<AgingCard issues={[aged("DEV-1", 3, { inProgressSince: null })]} policy={POLICY} />);
     expect(screen.getByText(/nothing in progress yet/i)).toBeTruthy();

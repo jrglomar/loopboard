@@ -142,6 +142,14 @@ export function Dashboard({
     [sprintIssues],
   );
 
+  // v1.61 (ADR-073, item 173): AgingCard receives ONLY the inprogress bucket — code review
+  // counts as done per the ADR-014 DoD, so get_active_sprint no longer enriches it with
+  // inProgressSince (it would show as an unaged, un-clocked entry there anyway).
+  const inProgressIssues = useMemo(
+    () => sprint.data?.issuesByStatus.inprogress ?? [],
+    [sprint.data]
+  );
+
   // v1.27 (ADR-039): lift linked-PR data ONCE for the whole page — feeds both the
   // board's per-card "has PR" badge and the code-review card (avoids a double fetch).
   const issuePrs = useIssuePullRequests(sprintKeys);
@@ -315,9 +323,15 @@ export function Dashboard({
           The AI assistant is now a global floating widget (AssistantWidget). */}
         <div className="flex flex-col gap-3 min-w-0">
           {/* v1.58 (ADR-070): Work Item Age — how long in-flight tickets have sat, vs a
-              points-scaled expectation. Rides the already-fetched sprintIssues; no extra call. */}
+              points-scaled expectation. Rides the already-fetched sprint data; no extra call.
+              v1.61 (ADR-073, items 173-174): scoped to the inprogress bucket only, clamped to
+              the selected sprint's start date. */}
           <section aria-label="Ticket aging">
-            <AgingCard issues={sprintIssues} policy={agingPolicy} />
+            <AgingCard
+              issues={inProgressIssues}
+              policy={agingPolicy}
+              sprintStartDate={sprint.data?.sprint.startDate}
+            />
           </section>
 
           {/* v1.20 (ADR-031): today's meeting focus, above the daily widgets */}

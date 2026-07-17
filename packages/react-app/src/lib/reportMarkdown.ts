@@ -362,7 +362,8 @@ export function buildSprintReviewCsv(
  *  1. Title + a one-line window summary (totals + averages)
  *  2. Sprint History table (name, dates, committed, completed, rate, carryover, blocked)
  *  3. Team KPIs (avg completed/sprint, avg completion rate)
- *  4. By-assignee window aggregate table (sprints active, done/total pts, avg done pts)
+ *  4. By-assignee window aggregate table (sprints active, done/total pts, avg done pts) —
+ *     "Unassigned" excluded (v1.61, ADR-073, item 176 — a ticket state, not a developer)
  */
 export function buildMultiSprintMarkdown(report: MultiSprintReport): string {
   const lines: string[] = [];
@@ -399,14 +400,19 @@ export function buildMultiSprintMarkdown(report: MultiSprintReport): string {
   lines.push(`- Avg completion rate: **${pct(report.averageCompletionRate)}**`);
   lines.push("");
 
+  // v1.61 (ADR-073, item 176): "Unassigned" is a ticket state, not a developer — excluded from
+  // this per-assignee aggregate section. Team committed/completed totals above are untouched
+  // (they sum issues, not assignees).
+  const byAssignee = report.byAssignee.filter((a) => a.name !== "Unassigned");
+
   lines.push("## By Assignee (window aggregate)");
   lines.push("");
-  if (report.byAssignee.length === 0) {
+  if (byAssignee.length === 0) {
     lines.push("_No assignee data._");
   } else {
     lines.push("| Assignee | Sprints active | Done pts | Total pts | Avg done pts/sprint |");
     lines.push("|---|---|---|---|---|");
-    for (const a of report.byAssignee) {
+    for (const a of byAssignee) {
       lines.push(
         `| ${a.name} | ${a.sprintsActive} | ${formatPoints(a.donePoints)} | ${formatPoints(a.totalPoints)} | ${formatPoints(a.avgDonePoints)} |`
       );
@@ -459,7 +465,9 @@ export function buildMultiSprintCsv(report: MultiSprintReport): string {
 
   rows.push("");
   rows.push(csvRow(["Assignee", "Sprints Active", "Done Points", "Total Points", "Avg Done Points/Sprint"]));
-  for (const a of report.byAssignee) {
+  // v1.61 (ADR-073, item 176): "Unassigned" is a ticket state, not a developer — excluded from
+  // this per-assignee aggregate block. Team committed/completed totals above are untouched.
+  for (const a of report.byAssignee.filter((x) => x.name !== "Unassigned")) {
     rows.push(csvRow([a.name, a.sprintsActive, a.donePoints, a.totalPoints, a.avgDonePoints]));
   }
 

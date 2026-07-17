@@ -19,7 +19,8 @@ describe("Guide page (v1.49)", () => {
     const toc = screen.getByRole("navigation", { name: /guide contents/i });
     const links = within(toc).getAllByRole("link");
     // one TOC link per section, each pointing at an in-page anchor that exists
-    expect(links.length).toBeGreaterThanOrEqual(13);
+    // v1.61 (ADR-073, item 179): 13 → 12 sections — the ticket→prompt helper section retired.
+    expect(links.length).toBeGreaterThanOrEqual(12);
     for (const link of links) {
       const href = link.getAttribute("href") ?? "";
       expect(href.startsWith("#")).toBe(true);
@@ -29,9 +30,17 @@ describe("Guide page (v1.49)", () => {
 
   it("covers the key surfaces users need to learn", () => {
     render(<Guide />);
-    for (const name of [/huddle/i, /planning/i, /task helper/i, /connections/i, /admin/i, /ai assistant/i]) {
+    for (const name of [/huddle/i, /planning/i, /connections/i, /admin/i, /ai assistant/i]) {
       expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
     }
+  });
+
+  // v1.61 (ADR-073, item 179): the ticket→prompt helper UI is retired — no nav entry or
+  // section remains (its old anchor id was "task-helper").
+  it("no longer has the retired helper section (v1.61, ADR-073)", () => {
+    render(<Guide />);
+    expect(document.getElementById("task-helper")).toBeNull();
+    expect(screen.queryByRole("heading", { level: 2, name: /ticket → prompt/i })).toBeNull();
   });
 });
 

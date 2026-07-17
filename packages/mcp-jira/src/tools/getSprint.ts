@@ -162,10 +162,12 @@ async function handler(input: unknown): Promise<SprintOutput> {
     }
   }
 
-  // Step 8 (v1.58, ADR-070): aging enrichment — opt-in, and only for the buckets the Huddle
-  // ages (in progress + code review). Bounded by the in-progress count, run in parallel.
+  // Step 8 (v1.58, ADR-070; scope amended v1.61, ADR-073): aging enrichment — opt-in, and only
+  // for the inprogress bucket. Code review counts as done per the ADR-014 DoD, so code-review
+  // tickets are not "aging" and never fetch changelogs. Bounded by the in-progress count alone,
+  // run in parallel.
   if (args.withAging) {
-    await enrichWithAging([...inprogress, ...codereview]);
+    await enrichWithAging(inprogress);
   }
 
   // Step 9: compute totals
@@ -222,8 +224,9 @@ export const getSprint: ToolDef = {
     "falls back to the next future sprint when no active sprint exists. " +
     "Pass sprintId to select a specific active or future sprint. " +
     "activeSprints lists all active sprints (latest-first); futureSprints lists all future sprints (next-up first). " +
-    "Pass withAging: true to also resolve each in-progress/code-review issue's inProgressSince " +
-    "(when it entered its current status, from the Jira changelog) for ticket-aging views; " +
+    "Pass withAging: true to also resolve each in-progress issue's inProgressSince " +
+    "(when it entered its current status, from the Jira changelog) for ticket-aging views " +
+    "(code-review issues count as done per the ADR-014 DoD and are never enriched); " +
     "omitted by default because it costs one extra Jira call per in-progress issue.",
   schema,
   handler,

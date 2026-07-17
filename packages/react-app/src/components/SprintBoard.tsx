@@ -132,9 +132,18 @@ const AGE_CHIP_CLASS: Record<AgingTier, string> = {
   overdue: "bg-error-bg text-error border-error-border",
 };
 
-function AgeChip({ issue, policy }: { issue: IssueSummary; policy: AgingPolicy }) {
+function AgeChip({
+  issue,
+  policy,
+  sprintStartDate,
+}: {
+  issue: IssueSummary;
+  policy: AgingPolicy;
+  /** v1.61 (ADR-073, item 174) — clamps the displayed age to max(inProgressSince, sprintStartDate). */
+  sprintStartDate?: string | null;
+}) {
   const today = new Date().toISOString().slice(0, 10);
-  const { entries } = computeAging([issue], policy, today);
+  const { entries } = computeAging([issue], policy, today, sprintStartDate);
   const entry = entries[0];
   if (!entry) return null;
   return (
@@ -152,10 +161,21 @@ function IssueCard({
   issue,
   prs,
   agingPolicy = DEFAULT_AGING_POLICY,
+  sprintStartDate,
+  showAgeChip = false,
 }: {
   issue: IssueSummary;
   prs?: LinkedPr[];
   agingPolicy?: AgingPolicy;
+  /** v1.61 (ADR-073, item 174) — clamps the age chip's displayed age to sprint start. */
+  sprintStartDate?: string | null;
+  /**
+   * v1.61 (ADR-073, item 173) — only the In Progress column ever renders the age chip: code
+   * review counts as done per the ADR-014 DoD, so get_active_sprint no longer enriches it with
+   * inProgressSince (AgeChip would already self-suppress on that alone, but the column render
+   * knows its own bucket, so it's scoped structurally too — never opt-in by accident).
+   */
+  showAgeChip?: boolean;
 }) {
   const isBlocked = issue.blocked;
 
@@ -213,8 +233,11 @@ function IssueCard({
           <div className="flex items-center gap-1 flex-shrink-0">
             {/* v1.27 (ADR-039): linked-PR badge — clickable, opens newest PR */}
             <PrBadge prs={prs} />
-            {/* v1.58 (ADR-070): work-item age — only when the changelog resolved a start date */}
-            <AgeChip issue={issue} policy={agingPolicy} />
+            {/* v1.58 (ADR-070): work-item age — only when the changelog resolved a start date.
+                v1.61 (ADR-073, item 173): In Progress column only. */}
+            {showAgeChip && (
+              <AgeChip issue={issue} policy={agingPolicy} sprintStartDate={sprintStartDate} />
+            )}
             {issue.storyPoints != null && (
               <Badge
                 variant="outline"
@@ -240,11 +263,15 @@ interface ColumnProps {
   prsByKey?: Record<string, LinkedPr[]>;
   /** v1.58 (ADR-070): aging expectation for the per-card age chip. */
   agingPolicy?: AgingPolicy;
+  /** v1.61 (ADR-073, item 174) — clamps the age chip's displayed age to sprint start. */
+  sprintStartDate?: string | null;
 }
 
-function SprintColumn({ colorKey, issues, prsByKey, agingPolicy }: ColumnProps) {
+function SprintColumn({ colorKey, issues, prsByKey, agingPolicy, sprintStartDate }: ColumnProps) {
   const cfg = COLUMN_CONFIG[colorKey];
   const Icon = cfg.icon;
+  // v1.61 (ADR-073, item 173): the column itself decides — only In Progress ever shows the chip.
+  const showAgeChip = colorKey === "inprogress";
 
   return (
     // a11y: region landmark per column
@@ -285,7 +312,13 @@ function SprintColumn({ colorKey, issues, prsByKey, agingPolicy }: ColumnProps) 
           <ul className="flex flex-col gap-2" style={{ listStyle: "none" }}>
             {issues.map((issue) => (
               <li key={issue.key}>
-                <IssueCard issue={issue} prs={prsByKey?.[issue.key]} agingPolicy={agingPolicy} />
+                <IssueCard
+                  issue={issue}
+                  prs={prsByKey?.[issue.key]}
+                  agingPolicy={agingPolicy}
+                  sprintStartDate={sprintStartDate}
+                  showAgeChip={showAgeChip}
+                />
               </li>
             ))}
           </ul>
@@ -959,10 +992,10 @@ export function SprintBoard({
       {/* perf: 4-column grid; overflow-x-auto for 360px */}
       <div className="overflow-x-auto">
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 min-w-0">
-          <SprintColumn colorKey="todo"       issues={filteredTodo}       prsByKey={prsByKey} agingPolicy={agingPolicy} />
-          <SprintColumn colorKey="inprogress" issues={filteredInProgress} prsByKey={prsByKey} agingPolicy={agingPolicy} />
-          <SprintColumn colorKey="codereview" issues={filteredCodeReview} prsByKey={prsByKey} agingPolicy={agingPolicy} />
-          <SprintColumn colorKey="done"       issues={filteredDone}       prsByKey={prsByKey} agingPolicy={agingPolicy} />
+          <SprintColumn colorKey="todo"       issues={filteredTodo}       prsByKey={prsByKey} agingPolicy={agingPolicy} sprintStartDate={data.sprint.startDate} />
+          <SprintColumn colorKey="inprogress" issues={filteredInProgress} prsByKey={prsByKey} agingPolicy={agingPolicy} sprintStartDate={data.sprint.startDate} />
+          <SprintColumn colorKey="codereview" issues={filteredCodeReview} prsByKey={prsByKey} agingPolicy={agingPolicy} sprintStartDate={data.sprint.startDate} />
+          <SprintColumn colorKey="done"       issues={filteredDone}       prsByKey={prsByKey} agingPolicy={agingPolicy} sprintStartDate={data.sprint.startDate} />
         </div>
       </div>
     </div>

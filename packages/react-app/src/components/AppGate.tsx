@@ -62,7 +62,7 @@ function Onboarding({ email, onLogout, onChange }: {
       <ConnectionsPanel onStatusChange={() => onChange()} />
       <p className="text-sm text-muted-foreground">
         Once your <span className="font-medium text-foreground">Jira and GitHub</span> are connected, the app
-        unlocks automatically. (Your AI token powers the Task Helper.)
+        unlocks automatically. (Your AI token powers the floating assistant.)
       </p>
     </div>
   );

@@ -62,6 +62,25 @@ export function sprintIdsInDateRange(
     .map((s) => s.id);
 }
 
+// v1.61 (ADR-073, item 175): get_multi_sprint_report's sprintIds path rejects arrays longer than
+// 26 (§4.29 VALIDATION). "range" and "pick" selections are user-driven and can easily exceed
+// that on a real board — cap client-side before the ids ever reach useMultiSprintReport.
+export const MAX_SPRINT_WINDOW = 26;
+
+/**
+ * Cap a CHRONOLOGICAL (oldest → newest) sprint-id list at `max` entries, keeping the NEWEST ones
+ * (i.e. the tail of the array — this lib's convention throughout). `capped` is true only when
+ * truncation actually happened (length was over `max`), so callers can gate a "showing the
+ * latest N" hint on it without an extra length check.
+ */
+export function capSprintWindow(
+  ids: number[],
+  max: number = MAX_SPRINT_WINDOW
+): { ids: number[]; capped: boolean } {
+  if (ids.length <= max) return { ids, capped: false };
+  return { ids: ids.slice(-max), capped: true };
+}
+
 /**
  * Default "date range" window for the Trends & KPIs mode (v1.60, ADR-072): the span covering the
  * last `n` CLOSED sprints (latest-first, list_sprints convention — the same slice

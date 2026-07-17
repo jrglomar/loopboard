@@ -6,7 +6,7 @@
 import type { ReactNode } from "react";
 import {
   BookOpen, PlayCircle, LayoutDashboard, CalendarRange, CalendarDays, Link2, BarChart3,
-  Sparkles, Plug, ShieldCheck, MessageCircle, HelpCircle, Terminal, Table2,
+  Plug, ShieldCheck, MessageCircle, HelpCircle, Terminal, Table2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -88,7 +88,7 @@ const SECTIONS: Section[] = [
           </li>
           <li>
             Pick your <T>board</T> (PO or Dev) and <T>sprint</T> from the top-right. That choice is shared
-            across the Huddle, Planning, Reports and Task Helper.
+            across the Huddle, Planning and Reports.
           </li>
         </ol>
         <p className="mt-3">
@@ -187,24 +187,6 @@ const SECTIONS: Section[] = [
     ),
   },
   {
-    id: "task-helper",
-    title: "Task Helper — ticket → prompt, plus your journal",
-    icon: Sparkles,
-    body: (
-      <>
-        <p><T>Turn one of your tickets into a coding-agent prompt:</T></p>
-        <ol className="list-decimal pl-5 space-y-1.5 mt-2">
-          <li>Pick a ticket from your selected sprint (optionally add repo / stack context).</li>
-          <li>Click <T>Refine &amp; build prompt</T> — the AI rewrites the ticket into a crisp spec and produces a ready-to-paste prompt for Copilot, Claude Code or Cursor. Nothing is written back to Jira.</li>
-        </ol>
-        <p className="mt-3">
-          The same tab keeps your <T>notes &amp; to-dos</T> for the sprint — type a note and press Enter to
-          log it, and tick off a checklist you can tie to your tickets. These are <T>private to you</T>.
-        </p>
-      </>
-    ),
-  },
-  {
     id: "connections",
     title: "Connections — your accounts",
     icon: Plug,
@@ -212,7 +194,7 @@ const SECTIONS: Section[] = [
       <p>
         Connect and disconnect your own <T>Jira</T>, <T>GitHub</T> and <T>AI</T> tokens here. Tokens are
         encrypted at rest and are <T>never shown back to you</T> — only a masked “…last4” hint. Your AI
-        token is what powers the Task Helper and the assistant.
+        token is what powers the assistant.
       </p>
     ),
   },
@@ -339,7 +321,7 @@ const SECTIONS: Section[] = [
     icon: HelpCircle,
     body: (
       <ul className="list-disc pl-5 space-y-1.5">
-        <li><T>Board switcher</T> (top-right) flips PO ⇄ Dev context; Linking and Task Helper work across both.</li>
+        <li><T>Board switcher</T> (top-right) flips PO ⇄ Dev context; Linking works across both.</li>
         <li>Every Huddle sidebar card collapses via the chevron in its header — handy on long sprints.</li>
         <li><T>“Bridge is offline”</T> — a page can't reach the Jira/GitHub server. Ask whoever runs Loopboard to start the bridges.</li>
         <li><T>A report looks empty?</T> Check the board is right and the sprint has issues assigned to your rostered team.</li>

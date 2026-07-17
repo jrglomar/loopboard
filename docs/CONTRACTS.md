@@ -282,8 +282,10 @@ case.
      count `blocked` issues (those with `blocked === true` regardless of bucket), sum
      `storyPoints` for `storyPointsTotal` (null values count as 0), sum `storyPoints` for
      done-bucket issues for `storyPointsDone`.
-  8. **Aging enrichment (v1.58, ADR-070 — only when `withAging: true`):** for every issue in
-     the `inprogress` + `codereview` buckets, fetch its changelog via the dedicated paginated
+  8. **Aging enrichment (v1.58, ADR-070 — only when `withAging: true`; v1.61, ADR-073 —
+     `inprogress` bucket ONLY):** for every issue in the `inprogress` bucket (NOT `codereview` —
+     code review counts as done per the ADR-014 DoD, so it is not "aging"), fetch its changelog
+     via the dedicated paginated
      endpoint `GET /rest/api/3/issue/{key}/changelog?startAt&maxResults` (NOT `expand=changelog`
      on the bulk sprint-issue call — the stable per-issue resource; bulk/search-family endpoints
      have churned before, v1.44.1). **Bounded 2-page fetch**: page 1 (`startAt=0, maxResults=100`);
@@ -2829,3 +2831,32 @@ No tool, route, or env surface changes — UI-only release (client-side joins of
 172. **Reports · Trends & KPIs — date range is the DEFAULT selection mode**, pre-filled to the span
     of the last 10 closed sprints (start = 10th-most-recent closed sprint's startDate, end = today);
     Last-N and pick-sprints modes remain.
+
+## Changelog v1.61 (2026-07-17 — Trends hardening + styled exports, DoD-true aging, Task Helper UI retired; ADR-073)
+
+Tool/route/env surface: ONE amendment (§4.3 step 8 — aging bucket scope). Everything else is UI.
+
+173. **§4.3 step 8 amended — `withAging` enriches ONLY the `inprogress` bucket.** Code review counts
+    as done (ADR-014 DoD), so code-review tickets are not "aging": they no longer fetch changelogs
+    (cost drops to ≤ 2 calls per genuinely in-progress issue) and never carry `inProgressSince`.
+    UI: age chips render only in the In Progress column; the Aging card receives the inprogress
+    bucket alone.
+174. **Aging display clamps to the sprint** (UI-only): shown age = days since
+    `max(inProgressSince, sprint.startDate)` — a ticket carried in mid-flight starts its clock at
+    sprint start. The tool's `inProgressSince` stays the raw changelog fact.
+175. **Trends window is capped client-side at the §4.29 limit (26 sprints)**: date-range and
+    pick-sprints selections keep the NEWEST 26 with a visible "showing the latest 26" note, so a
+    wide range can no longer produce a 400 VALIDATION error; pick-mode checkboxes disable at 26.
+176. **"Unassigned" is a ticket state, not a developer**: filtered out of the per-developer KPI
+    union, the developer picker, and every per-assignee export section (markdown/CSV/xlsx). Team
+    committed/completed totals are untouched (they sum issues, not assignees).
+177. **Trends styled exports (xlsx-js-style, the ADR-048 technique)** — TWO separate downloads:
+    a styled **team trends** workbook from the export bar (per-sprint rows + totals/averages) and a
+    styled **developer KPIs** workbook from the Developer KPIs section (leave-adjusted columns:
+    done, leaves, adjusted target, met). Markdown/CSV exports remain.
+178. **Reports opens in Trends & KPIs mode by default** (the mode toggle still switches back to the
+    single-sprint report).
+179. **Task Helper UI retired** (tab, page, sprint-journal card, Guide + USER-GUIDE sections,
+    frontend-only clients). The §7/§8 backend endpoints and stores remain in place but DORMANT
+    (unchanged contract surface; no smoke changes) — login, Connections, Admin, and
+    `GET /api/me/context` are app-wide infrastructure and unaffected. (ADR-073.)

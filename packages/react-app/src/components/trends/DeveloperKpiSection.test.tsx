@@ -2,14 +2,22 @@
 // Presentational; keyless/offline. devKpis fixtures come from the pure computeDevKpis()
 // (itself unit-tested in lib/kpiAdjust.test.ts) so the prop shapes can never drift.
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { DeveloperKpiSection } from "./DeveloperKpiSection";
 import { computeDevKpis } from "../../lib/kpiAdjust";
 import type { AllLeavesMap } from "../../lib/leavesClient";
 import type { MultiSprintReport } from "../../lib/types";
 
-afterEach(() => cleanup());
+let capturedBlob: Blob | null = null;
+
+beforeEach(() => {
+  capturedBlob = null;
+  (URL as unknown as { createObjectURL: unknown }).createObjectURL = vi.fn((b: Blob) => { capturedBlob = b; return "blob:x"; });
+  (URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = vi.fn();
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+});
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 const REQUIRED_POINTS = 8;
 
@@ -188,5 +196,29 @@ describe("DeveloperKpiSection", () => {
     expect(screen.queryByText(/reliability/i)).toBeNull();
     expect(screen.queryByText(/throughput/i)).toBeNull();
     expect(screen.queryByText(/capacity/i)).toBeNull();
+  });
+
+  // v1.61 (ADR-073, item 177): styled Developer KPIs .xlsx export — a SEPARATE download from the
+  // Team trends button in TrendsView's own export bar (SprintReviewExport.test.tsx pattern:
+  // exercise the real builder, capture the resulting Blob via a mocked createObjectURL).
+  describe("styled xlsx export (v1.61, ADR-073, item 177)", () => {
+    it("has an Export .xlsx button", () => {
+      render(<DeveloperKpiSection report={REPORT} devKpis={DEV_KPIS} />);
+      expect(screen.getByRole("button", { name: /Export developer KPIs as styled Excel workbook/i })).toBeTruthy();
+    });
+
+    it("downloads a non-empty styled workbook Blob on click", () => {
+      render(<DeveloperKpiSection report={REPORT} devKpis={DEV_KPIS} boardLabel="Dev" boardSlug="dev" />);
+      fireEvent.click(screen.getByRole("button", { name: /Export developer KPIs as styled Excel workbook/i }));
+
+      expect(capturedBlob).toBeTruthy();
+      expect(capturedBlob!.type).toContain("spreadsheetml");
+      expect(capturedBlob!.size).toBeGreaterThan(0);
+    });
+
+    it("is absent when there is no assignee data", () => {
+      render(<DeveloperKpiSection report={REPORT} devKpis={[]} />);
+      expect(screen.queryByRole("button", { name: /Export developer KPIs/i })).toBeNull();
+    });
   });
 });
