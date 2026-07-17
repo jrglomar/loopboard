@@ -54,15 +54,25 @@ import { useMCP, type UseMCPState } from "./useMCP";
  *
  * CONTRACTS.md §4.3 v1.1
  */
-export function useActiveSprint(boardId?: number, sprintId?: number | null): UseMCPState<GetActiveSprintOutput> {
+export function useActiveSprint(
+  boardId?: number,
+  sprintId?: number | null,
+  /**
+   * v1.58 (ADR-070): also resolve each in-progress issue's inProgressSince (Work Item Age) from
+   * the Jira changelog. Costs ~1 extra Jira call per in-progress issue, so only the Huddle's
+   * primary sprint opts in — every other caller leaves it off.
+   */
+  withAging = false
+): UseMCPState<GetActiveSprintOutput> {
   const fn = useCallback(
     () => {
-      const input: Record<string, number> = {};
+      const input: Record<string, number | boolean> = {};
       if (boardId !== undefined) input.boardId = boardId;
       if (sprintId != null) input.sprintId = sprintId;
+      if (withAging) input.withAging = true;
       return callTool<GetActiveSprintOutput>("jira", "get_active_sprint", input);
     },
-    [boardId, sprintId]
+    [boardId, sprintId, withAging]
   );
 
   const state = useMCP(fn);

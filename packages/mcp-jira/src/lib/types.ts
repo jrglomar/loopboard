@@ -37,6 +37,13 @@ export interface IssueSummary {
   blocked: boolean;
   resolvedAt?: string | null; // v1.42 (ADR-052) — Jira resolutiondate; burndown input
   updatedAt?: string | null; // v1.42 (ADR-052) — Jira updated; staleness detection
+  /**
+   * v1.58 (ADR-070) — when the issue entered its CURRENT status, from the changelog. Populated
+   * ONLY for inprogress/codereview issues when get_active_sprint runs with `withAging: true`.
+   * null = unknown (no matching transition, fetch failed, or not requested) — the UI shows no
+   * age rather than guessing.
+   */
+  inProgressSince?: string | null;
 }
 
 export interface HuddleItem {

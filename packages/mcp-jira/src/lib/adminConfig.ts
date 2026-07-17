@@ -30,6 +30,9 @@ export const adminConfigSchema = z
     JIRA_VELOCITY_SPRINTS: z.coerce.number().int().positive().max(50),
     JIRA_REQUIRED_POINTS: z.coerce.number().int().nonnegative().max(1000),
     JIRA_OFFSET_THRESHOLD: z.coerce.number().int().positive().max(1000),
+    // v1.58 (ADR-070) — ticket-aging expectation policy.
+    JIRA_AGING_BASE_DAYS: z.coerce.number().int().nonnegative().max(365),
+    JIRA_AGING_DAYS_PER_POINT: z.coerce.number().int().nonnegative().max(365),
   })
   .partial();
 

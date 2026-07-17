@@ -9,7 +9,7 @@
 // source of truth and no extra round-trip.
 
 import { useAuth } from "../context/AuthContext";
-import type { Boards, OffsetPolicy } from "./types";
+import type { Boards, OffsetPolicy, AgingPolicy } from "./types";
 
 type BoardRef = Boards["dev"][number];
 
@@ -60,4 +60,14 @@ const DEFAULT_POLICY: OffsetPolicy = { requiredPoints: 8, offsetThreshold: 2 };
 export function usePolicy(): OffsetPolicy {
   const { context } = useAuth();
   return context?.policy ?? DEFAULT_POLICY;
+}
+
+// ── Ticket-aging policy (v1.58, ADR-070) ──────────────────────────────────────
+
+const DEFAULT_AGING_POLICY: AgingPolicy = { baseDays: 1, daysPerPoint: 1 };
+
+/** The signed-in user's effective ticket-aging policy, or the default until the context loads. */
+export function useAgingPolicy(): AgingPolicy {
+  const { context } = useAuth();
+  return context?.aging ?? DEFAULT_AGING_POLICY;
 }

@@ -85,6 +85,10 @@ const configSchema = z.object({
   // v1.26 (ADR-038): offset policy — N required points/sprint + N2 surplus threshold.
   JIRA_REQUIRED_POINTS: z.coerce.number().int().nonnegative().default(8),
   JIRA_OFFSET_THRESHOLD: z.coerce.number().int().positive().default(2),
+  // v1.58 (ADR-070) — ticket-aging expectation: expected days in a status =
+  // base + perPoint × storyPoints (unpointed issues use the base only).
+  JIRA_AGING_BASE_DAYS: z.coerce.number().int().nonnegative().default(1),
+  JIRA_AGING_DAYS_PER_POINT: z.coerce.number().int().nonnegative().default(1),
   // v1.26: optional offset-ledger store path; default resolved from package dir.
   JIRA_OFFSET_FILE: z.string().default(""),
   // v1.5: optional leaves file path; default resolved from package dir above.
@@ -268,6 +272,16 @@ export function isAdminEmail(email: string): boolean {
 export function getOffsetPolicy(): { requiredPoints: number; offsetThreshold: number } {
   const cfg = getConfig();
   return { requiredPoints: cfg.JIRA_REQUIRED_POINTS, offsetThreshold: cfg.JIRA_OFFSET_THRESHOLD };
+}
+
+/**
+ * Ticket-aging policy (v1.58, ADR-070) — how long a ticket is EXPECTED to sit in a status,
+ * scaled by its story points: expected = baseDays + daysPerPoint × points (unpointed → base).
+ * A sibling of the offset policy, not folded into it (distinct domain; ADR-062/064 pattern).
+ */
+export function getAgingPolicy(): { baseDays: number; daysPerPoint: number } {
+  const cfg = getConfig();
+  return { baseDays: cfg.JIRA_AGING_BASE_DAYS, daysPerPoint: cfg.JIRA_AGING_DAYS_PER_POINT };
 }
 
 /** One configured project for a board side (v1.25, ADR-037). */

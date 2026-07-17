@@ -35,13 +35,17 @@ export interface BuildAttentionInput {
 }
 
 /** UTC midnight epoch for a full ISO timestamp or a YYYY-MM-DD date. */
-function toUtcMidnight(iso: string): number {
+export function toUtcMidnight(iso: string): number {
   const d = new Date(iso);
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
-/** Whole days from an ISO timestamp to `today` (YYYY-MM-DD). Negative if in the future. */
-function daysSince(iso: string, today: string): number {
+/**
+ * Whole days from an ISO timestamp to `today` (YYYY-MM-DD). Negative if in the future.
+ * Exported since v1.58 (ADR-070) so lib/aging.ts shares this exact calendar-day convention
+ * (ADR-052) instead of hand-rolling a third copy.
+ */
+export function daysSince(iso: string, today: string): number {
   return Math.floor((toUtcMidnight(today) - toUtcMidnight(iso)) / 86_400_000);
 }
 

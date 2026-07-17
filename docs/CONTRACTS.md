@@ -125,6 +125,8 @@ so tests run with no `.env`.
 | `JIRA_LEAVES_FILE` | mcp-jira | optional | `<mcp-jira pkg>/.loopboard-leaves.json` — JSON store for per-sprint leaves (v1.5) |
 | `JIRA_REQUIRED_POINTS` | mcp-jira | optional | `8` — N, required points/sprint per member (offset engine, v1.26) |
 | `JIRA_OFFSET_THRESHOLD` | mcp-jira | optional | `2` — N2, surplus threshold to earn an offset point (v1.26) |
+| `JIRA_AGING_BASE_DAYS` | mcp-jira | optional | `1` — aging policy: base expected days in a status (v1.58, ADR-070) |
+| `JIRA_AGING_DAYS_PER_POINT` | mcp-jira | optional | `1` — aging policy: extra expected days per story point; expected = base + perPoint×points, unpointed = base only (v1.58) |
 | `JIRA_OFFSET_FILE` | mcp-jira | optional | `<mcp-jira pkg>/.loopboard-offset.json` — JSON store for the offset ledger (v1.26) |
 | `JIRA_TEAM_FILE` | mcp-jira | optional | `<mcp-jira pkg>/.loopboard-team.json` — JSON store for the per-board team roster (v1.8) |
 | `GITHUB_TOKEN` | mcp-github | yes (no default) | — |
@@ -171,6 +173,10 @@ export interface IssueSummary {
   blocked: boolean;
   resolvedAt?: string | null;           // v1.42 (ADR-052) — Jira resolutiondate; burndown input
   updatedAt?: string | null;            // v1.42 (ADR-052) — Jira updated; staleness detection
+  inProgressSince?: string | null;      // v1.58 (ADR-070) — latest transition into the CURRENT status
+                                        // (changelog-derived); populated only for inprogress/codereview
+                                        // issues when get_active_sprint is called with withAging: true.
+                                        // null = unknown (no matching transition, fetch failed, or not requested).
 }
 
 export interface HuddleItem {
@@ -249,9 +255,10 @@ case.
   ```
 
 ### 4.3 `get_active_sprint`
-- **Input:** `{ boardId?: number, sprintId?: number, maxResults?: number }` — `boardId`
+- **Input:** `{ boardId?: number, sprintId?: number, maxResults?: number, withAging?: boolean }` — `boardId`
   defaults to `parseInt(JIRA_DEV_BOARD_ID)`; `maxResults` defaults to `50`; `sprintId`
-  selects a specific **active OR future** sprint on the board (v1.4).
+  selects a specific **active OR future** sprint on the board (v1.4); `withAging` defaults
+  to `false` (v1.58, ADR-070 — see the aging step below).
 - **Sprint selection (v1.4 — extends ADR-007 to future sprints; ADR-011):**
   1. `GET /rest/agile/1.0/board/{boardId}/sprint?state=active,future` → split `values`
      into active and future lists. If BOTH are empty/absent, return an `UPSTREAM` error
@@ -275,6 +282,20 @@ case.
      count `blocked` issues (those with `blocked === true` regardless of bucket), sum
      `storyPoints` for `storyPointsTotal` (null values count as 0), sum `storyPoints` for
      done-bucket issues for `storyPointsDone`.
+  8. **Aging enrichment (v1.58, ADR-070 — only when `withAging: true`):** for every issue in
+     the `inprogress` + `codereview` buckets, fetch its changelog via the dedicated paginated
+     endpoint `GET /rest/api/3/issue/{key}/changelog?startAt&maxResults` (NOT `expand=changelog`
+     on the bulk sprint-issue call — the stable per-issue resource; bulk/search-family endpoints
+     have churned before, v1.44.1). **Bounded 2-page fetch**: page 1 (`startAt=0, maxResults=100`);
+     if `!isLast && total > 100`, also fetch the tail page at `startAt = total − 100`.
+     `inProgressSince` = the `created` timestamp of the LATEST history entry containing a
+     `status` item whose `toString` equals the issue's CURRENT status name (i.e. "entered its
+     current column at"; naturally resets on bounce-backs; no historical status→category
+     inference). No matching transition found, or the changelog fetch fails for that key
+     (per-key try/catch) → `inProgressSince: null` — never a guess. Fetches run in parallel
+     (`Promise.all`), worst case 2 Jira calls per in-progress issue. `withAging: false`
+     (the default) performs ZERO changelog calls — `get_velocity`, `get_sprint_report`, and
+     `get_multi_sprint_report` never inherit this cost.
 - **Output:**
 ```ts
 export interface ActiveSprintRef {
@@ -1013,6 +1034,58 @@ export** (no more retyping at export time). Same bridge-side JSON store pattern.
 - Registered MCP tools; `get_retro` joins the AI Q&A read-allowlist (§4.9, 18 read tools).
   jira tools **38 → 40**. Tests use a temp file; keyless/offline.
 
+### 4.29 `get_multi_sprint_report` (v1.59, ADR-071 — multi-sprint report + velocity KPIs)
+
+One aggregated report across a WINDOW of sprints — the data source for the Reports page's
+"Trends & KPIs" mode (team + per-developer velocity & trend). Follows `get_velocity`'s cheap
+pattern: pool sprints once, then ONE `getSprintIssues(id, maxResults)` call per sprint in parallel,
+reusing `reportMath.ts` (`makeDodPredicate`/`computeSprintPoints`/`computeByAssignee`) verbatim —
+`byAssignee` is free CPU on the same fetched issues. Never fetches changelogs (§4.3's aging is
+`get_active_sprint`-only).
+
+- **Input:** `{ boardId?: number, sprintCount?: number (1..26, default 10), beforeSprintId?: number,
+  sprintIds?: number[] (1..26 entries), includeActive?: boolean (default false),
+  maxResults?: number (per-sprint issue cap, default 200) }`.
+  **`sprintIds` is mutually exclusive with `sprintCount`/`beforeSprintId`** → `400 VALIDATION`
+  (ZodObject base schema + `.refine` in the handler — the set_leaves pattern). Date-range selection
+  is a CLIENT concern: the UI filters `list_sprints` (which already returns start/end/complete dates)
+  and sends concrete `sprintIds`.
+- **Sprint selection:** with `sprintIds` → `Promise.all(getSprintMeta)` for each id, sorted
+  chronologically by `startDate` (asc, nulls last). Without → the `get_velocity` pool: closed
+  sprints (+ active when `includeActive`), sorted latest-first by `completeDate ?? endDate`
+  (shared `sortClosedSprintsLatestFirst` in `sprintSelect.ts` — extracted from the previously
+  duplicated getVelocity/listSprints sort), optional strict-before `beforeSprintId` anchor
+  (one `getSprintMeta` call), then `slice(0, sprintCount)`.
+- **Per sprint:** `computeSprintPoints` + `computeByAssignee` (same DoD predicate as
+  `get_sprint_report`: done OR code-review) + counts (`totalCount`, `completedCount`,
+  `carryoverCount = total − completed`, `blockedCount`).
+- **Output:**
+```ts
+{
+  boardId: number;
+  sprintCount: number;                    // sprints actually included
+  sprints: Array<{                        // chronological oldest → newest
+    sprint: SprintRef;                    // id/name/state/startDate/endDate/completeDate/goal/boardId
+    committedPoints: number; completedPoints: number; completionRate: number;
+    totalCount: number; completedCount: number; carryoverCount: number; blockedCount: number;
+    byAssignee: AssigneeStats[];          // §4.12 shape, per sprint
+  }>;
+  totals: { committedPoints: number; completedPoints: number };
+  averageCompleted: number;               // totals.completedPoints / sprintCount (0 when empty)
+  averageCompletionRate: number;          // mean of per-sprint completionRate (0 when empty)
+  byAssignee: Array<{                     // aggregated across the window, donePoints desc
+    name: string; sprintsActive: number;  // sprints where the person had ≥1 issue
+    donePoints: number; totalPoints: number;
+    avgDonePoints: number;                // donePoints / sprintCount — FULL window (velocity convention)
+  }>;
+}
+```
+- Empty pool/window → the empty-but-valid shape (all zeros, empty arrays) — NOT an error
+  (`get_velocity` convention).
+- Registered MCP tool; joins the AI Q&A read-allowlist (§4.9, 18 → **19** read tools).
+  jira tools **42 → 43** (smoke expected-tools list +1; NOT in the empty-input-validation smoke
+  loop — all fields optional, `{}` is valid, same class as `get_velocity`). Keyless/offline tests.
+
 ## 5. mcp-github tools (Phase 2) — exact IO
 
 ```ts
@@ -1663,15 +1736,18 @@ live call at connect so a bad/expired token is caught then, clearly. Folds into 
 
 ### 9.5 Context + app-wide gate
 
-`GET /api/me/context` → `{ connections, ready, boards, policy, ai, role }`, `ready = !!jira && !!github`.
+`GET /api/me/context` → `{ connections, ready, boards, policy, aging, ai, role }`, `ready = !!jira && !!github`.
 Frontend `AuthProvider` + `AppGate`: not signed in → login; signed in but not ready → onboarding (connect
 accounts); ready → the app. `callTool` + the AI client send `credentials: "include"`.
 
-**`boards` + `policy` + `ai` are PER-USER and authoritative for the UI (v1.51/v1.53, ADR-062/064).** All are
-computed inside the caller's request context (`resolveUser(userId)` → `runWithUser(…
-getProjects()/getOffsetPolicy()/getAiStatus())`), so they reflect the user's own
-`.env`←admin-global←shared-source←per-user override chain. `policy` is `{ requiredPoints, offsetThreshold }`;
-`ai` is `{ enabled, provider, model }` (the user's OWN AI token, else inherited/global). The React board
+**`boards` + `policy` + `aging` + `ai` are PER-USER and authoritative for the UI (v1.51/v1.53/v1.58,
+ADR-062/064/070).** All are computed inside the caller's request context (`resolveUser(userId)` →
+`runWithUser(… getProjects()/getOffsetPolicy()/getAgingPolicy()/getAiStatus())`), so they reflect the user's
+own `.env`←admin-global←shared-source←per-user override chain. `policy` is `{ requiredPoints,
+offsetThreshold }`; `aging` is `{ baseDays, daysPerPoint }` (v1.58 — the ticket-aging expectation policy,
+from `JIRA_AGING_BASE_DAYS`/`JIRA_AGING_DAYS_PER_POINT`, also on `GET /api/health .aging` as the global
+`.env` value for keyless smoke/health); `ai` is `{ enabled, provider, model }` (the user's OWN AI token,
+else inherited/global). The React board
 selector + offset views read `boards`/`policy`, and `getAiStatus()` reads `ai`, from **this** endpoint (via
 `AuthContext`) — NOT from the global, unauthenticated `GET /api/health` (which still returns the `.env`
 values and is used only for keyless smoke/health). Two consequences: to point a user at a different board an
@@ -2694,3 +2770,40 @@ All frontend/presentation; **no new tool, jira tools stay 36, IO shapes unchange
     classic `GET /rest/api/3/search` (now **410 Gone**); `userJira.fetchMySprintIssues` migrated to the
     replacement `/rest/api/3/search/jql` (same issue shape; `fields` explicit; first page). The 40 MCP
     tools were unaffected (they read sprint issues via the Agile API). Verified live against real Jira.
+
+## Changelog v1.58 (2026-07-17 — ticket aging: changelog-derived Work Item Age; ADR-070)
+
+163. **§4.3 — `get_active_sprint` gains `withAging?: boolean` (default false).** When true, the
+    inprogress + codereview buckets are enriched with `inProgressSince` via the dedicated paginated
+    per-issue changelog endpoint (`GET /rest/api/3/issue/{key}/changelog`), bounded 2-page fetch
+    (page 1 + tail page when total > 100), latest transition whose `toString` equals the CURRENT
+    status; no match / fetch failure → `null` (never a guess). Default false performs zero changelog
+    calls — velocity/report tools are unaffected.
+164. **§3 — `IssueSummary` gains `inProgressSince?: string | null`** (populated only under
+    `withAging: true`).
+165. **§3 env / §9.5 — aging policy.** `JIRA_AGING_BASE_DAYS` (default 1) + `JIRA_AGING_DAYS_PER_POINT`
+    (default 1); expected days in status = base + perPoint × storyPoints (unpointed = base only).
+    Admin-configurable (global + per-user overrides). Exposed as a NEW sibling `aging` key on
+    `GET /api/health` (global) and `GET /api/me/context` (per-user via the ADR-062 runWithUser
+    pattern). UI tiers: ok < 100% of expected, watch ≥ 100%, overdue ≥ 150% (react-app `lib/aging.ts`).
+
+## Changelog v1.59 (2026-07-17 — multi-sprint report + velocity KPIs; ADR-071)
+
+166. **§4.29 — NEW tool `get_multi_sprint_report`** (jira tools 42 → 43): one aggregated report
+    across a window of sprints. Pool path (default): the last `sprintCount` (1..26, default 10)
+    closed sprints (+ active when `includeActive`), optional strict-before `beforeSprintId` anchor —
+    the `get_velocity` selection verbatim, via `sortClosedSprintsLatestFirst` extracted into
+    `sprintSelect.ts` from the previously duplicated getVelocity/listSprints closed-sort. Explicit
+    path: `sprintIds` (1..26 entries, mutually exclusive with `sprintCount`/`beforeSprintId` →
+    400 VALIDATION; refine-in-handler). Output: chronological per-sprint entries (points, rate,
+    counts, byAssignee — §4.12 math, same DoD) + window `totals`, `averageCompleted`,
+    `averageCompletionRate`, and a cross-sprint `byAssignee` aggregate (`sprintsActive`,
+    `avgDonePoints` = donePoints / FULL window). Date-range selection is client-side over
+    `list_sprints` dates → concrete `sprintIds`.
+167. **§4.9 — AI Q&A read-allowlist** += `get_multi_sprint_report` (18 → 19 read tools). Smoke
+    expected-jira-tools list +1 (NOT added to the empty-input-validation loop — all-optional
+    schema, `{}` is valid input, same class as `get_velocity`).
+168. **Reports UI — "Sprint report | Trends & KPIs" mode toggle** (client-only; mode inside Reports,
+    no new tab per the ADR-060 tab-crowding precedent): Last-N (default 10) / pick-sprints /
+    date-range selection → one `get_multi_sprint_report` fetch; team + per-developer velocity &
+    trend sections + markdown/CSV export. Guide + USER-GUIDE updated.

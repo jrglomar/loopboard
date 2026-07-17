@@ -105,6 +105,12 @@ export interface IssueSummary {
   resolvedAt?: string | null;
   /** v1.42 (ADR-052) — Jira updated (ISO) or null; staleness detection. */
   updatedAt?: string | null;
+  /**
+   * v1.58 (ADR-070) — when the issue entered its CURRENT status (ISO), from the Jira changelog.
+   * Present only for in-progress/code-review issues when the sprint was fetched with
+   * `withAging: true`. null/undefined = unknown → the UI shows no age (never a guess).
+   */
+  inProgressSince?: string | null;
 }
 
 export interface HuddleItem {
@@ -567,6 +573,15 @@ export interface OffsetSummary {
 export interface OffsetPolicy {
   requiredPoints: number; // N
   offsetThreshold: number; // N2
+}
+
+/**
+ * Ticket-aging expectation policy (v1.58, ADR-070; per-user via /api/me/context .aging).
+ * expected days in a status = baseDays + daysPerPoint × storyPoints (unpointed → baseDays).
+ */
+export interface AgingPolicy {
+  baseDays: number;
+  daysPerPoint: number;
 }
 
 /** get_pr output */

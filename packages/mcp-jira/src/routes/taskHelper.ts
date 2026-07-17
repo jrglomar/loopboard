@@ -26,7 +26,7 @@ import { getAiProvider, getAiStatus } from "../lib/ai/provider.js";
 import { runTaskHelper } from "../lib/ai/taskHelperService.js";
 import { resolveUser } from "../lib/userConfig.js";
 import { runWithUser } from "../lib/requestContext.js";
-import { getProjects, getOffsetPolicy } from "../lib/config.js";
+import { getProjects, getOffsetPolicy, getAgingPolicy } from "../lib/config.js";
 import { getEffectiveConnection } from "../lib/delegation.js";
 import {
   getSprintJournal, addNote, deleteNote, addTodo, updateTodo, deleteTodo,
@@ -336,21 +336,23 @@ taskHelperRouter.get("/api/me/context", requireAuth, (_req: Request, res: Respon
   // admin/inherited/per-user overrides). v1.51 (ADR-062): the UI reads boards/policy from here — NOT the
   // global, unauthenticated GET /api/health. v1.53 (ADR-064): the AI status too, so a user on their OWN
   // AI token (with no global .env AI) sees the assistant/drafting enabled instead of "AI disabled".
+  // v1.58 (ADR-070): the ticket-aging policy resolves the same per-user way.
   let boards: { dev: unknown[]; po: unknown[] } = { dev: [], po: [] };
   let policy = getOffsetPolicy(); // global default when the user isn't resolvable yet
+  let aging = getAgingPolicy(); // ditto — global .env aging policy until we can resolve the user
   let ai = getAiStatus(); // ditto — global .env AI status until we can resolve the user
   const resolved = resolveUser(userId);
   if (resolved) {
-    ({ boards, policy, ai } = runWithUser(
+    ({ boards, policy, aging, ai } = runWithUser(
       { userId, config: resolved.config, storeUserId: resolved.storeUserId, canWriteJira: resolved.canWriteJira },
-      () => ({ boards: getProjects(), policy: getOffsetPolicy(), ai: getAiStatus() })
+      () => ({ boards: getProjects(), policy: getOffsetPolicy(), aging: getAgingPolicy(), ai: getAiStatus() })
     ));
   }
   const role = user && isAdmin(user) ? "admin" : "user";
   // v1.46: the UI shows a "read-only (shared credentials)" banner and hides Jira-write affordances.
   const readOnly = resolved ? !resolved.canWriteJira : false;
   const sharedFrom = resolved?.sharedFromUserId ? emailOf(resolved.sharedFromUserId) : null;
-  res.json({ ok: true, data: { connections: status, ready, boards, policy, ai, role, readOnly, sharedFrom } });
+  res.json({ ok: true, data: { connections: status, ready, boards, policy, aging, ai, role, readOnly, sharedFrom } });
 });
 
 // ── Tasks (§8.5) — fetch my tickets + AI refine→prompt ───────────────────────

@@ -74,6 +74,15 @@ const FIELD_GROUPS: { title: string; hint?: string; fields: FieldDef[] }[] = [
       { key: "JIRA_OFFSET_THRESHOLD", label: "Offset threshold", placeholder: "2", numeric: true },
     ],
   },
+  {
+    title: "Ticket aging",
+    // v1.58 (ADR-070) — drives the Huddle's Aging card + the per-card age chips.
+    hint: "Expected days in a status = base + (days per point × story points). Unpointed tickets use the base only.",
+    fields: [
+      { key: "JIRA_AGING_BASE_DAYS", label: "Base days", placeholder: "1", numeric: true },
+      { key: "JIRA_AGING_DAYS_PER_POINT", label: "Days per point", placeholder: "1", numeric: true },
+    ],
+  },
 ];
 
 function toStringMap(cfg: AdminConfig): Record<string, string> {

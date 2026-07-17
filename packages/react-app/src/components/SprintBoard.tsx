@@ -13,7 +13,9 @@ import {
   type IssueSummary,
   type ActiveSprintRef,
   type LinkedPr,
+  type AgingPolicy,
 } from "../lib/types";
+import { computeAging, agingDetail, type AgingTier } from "../lib/aging";
 import { type McpError } from "../lib/mcpClient";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -48,7 +50,15 @@ interface SprintBoardProps {
   createSprintButton?: React.ReactNode;
   /** v1.27 (ADR-039): linked PRs per issue key — drives the "has PR" badge on cards. */
   prsByKey?: Record<string, LinkedPr[]>;
+  /**
+   * v1.58 (ADR-070): the aging expectation for the per-card age chip. Passed as a prop rather
+   * than read from AuthContext so the board stays renderable without a provider (tests).
+   */
+  agingPolicy?: AgingPolicy;
 }
+
+/** Matches the backend default (JIRA_AGING_BASE_DAYS / JIRA_AGING_DAYS_PER_POINT). */
+const DEFAULT_AGING_POLICY: AgingPolicy = { baseDays: 1, daysPerPoint: 1 };
 
 // ── Column config (v1.3: icon + filled tinted band) ──────────────────────────
 
@@ -111,7 +121,42 @@ function InitialsAvatar({ name }: { name: string | null }) {
 
 // ── Issue Card ────────────────────────────────────────────────────────────────
 
-function IssueCard({ issue, prs }: { issue: IssueSummary; prs?: LinkedPr[] }) {
+/**
+ * v1.58 (ADR-070): work-item age chip. Renders ONLY when the changelog resolved when the issue
+ * entered its current status — an unknown age shows nothing rather than a wrong number. Tinted by
+ * the same ok/watch/overdue tiers as the Huddle's Aging card.
+ */
+const AGE_CHIP_CLASS: Record<AgingTier, string> = {
+  ok: "",
+  watch: "bg-warning-bg text-warning-foreground border-warning-border",
+  overdue: "bg-error-bg text-error border-error-border",
+};
+
+function AgeChip({ issue, policy }: { issue: IssueSummary; policy: AgingPolicy }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const { entries } = computeAging([issue], policy, today);
+  const entry = entries[0];
+  if (!entry) return null;
+  return (
+    <Badge
+      variant="outline"
+      className={cn("text-xs font-semibold flex-shrink-0 tabular-nums", AGE_CHIP_CLASS[entry.tier])}
+      title={agingDetail(entry)}
+    >
+      {entry.ageDays}d
+    </Badge>
+  );
+}
+
+function IssueCard({
+  issue,
+  prs,
+  agingPolicy = DEFAULT_AGING_POLICY,
+}: {
+  issue: IssueSummary;
+  prs?: LinkedPr[];
+  agingPolicy?: AgingPolicy;
+}) {
   const isBlocked = issue.blocked;
 
   return (
@@ -168,6 +213,8 @@ function IssueCard({ issue, prs }: { issue: IssueSummary; prs?: LinkedPr[] }) {
           <div className="flex items-center gap-1 flex-shrink-0">
             {/* v1.27 (ADR-039): linked-PR badge — clickable, opens newest PR */}
             <PrBadge prs={prs} />
+            {/* v1.58 (ADR-070): work-item age — only when the changelog resolved a start date */}
+            <AgeChip issue={issue} policy={agingPolicy} />
             {issue.storyPoints != null && (
               <Badge
                 variant="outline"
@@ -191,9 +238,11 @@ interface ColumnProps {
   issues: IssueSummary[];
   /** v1.27 (ADR-039): linked PRs per issue key for the card badge. */
   prsByKey?: Record<string, LinkedPr[]>;
+  /** v1.58 (ADR-070): aging expectation for the per-card age chip. */
+  agingPolicy?: AgingPolicy;
 }
 
-function SprintColumn({ colorKey, issues, prsByKey }: ColumnProps) {
+function SprintColumn({ colorKey, issues, prsByKey, agingPolicy }: ColumnProps) {
   const cfg = COLUMN_CONFIG[colorKey];
   const Icon = cfg.icon;
 
@@ -236,7 +285,7 @@ function SprintColumn({ colorKey, issues, prsByKey }: ColumnProps) {
           <ul className="flex flex-col gap-2" style={{ listStyle: "none" }}>
             {issues.map((issue) => (
               <li key={issue.key}>
-                <IssueCard issue={issue} prs={prsByKey?.[issue.key]} />
+                <IssueCard issue={issue} prs={prsByKey?.[issue.key]} agingPolicy={agingPolicy} />
               </li>
             ))}
           </ul>
@@ -741,6 +790,7 @@ export function SprintBoard({
   onAssigneeFilterChange,
   createSprintButton,
   prsByKey,
+  agingPolicy,
 }: SprintBoardProps) {
   // v1.3: "Show blocked" toggle state — composes with assignee filter
   const [showBlockedOnly, setShowBlockedOnly] = useState(false);
@@ -909,10 +959,10 @@ export function SprintBoard({
       {/* perf: 4-column grid; overflow-x-auto for 360px */}
       <div className="overflow-x-auto">
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 min-w-0">
-          <SprintColumn colorKey="todo"       issues={filteredTodo}       prsByKey={prsByKey} />
-          <SprintColumn colorKey="inprogress" issues={filteredInProgress} prsByKey={prsByKey} />
-          <SprintColumn colorKey="codereview" issues={filteredCodeReview} prsByKey={prsByKey} />
-          <SprintColumn colorKey="done"       issues={filteredDone}       prsByKey={prsByKey} />
+          <SprintColumn colorKey="todo"       issues={filteredTodo}       prsByKey={prsByKey} agingPolicy={agingPolicy} />
+          <SprintColumn colorKey="inprogress" issues={filteredInProgress} prsByKey={prsByKey} agingPolicy={agingPolicy} />
+          <SprintColumn colorKey="codereview" issues={filteredCodeReview} prsByKey={prsByKey} agingPolicy={agingPolicy} />
+          <SprintColumn colorKey="done"       issues={filteredDone}       prsByKey={prsByKey} agingPolicy={agingPolicy} />
         </div>
       </div>
     </div>

@@ -896,3 +896,69 @@ describe("SprintBoard", () => {
     expect(screen.queryByRole("link", { name: /linked pull request/i })).toBeNull();
   });
 });
+
+// ── Age chip (v1.58, ADR-070) ─────────────────────────────────────────────────
+
+describe("SprintBoard — work-item age chip (v1.58)", () => {
+  /** SAMPLE_SPRINT with `inProgressSince` stamped onto one in-progress issue. */
+  function withAge(daysAgo: number, over: Record<string, unknown> = {}): typeof SAMPLE_SPRINT {
+    const since = new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+    return {
+      ...SAMPLE_SPRINT,
+      issuesByStatus: {
+        ...SAMPLE_SPRINT.issuesByStatus,
+        inprogress: [{ ...SAMPLE_SPRINT.issuesByStatus.inprogress[0]!, inProgressSince: since, ...over }],
+      },
+    };
+  }
+
+  it("shows no chip when the issue has no known start (the default fixture)", () => {
+    render(<SprintBoard data={SAMPLE_SPRINT} loading={false} error={null} onRefresh={() => undefined} />);
+    expect(screen.queryByTitle(/in In Progress \(expected/)).toBeNull();
+  });
+
+  it("shows an age chip with the points-scaled expectation when the start is known", () => {
+    render(
+      <SprintBoard
+        data={withAge(3)}
+        loading={false}
+        error={null}
+        onRefresh={() => undefined}
+        agingPolicy={{ baseDays: 1, daysPerPoint: 1 }}
+      />
+    );
+    // DEV-11 is 5 pts → expected 6d; 3d in = ok
+    const chip = screen.getByTitle("3d in In Progress (expected ~6d for 5 pts)");
+    expect(chip.textContent).toBe("3d");
+  });
+
+  it("tints the chip when the ticket is past its expectation", () => {
+    render(
+      <SprintBoard
+        data={withAge(12)}
+        loading={false}
+        error={null}
+        onRefresh={() => undefined}
+        agingPolicy={{ baseDays: 1, daysPerPoint: 1 }}
+      />
+    );
+    // 12d vs expected 6d = 200% → overdue
+    const chip = screen.getByTitle(/12d in In Progress/);
+    expect(chip.className).toContain("text-error");
+  });
+
+  it("never chips a Done issue even if it carries a start date", () => {
+    const data = {
+      ...SAMPLE_SPRINT,
+      issuesByStatus: {
+        ...SAMPLE_SPRINT.issuesByStatus,
+        done: SAMPLE_SPRINT.issuesByStatus.done.map((i) => ({
+          ...i,
+          inProgressSince: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+        })),
+      },
+    };
+    render(<SprintBoard data={data} loading={false} error={null} onRefresh={() => undefined} />);
+    expect(screen.queryByTitle(/expected ~/)).toBeNull();
+  });
+});
