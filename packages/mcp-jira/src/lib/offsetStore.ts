@@ -19,6 +19,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { getOffsetFilePath } from "./config.js";
+import { writeJsonAtomic } from "./atomicFile.js";
 
 export interface OffsetSprintEntry {
   earned: number; // 0 or 1 (capped per sprint)
@@ -67,7 +68,7 @@ export function readOffset(): OffsetFile {
 export function writeOffset(data: OffsetFile): void {
   const filePath = getOffsetFilePath();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+  writeJsonAtomic(filePath, data);
 }
 
 /** Pure: reduce a ledger to per-assignee computed summaries (earned/spent/manualAdjust/adjustments/balance). */

@@ -2,8 +2,8 @@
 
 **Loopboard** is an Agile team dashboard and AI assistant that sits on top of your Jira (and,
 optionally, GitHub). It turns your sprint into a live board, a daily-huddle digest, planning and
-reporting tools, leave/capacity tracking, and an AI helper that drafts tickets, answers questions,
-and turns a ticket into a ready‑to‑paste coding‑agent prompt.
+reporting tools, leave/capacity tracking, and an AI helper that drafts tickets and answers
+questions.
 
 This guide has two parts:
 - **[What Loopboard offers](#what-loopboard-offers)** — a tour of every feature.
@@ -38,12 +38,15 @@ Your run‑the‑standup home screen.
   - **Code review** — pull requests linked to the sprint's tickets (multi‑repo), with approval status.
 - **Fly‑in tracker** — a strip highlighting "fly‑in" tickets across the Dev and PO boards.
 - **Auto‑refresh** every few minutes, with a "last updated" stamp.
-- **Ticket aging** — the sprint board's in‑progress and code‑review tickets each carry an age chip, and
-  the sidebar's **Ticket aging** card lists them worst‑first. Age is the time since the ticket entered
-  its current column (from the Jira changelog); the expected time is `base days + days‑per‑point ×
-  story points` (unpointed tickets use base days alone) — both admin‑configurable. A ticket reads **ok**
-  under 100% of that expectation, **watch** from 100–150%, and **overdue** past 150%. Tickets with no
-  changelog history show no age at all, rather than a guess.
+- **Ticket aging** — the sprint board's **In Progress** tickets each carry an age chip, and the
+  sidebar's **Ticket aging** card lists them worst‑first (code‑review tickets are *not* aged —
+  code review counts as done, per your Definition of Done). Age is the time since the ticket
+  entered the column (from the Jira changelog), and it never starts before the sprint does — a
+  ticket carried over mid‑flight starts its clock at the sprint's start date. The expected time is
+  `base days + days‑per‑point × story points` (unpointed tickets use base days alone) — both
+  admin‑configurable. A ticket reads **ok** under 100% of that expectation, **watch** from
+  100–150%, and **overdue** past 150%. Tickets with no changelog history show no age at all,
+  rather than a guess.
 
 ### 🗓️ Planning — grooming & sprint prep
 
@@ -92,17 +95,15 @@ Everything you need to prepare the next sprint.
   reduces that developer's sprint target by a point, so their **met target** mark reflects the adjusted
   number, not the flat team target.
 
-### ✨ Task Helper — your personal ticket → prompt assistant
+### 🔌 Accounts & Connections
 
-A **login‑gated, per‑user** tab: sign up, connect **your own** Jira and GitHub, then:
+Loopboard is **login‑gated and per‑user**: sign up, then open the **Connections** tab and connect
+**your own** Jira and GitHub tokens (plus an AI token if you want the AI features) — the app
+unlocks the moment Jira and GitHub are connected.
 
-1. **Pick a ticket** from your sprint.
-2. Optionally add repo/stack context.
-3. Click **Refine & build prompt** — the AI refines the ticket into a crisp spec and produces a
-   **ready‑to‑paste prompt for a coding agent** (Copilot, Claude Code, Cursor).
-
-Your tokens are **encrypted at rest and never shown back to you** (only a masked hint). Nothing is
-written back to Jira. See [Enabling the Task Helper](#enabling-the-task-helper) to turn it on.
+Your tokens are **encrypted at rest and never shown back to you** (only a masked "…last4" hint).
+Admins can also onboard viewers on **shared credentials** (read‑only against Jira unless granted
+writes). See [Enabling accounts (login)](#enabling-accounts-login) to turn accounts on.
 
 ### 🤖 AI assistant (floating widget)
 
@@ -330,10 +331,10 @@ npm run typecheck && npm run test && npm run build   # all green, no network nee
 node scripts/smoke.mjs                               # boots both bridges with stub creds
 ```
 
-### Enabling the Task Helper
+### Enabling accounts (login)
 
-The Task Helper is **off by default**. To turn it on, add two secrets to the bridge's `.env` and
-restart it:
+Per‑user accounts (the login gate + the Connections tab) are **off by default**. To turn them on,
+add two secrets to the bridge's `.env` and restart it:
 
 ```bash
 # generate the values:
@@ -346,15 +347,15 @@ TOKEN_ENC_KEY=<32-byte base64 value>
 SESSION_SECRET=<random base64 value>
 ```
 
-Then each teammate opens the **Task Helper** tab, **signs up**, and **connects their own** Jira and
-GitHub tokens. Tokens are AES‑256‑GCM encrypted at rest and are never returned to the browser.
+Then each teammate **signs up** on the login screen and **connects their own** Jira and GitHub
+tokens on the **Connections** tab. Tokens are AES‑256‑GCM encrypted at rest and are never returned
+to the browser.
 
 ---
 
 ## Tips & FAQ
 
-- **PO vs. Dev board:** use the board switcher (top‑right) to flip context. Linking and the Task Helper
-  work across both.
+- **PO vs. Dev board:** use the board switcher (top‑right) to flip context. Linking works across both.
 - **Collapsing clutter:** every Huddle sidebar card collapses via the chevron in its header — handy on
   long sprints. Your choices persist per browser.
 - **"Bridge is offline":** a page can't reach the Jira/GitHub bridge — make sure `npm run dev:all` (or
@@ -362,7 +363,7 @@ GitHub tokens. Tokens are AES‑256‑GCM encrypted at rest and are never return
 - **Sprint reports look empty:** confirm the board id is correct and the sprint has issues assigned to
   your rostered team members.
 - **Security:** API tokens live only in the server's `.env` (team config) or the encrypted per‑user
-  vault (Task Helper). They are never logged or sent to the browser.
+  vault (Connections). They are never logged or sent to the browser.
 
 ---
 

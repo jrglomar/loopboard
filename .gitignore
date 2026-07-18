@@ -39,6 +39,8 @@ coverage/
 *.loopboard-users.json
 # Per-user store dir (v1.45 — each user's leaves/team/retro/etc. JSON, NEVER committed)
 .loopboard-user-stores/
+# Crash-leftover atomic-write temp files (v1.63 — writeJsonAtomic's same-dir *.tmp before rename)
+*.tmp
 
 # Editor / OS
 .DS_Store

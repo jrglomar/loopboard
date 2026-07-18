@@ -2,7 +2,13 @@
 // Pure functions; no mocks needed. Keyless/offline.
 
 import { describe, it, expect } from "vitest";
-import { lastNClosedSprintIds, sprintIdsInDateRange, defaultRangeFromClosed } from "./sprintRange";
+import {
+  lastNClosedSprintIds,
+  sprintIdsInDateRange,
+  defaultRangeFromClosed,
+  capSprintWindow,
+  MAX_SPRINT_WINDOW,
+} from "./sprintRange";
 import type { SprintRef } from "./types";
 
 function sprint(partial: Partial<SprintRef> & { id: number }): SprintRef {
@@ -166,5 +172,49 @@ describe("defaultRangeFromClosed", () => {
   it("returns null when every sprint in the slice has a null startDate", () => {
     const closed: SprintRef[] = [sprint({ id: 2, startDate: null }), sprint({ id: 1, startDate: null })];
     expect(defaultRangeFromClosed(closed, 10, TODAY)).toBeNull();
+  });
+});
+
+// v1.61 (ADR-073, item 175): client-side cap at the §4.29 sprintIds limit (26) — "range" and
+// "pick" mode selections can exceed it on a real board; keep the NEWEST ids (chronological
+// oldest→newest convention throughout this lib, so "newest" = the tail).
+describe("capSprintWindow", () => {
+  it("MAX_SPRINT_WINDOW is 26", () => {
+    expect(MAX_SPRINT_WINDOW).toBe(26);
+  });
+
+  it("under the cap: returns the ids unchanged, capped false", () => {
+    const ids = [1, 2, 3];
+    expect(capSprintWindow(ids)).toEqual({ ids: [1, 2, 3], capped: false });
+  });
+
+  it("exactly at the cap: returns the ids unchanged, capped false", () => {
+    const ids = Array.from({ length: 26 }, (_, i) => i + 1); // chronological 1..26
+    const result = capSprintWindow(ids);
+    expect(result.capped).toBe(false);
+    expect(result.ids).toEqual(ids);
+    expect(result.ids).toHaveLength(26);
+  });
+
+  it("over the cap: keeps the NEWEST 26 (the tail — highest ids here) and reports capped true", () => {
+    const ids = Array.from({ length: 30 }, (_, i) => i + 1); // chronological 1..30
+    const result = capSprintWindow(ids);
+    expect(result.capped).toBe(true);
+    expect(result.ids).toHaveLength(26);
+    expect(result.ids).toEqual(Array.from({ length: 26 }, (_, i) => i + 5)); // 5..30
+    expect(result.ids[0]).toBe(5);
+    expect(result.ids[result.ids.length - 1]).toBe(30);
+  });
+
+  it("honors a custom max override", () => {
+    const ids = [1, 2, 3, 4, 5];
+    expect(capSprintWindow(ids, 3)).toEqual({ ids: [3, 4, 5], capped: true });
+  });
+
+  it("does not mutate the input array", () => {
+    const ids = Array.from({ length: 30 }, (_, i) => i + 1);
+    const copy = [...ids];
+    capSprintWindow(ids);
+    expect(ids).toEqual(copy);
   });
 });

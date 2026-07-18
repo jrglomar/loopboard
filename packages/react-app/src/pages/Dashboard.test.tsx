@@ -185,6 +185,36 @@ describe("Dashboard — board toggle (v1.6, ADR-017)", () => {
     expect(calls.some((args) => args[0] === 20 && args[2] === true)).toBe(false);
   });
 
+  // v1.61 (ADR-073, item 173): AgingCard gets ONLY the inprogress bucket — code review counts
+  // as done (ADR-014 DoD) and the tool no longer enriches it with inProgressSince.
+  it("v1.61 (ADR-073): AgingCard renders only the inprogress bucket, never code review", async () => {
+    const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+    const inProgressIssue = {
+      key: "DEV-1", summary: "In flight", status: "In Progress", statusCategory: "inprogress" as const,
+      assignee: "Alice", assigneeAccountId: "a1", storyPoints: 1, issueType: "Task",
+      url: "https://j/browse/DEV-1", blocked: false, inProgressSince: daysAgo(5),
+    };
+    const codeReviewIssue = {
+      key: "DEV-2", summary: "In review", status: "Code Review", statusCategory: "inprogress" as const,
+      assignee: "Bob", assigneeAccountId: "b1", storyPoints: 1, issueType: "Task",
+      url: "https://j/browse/DEV-2", blocked: false, inProgressSince: daysAgo(2),
+    };
+    vi.mocked(useJiraModule.useActiveSprint).mockReturnValue({
+      data: {
+        ...DEV_SPRINT_DATA,
+        issuesByStatus: { todo: [], inprogress: [inProgressIssue], codereview: [codeReviewIssue], done: [] },
+      },
+      loading: false,
+      error: null,
+      run: vi.fn(),
+    });
+
+    render(<Dashboard />);
+    const list = await screen.findByRole("list", { name: /ticket aging/i });
+    expect(list.textContent).toContain("DEV-1");
+    expect(list.textContent).not.toContain("DEV-2");
+  });
+
   it("PO button has aria-pressed=true after clicking PO", async () => {
     render(<Dashboard />);
     await waitFor(() => screen.getByRole("button", { name: "PO" }));

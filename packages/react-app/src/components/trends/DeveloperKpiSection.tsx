@@ -7,9 +7,12 @@
 // Uses a NATIVE <select> — Radix Select is jsdom-hostile (ADR-009).
 
 import { useMemo, useState } from "react";
-import { UserRound } from "lucide-react";
+import { FileSpreadsheet, UserRound } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { formatPoints } from "../../lib/format";
+import { buildDeveloperKpisWorkbook } from "../../lib/trendsXlsx"; // v1.61 (ADR-073, item 177)
+import { saveBlob } from "../SprintReviewExport";
 import { MultiSprintBarChart } from "./MultiSprintBarChart";
 import type { DevKpi } from "../../lib/kpiAdjust";
 import type { MultiSprintReport } from "../../lib/types";
@@ -18,6 +21,8 @@ export function DeveloperKpiSection({
   report,
   devKpis,
   leavesLoading = false,
+  boardLabel = "Dev",
+  boardSlug = "dev",
 }: {
   /** Kept for the window size (sprint names/order also live on each DevKpi.perSprint). */
   report: MultiSprintReport;
@@ -25,6 +30,10 @@ export function DeveloperKpiSection({
   devKpis: DevKpi[];
   /** v1.60 — true while the leaves store is still loading (targets shown unadjusted meanwhile). */
   leavesLoading?: boolean;
+  /** v1.61 (ADR-073, item 177) — friendly board label for the styled xlsx workbook's title band. */
+  boardLabel?: string;
+  /** v1.61 (ADR-073, item 177) — url-safe board slug for the styled xlsx download's filename. */
+  boardSlug?: string;
 }) {
   // devKpis is already sorted donePoints desc (kpiAdjust contract) — names[0] IS "top donePoints",
   // so no extra sort is needed here.
@@ -64,6 +73,17 @@ export function DeveloperKpiSection({
 
   const activeCount = dev.perSprint.filter((s) => s.active).length;
 
+  // v1.61 (ADR-073, item 177): styled workbook of EVERY dev's leave-adjusted per-sprint KPIs
+  // (not just the one selected above) — a SEPARATE download from the team-trends button in
+  // TrendsView's own export bar.
+  function handleDownloadXlsx() {
+    const bytes = buildDeveloperKpisWorkbook(devKpis, boardLabel);
+    saveBlob(
+      new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+      `trends-devs-${boardSlug}.xlsx`
+    );
+  }
+
   return (
     <Card className="shadow-sm h-full">
       <CardHeader className="pb-2">
@@ -72,7 +92,7 @@ export function DeveloperKpiSection({
             <UserRound className="h-4 w-4 text-primary" aria-hidden="true" />
             Developer KPIs
           </h3>
-          <div>
+          <div className="flex items-center gap-2">
             <label htmlFor="trends-dev-picker" className="sr-only">
               Select developer
             </label>
@@ -90,6 +110,16 @@ export function DeveloperKpiSection({
                 </option>
               ))}
             </select>
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              onClick={handleDownloadXlsx}
+              aria-label="Export developer KPIs as styled Excel workbook"
+            >
+              <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" aria-hidden="true" />
+              Export .xlsx
+            </Button>
           </div>
         </div>
         {leavesLoading && (

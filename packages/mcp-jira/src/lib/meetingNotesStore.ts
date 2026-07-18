@@ -13,6 +13,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { getMeetingNotesFilePath } from "./config.js";
+import { writeJsonAtomic } from "./atomicFile.js";
 
 export interface MeetingNotes {
   html: string;
@@ -41,5 +42,5 @@ export function readMeetingNotes(): MeetingNotesFile {
 export function writeMeetingNotes(data: MeetingNotesFile): void {
   const filePath = getMeetingNotesFilePath();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+  writeJsonAtomic(filePath, data);
 }

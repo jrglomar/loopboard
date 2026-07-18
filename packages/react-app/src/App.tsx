@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LayoutDashboard, CalendarRange, CalendarDays, Link2, BarChart3, Sparkles, Plug, ShieldCheck, BookOpen, LogOut } from "lucide-react";
+import { LayoutDashboard, CalendarRange, CalendarDays, Link2, BarChart3, Plug, ShieldCheck, BookOpen, LogOut } from "lucide-react";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { AppGate } from "./components/AppGate";
 import { Dashboard } from "./pages/Dashboard";
@@ -7,7 +7,6 @@ import { Planning } from "./pages/Planning";
 import { Leaves } from "./pages/Leaves";
 import { Linking } from "./pages/Linking";
 import { Reports } from "./pages/Reports";
-import { TaskHelper } from "./pages/TaskHelper";
 import { Connections } from "./pages/Connections";
 import { Admin } from "./pages/Admin";
 import { Guide } from "./pages/Guide";
@@ -21,12 +20,13 @@ import { cn } from "@/lib/utils";
 
 // v1.7 (ADR-018): "Ticket Generator" tab removed; replaced by "Planning" tab.
 // v1.11 (ADR-022): "Linking" tab added (bulk PO→Dev ticket creation).
-// v1.44 (ADR-054): "Task Helper" tab added (login-gated, per-user Jira/GitHub + AI prompt).
 // v1.45 (ADR-055): "Admin" tab added (admin-only super-admin console).
-// v1.47 (ADR-057): "Connections" tab added — account setup split out of the Task Helper.
+// v1.47 (ADR-057): "Connections" tab added — account setup split out into its own tab.
 // v1.49 (ADR-060): "guide" — an in-app user guide, reached from a header button (not a tab, to
 // avoid crowding the tab bar per the v1.48 UI review).
-type Tab = "dashboard" | "planning" | "leaves" | "linking" | "reports" | "taskhelper" | "connections" | "admin" | "guide";
+// v1.61 (ADR-073, item 179): the v1.44 per-user ticket→prompt helper tab retired (UI only —
+// the §7/§8 backend routes/stores stay dormant; login, Connections and Admin are app-wide).
+type Tab = "dashboard" | "planning" | "leaves" | "linking" | "reports" | "connections" | "admin" | "guide";
 
 const TABS: { id: Tab; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "dashboard", label: "Huddle", icon: LayoutDashboard },
@@ -34,7 +34,6 @@ const TABS: { id: Tab; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "leaves", label: "Offset Tracker", icon: CalendarDays },
   { id: "linking", label: "Linking", icon: Link2 },
   { id: "reports", label: "Reports", icon: BarChart3 },
-  { id: "taskhelper", label: "Task Helper", icon: Sparkles },
   { id: "connections", label: "Connections", icon: Plug },
 ];
 
@@ -204,8 +203,6 @@ function AppShell() {
         {activeTab === "leaves" && <Leaves {...shared} />}
         {activeTab === "linking" && <Linking />}
         {activeTab === "reports" && <Reports {...shared} />}
-        {/* v1.46 (Phase F): Task Helper scopes "my tickets" to the shared board+sprint pick */}
-        {activeTab === "taskhelper" && <TaskHelper {...shared} />}
         {activeTab === "connections" && <Connections />}
         {activeTab === "admin" && <Admin />}
         {activeTab === "guide" && <Guide />}

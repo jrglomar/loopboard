@@ -136,6 +136,56 @@ describe("computeAging", () => {
   });
 });
 
+// v1.61 (ADR-073, item 174): display-only clamp to the sprint start — a carried-over ticket's
+// shown age starts at max(inProgressSince, sprintStart), never the tool's raw (older) fact.
+describe("computeAging — sprint-start clamp (v1.61, ADR-073, item 174)", () => {
+  it("clamps: inProgressSince BEFORE sprintStart → age counts from sprintStart", () => {
+    // Entered its status 9d ago, but the CURRENT sprint only started 3d ago — carried over.
+    const sprintStart = new Date(Date.UTC(2026, 6, 13)).toISOString(); // 2026-07-13, 3d before TODAY
+    const { entries } = computeAging([aged(9)], POLICY, TODAY, sprintStart);
+    expect(entries[0]!.ageDays).toBe(3);
+  });
+
+  it("unchanged: inProgressSince ON/AFTER sprintStart → uses inProgressSince as-is", () => {
+    const sprintStart = new Date(Date.UTC(2026, 6, 1)).toISOString(); // sprint started well before
+    const { entries } = computeAging([aged(2)], POLICY, TODAY, sprintStart);
+    expect(entries[0]!.ageDays).toBe(2); // inProgressSince (2d ago) is already the later date
+  });
+
+  it("equal boundary: inProgressSince EXACTLY on sprintStart → unaffected", () => {
+    const sprintStart = `${TODAY}T00:00:00.000Z`;
+    const { entries } = computeAging([aged(0)], POLICY, TODAY, sprintStart);
+    expect(entries[0]!.ageDays).toBe(0);
+  });
+
+  it("unclamped when sprintStartIso is omitted (identical to pre-v1.61 behavior)", () => {
+    const { entries } = computeAging([aged(9)], POLICY, TODAY);
+    expect(entries[0]!.ageDays).toBe(9);
+  });
+
+  it("unclamped when sprintStartIso is explicitly null", () => {
+    const { entries } = computeAging([aged(9)], POLICY, TODAY, null);
+    expect(entries[0]!.ageDays).toBe(9);
+  });
+
+  it("normalizes a full ISO timestamp sprintStartIso through the calendar-day convention", () => {
+    // Late time-of-day, but still calendar-day 2026-07-14 (2d before TODAY).
+    const sprintStart = "2026-07-14T23:59:59.999Z";
+    const { entries } = computeAging([aged(9)], POLICY, TODAY, sprintStart);
+    expect(entries[0]!.ageDays).toBe(2);
+  });
+
+  it("recomputes expectedDays/ratio/tier against the CLAMPED age, not the raw one", () => {
+    // Raw 9d vs 4d expected would be overdue (225%); clamped to 1d vs 4d expected is ok (25%).
+    const sprintStart = new Date(Date.UTC(2026, 6, 15)).toISOString(); // 1d before TODAY
+    const { entries } = computeAging([aged(9, { storyPoints: 3 })], POLICY, TODAY, sprintStart);
+    expect(entries[0]!.ageDays).toBe(1);
+    expect(entries[0]!.expectedDays).toBe(4);
+    expect(entries[0]!.ratio).toBe(0.25);
+    expect(entries[0]!.tier).toBe("ok");
+  });
+});
+
 describe("agingDetail", () => {
   it("reads naturally for a pointed ticket", () => {
     const { entries } = computeAging([aged(5, { status: "Code Review", storyPoints: 3 })], POLICY, TODAY);

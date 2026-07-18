@@ -1402,10 +1402,12 @@ export function Reports({
   // ── Sprint picker state ─────────────────────────────────────────────────────
   const sprintList = useSprintList("all", selectedBoardId);
 
-  // v1.59 (ADR-071): page mode — "sprint" (existing per-sprint report, default) vs "trends"
-  // (Trends & KPIs). trendsBoardId falls back to the resolved sprint-list boardId when the
-  // boards context hasn't loaded yet (legacy/older-bridge flows still need a concrete id).
-  const [mode, setMode] = useState<"sprint" | "trends">("sprint");
+  // v1.59 (ADR-071): page mode — "sprint" (existing per-sprint report) vs "trends" (Trends &
+  // KPIs). v1.61 (ADR-073, item 178): "trends" is now the DEFAULT — the toggle still switches
+  // back to the single-sprint report. trendsBoardId falls back to the resolved sprint-list
+  // boardId when the boards context hasn't loaded yet (legacy/older-bridge flows still need a
+  // concrete id).
+  const [mode, setMode] = useState<"sprint" | "trends">("trends");
   const trendsBoardId = selectedBoardId ?? sprintList.data?.boardId;
   // v1.60 (ADR-072): the per-user offset policy's required points feed TrendsView's
   // leave-adjusted per-developer targets. Pages call context hooks; components take props.
@@ -1553,7 +1555,8 @@ export function Reports({
       </div>
 
       {/* v1.59 (ADR-071): Trends & KPIs mode — the entire sprint-report path below is
-          untouched; it only renders in "sprint" mode (the default). */}
+          untouched; it only renders in "sprint" mode. v1.61 (ADR-073, item 178): "trends" is
+          now the default mode. */}
       {mode === "trends" && trendsBoardId !== undefined && (
         <TrendsView
           boardId={trendsBoardId}

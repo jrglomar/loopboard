@@ -12,6 +12,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { getPostScrumFilePath } from "./config.js";
+import { writeJsonAtomic } from "./atomicFile.js";
 
 export interface PostScrumNote {
   id: string;
@@ -43,5 +44,5 @@ export function readPostScrum(): PostScrumFile {
 export function writePostScrum(data: PostScrumFile): void {
   const filePath = getPostScrumFilePath();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+  writeJsonAtomic(filePath, data);
 }

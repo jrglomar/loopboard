@@ -7,6 +7,7 @@ import { CalendarRange } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { MAX_SPRINT_WINDOW } from "../../lib/sprintRange";
 import type { SprintRef } from "../../lib/types";
 
 export type TrendsSelectionMode = "recent" | "pick" | "range";
@@ -46,10 +47,14 @@ function formatDate(iso: string | null | undefined): string {
 function SprintCheckbox({
   sprint,
   checked,
+  disabled,
   onToggle,
 }: {
   sprint: SprintRef;
   checked: boolean;
+  /** v1.61 (ADR-073, item 175) — true once MAX_SPRINT_WINDOW are picked AND this one isn't
+   *  already one of them; lets the user uncheck an existing pick but not add past the cap. */
+  disabled: boolean;
   onToggle: () => void;
 }) {
   const inputId = `trends-pick-${sprint.id}`;
@@ -59,10 +64,14 @@ function SprintCheckbox({
         id={inputId}
         type="checkbox"
         checked={checked}
+        disabled={disabled}
         onChange={onToggle}
-        className="h-4 w-4 rounded border-input"
+        className="h-4 w-4 rounded border-input disabled:opacity-40 disabled:cursor-not-allowed"
       />
-      <label htmlFor={inputId} className="text-sm text-foreground flex-1 cursor-pointer">
+      <label
+        htmlFor={inputId}
+        className={`text-sm flex-1 ${disabled ? "text-muted-foreground cursor-not-allowed" : "text-foreground cursor-pointer"}`}
+      >
         {sprint.name}{" "}
         <span className="text-xs text-muted-foreground">
           ({formatDate(sprint.startDate)} – {formatDate(sprint.endDate)})
@@ -87,6 +96,10 @@ export function SprintRangePicker({
   onRangeEndChange,
 }: SprintRangePickerProps) {
   const pickedSet = new Set(pickedIds);
+  // v1.61 (ADR-073, item 175): get_multi_sprint_report rejects sprintIds arrays over
+  // MAX_SPRINT_WINDOW (26, §4.29) — once that many are picked, block adding more (but never
+  // block unchecking an existing pick, so the user can always swap one out).
+  const atMax = pickedIds.length >= MAX_SPRINT_WINDOW;
 
   return (
     <Card className="shadow-sm">
@@ -148,44 +161,64 @@ export function SprintRangePicker({
         )}
 
         {mode === "pick" && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
-                Active
+          <div>
+            {/* a11y: role="group" + a visible label — the (max 26) hint sits right beside it,
+                v1.61 (ADR-073, item 175). Scoped to the FULL picked set (Active + Closed
+                combined), not per-column. */}
+            <div className="flex items-center gap-1.5 mb-2">
+              <p
+                id="trends-pick-group-label"
+                className="text-xs font-medium text-muted-foreground uppercase tracking-wide"
+              >
+                Select sprints
               </p>
-              {active.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No active sprints.</p>
-              ) : (
-                <ul className="space-y-0.5" style={{ listStyle: "none" }}>
-                  {active.map((s) => (
-                    <SprintCheckbox
-                      key={s.id}
-                      sprint={s}
-                      checked={pickedSet.has(s.id)}
-                      onToggle={() => onTogglePicked(s.id)}
-                    />
-                  ))}
-                </ul>
-              )}
+              <span className="text-xs text-muted-foreground normal-case">(max 26)</span>
             </div>
-            <div>
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
-                Closed
-              </p>
-              {closed.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No closed sprints.</p>
-              ) : (
-                <ul className="space-y-0.5" style={{ listStyle: "none" }}>
-                  {closed.map((s) => (
-                    <SprintCheckbox
-                      key={s.id}
-                      sprint={s}
-                      checked={pickedSet.has(s.id)}
-                      onToggle={() => onTogglePicked(s.id)}
-                    />
-                  ))}
-                </ul>
-              )}
+            <div
+              role="group"
+              aria-labelledby="trends-pick-group-label"
+              className="grid grid-cols-1 sm:grid-cols-2 gap-4"
+            >
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+                  Active
+                </p>
+                {active.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No active sprints.</p>
+                ) : (
+                  <ul className="space-y-0.5" style={{ listStyle: "none" }}>
+                    {active.map((s) => (
+                      <SprintCheckbox
+                        key={s.id}
+                        sprint={s}
+                        checked={pickedSet.has(s.id)}
+                        disabled={atMax && !pickedSet.has(s.id)}
+                        onToggle={() => onTogglePicked(s.id)}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
+                  Closed
+                </p>
+                {closed.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No closed sprints.</p>
+                ) : (
+                  <ul className="space-y-0.5" style={{ listStyle: "none" }}>
+                    {closed.map((s) => (
+                      <SprintCheckbox
+                        key={s.id}
+                        sprint={s}
+                        checked={pickedSet.has(s.id)}
+                        disabled={atMax && !pickedSet.has(s.id)}
+                        onToggle={() => onTogglePicked(s.id)}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
           </div>
         )}

@@ -1,6 +1,7 @@
 // LoginForm (v1.44/v1.48, ADR-054) — the app-wide sign-in / sign-up form, rendered by AppGate.
-// v1.48 (UI review COPY-01/A11Y-05): copy addresses the whole app (not just the Task Helper), and
+// v1.48 (UI review COPY-01/A11Y-05): copy addresses the whole app (not just one tab), and
 // the form leads with a single <h1> so the entry screen has a valid heading outline.
+// (Folder name is historical — this form is app-wide infrastructure.)
 
 import { useState, type FormEvent } from "react";
 import { LogIn, UserPlus, AlertCircle, Loader2 } from "lucide-react";

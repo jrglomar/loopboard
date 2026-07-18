@@ -1,6 +1,7 @@
 // ConnectionsPanel (v1.44, ADR-054) — connect / disconnect the signed-in user's own Jira &
 // GitHub. Tokens are typed once and sent to the server; they are never displayed back
-// (only a masked "…last4" hint). Reports status changes up so the Task Helper can enable itself.
+// (only a masked "…last4" hint). Reports status changes up so the login gate / Connections tab
+// can re-resolve readiness. (Folder name is historical — this panel is app-wide infrastructure.)
 
 import { useEffect, useState, type FormEvent } from "react";
 import { Link2, Github, Sparkles, CheckCircle2, AlertCircle, Loader2, Trash2, Share2 } from "lucide-react";

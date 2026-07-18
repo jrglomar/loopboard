@@ -1,5 +1,6 @@
-// Task Helper connections client (v1.44, ADR-054) — the signed-in user's own Jira/GitHub
-// connections. Tokens are sent once (to connect) and NEVER returned by the server.
+// Connections client (v1.44, ADR-054) — the signed-in user's own Jira/GitHub connections
+// (the Connections tab + onboarding gate). Tokens are sent once (to connect) and NEVER
+// returned by the server.
 
 import { credFetch } from "./authClient";
 

@@ -11,6 +11,7 @@ import * as crypto from "crypto";
 import { getTaskHelperFilePath } from "./config.js";
 import type { SealedSecret } from "./crypto/secretBox.js";
 import type { AdminConfig } from "./adminConfig.js";
+import { writeJsonAtomic } from "./atomicFile.js";
 
 export type ConnectionProvider = "jira" | "github" | "ai";
 
@@ -105,7 +106,7 @@ function read(): UserStoreFile {
 function write(data: UserStoreFile): void {
   const filePath = getTaskHelperFilePath();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+  writeJsonAtomic(filePath, data);
 }
 
 function normalizeEmail(email: string): string {

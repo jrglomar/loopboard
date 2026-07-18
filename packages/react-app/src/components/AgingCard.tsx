@@ -29,12 +29,16 @@ const TIER_TEXT: Record<AgingTier, string> = {
 export function AgingCard({
   issues,
   policy,
+  sprintStartDate,
 }: {
   issues: IssueSummary[];
   policy: AgingPolicy;
+  /** v1.61 (ADR-073, item 174) — clamps displayed age to max(inProgressSince, sprintStartDate)
+   *  so a carried-over ticket's clock starts at sprint start. Omitted/null → unclamped. */
+  sprintStartDate?: string | null;
 }) {
   const today = new Date().toISOString().slice(0, 10);
-  const { entries, okCount, watchCount, overdueCount } = computeAging(issues, policy, today);
+  const { entries, okCount, watchCount, overdueCount } = computeAging(issues, policy, today, sprintStartDate);
   const [collapsed, toggleCollapsed] = useCollapse("aging");
   // v1.60 (ADR-072): "Show all" is per-visit only — deliberately NOT persisted like the card's
   // own collapse state above (useCollapse), which survives reloads.
