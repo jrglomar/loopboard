@@ -1,5 +1,5 @@
 {
-  "name": "@loopboard/mcp-jira",
+  "name": "@invokeboard/mcp-jira",
   "version": "0.1.0",
   "private": true,
   "type": "module",

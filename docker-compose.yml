@@ -1,4 +1,4 @@
-# Loopboard — local / single-host Docker stack.
+# InvokeBoard — local / single-host Docker stack.
 #
 # Topology: the `web` (nginx) container serves the SPA AND reverse-proxies the
 # two MCP HTTP bridges, so the browser talks to ONE origin (http://localhost:8080)
@@ -22,16 +22,16 @@ services:
     build:
       context: .
       dockerfile: docker/jira.Dockerfile
-    image: loopboard/mcp-jira:latest
+    image: invokeboard/mcp-jira:latest
     env_file: .env
     environment:
       # Persist the host-local JSON stores on a named volume (defaults otherwise
       # live inside the package dir and would be lost on container rebuild).
-      JIRA_LEAVES_FILE: /data/.loopboard-leaves.json
-      JIRA_TEAM_FILE: /data/.loopboard-team.json
+      JIRA_LEAVES_FILE: /data/.invokeboard-leaves.json
+      JIRA_TEAM_FILE: /data/.invokeboard-team.json
       MCP_JIRA_HTTP_PORT: "4001"
     volumes:
-      - loopboard-data:/data
+      - invokeboard-data:/data
     ports:
       - "4001:4001"   # optional — direct API access for curl / debugging
     restart: unless-stopped
@@ -40,7 +40,7 @@ services:
     build:
       context: .
       dockerfile: docker/github.Dockerfile
-    image: loopboard/mcp-github:latest
+    image: invokeboard/mcp-github:latest
     env_file: .env
     environment:
       MCP_GITHUB_HTTP_PORT: "4002"
@@ -56,7 +56,7 @@ services:
         # Same-origin proxy paths — nginx routes these to the bridge containers.
         VITE_MCP_JIRA_URL: /jira
         VITE_MCP_GITHUB_URL: /github
-    image: loopboard/web:latest
+    image: invokeboard/web:latest
     depends_on:
       - jira
       - github
@@ -65,4 +65,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  loopboard-data:
+  invokeboard-data:

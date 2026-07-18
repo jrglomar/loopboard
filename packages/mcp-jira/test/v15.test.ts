@@ -104,7 +104,7 @@ beforeEach(() => {
   // Point JIRA_LEAVES_FILE at a unique temp file so tests don't touch the real default
   tempLeavesFile = path.join(
     os.tmpdir(),
-    `loopboard-leaves-test-${process.pid}-${Date.now()}.json`
+    `invokeboard-leaves-test-${process.pid}-${Date.now()}.json`
   );
   process.env["JIRA_LEAVES_FILE"] = tempLeavesFile;
   resetConfigCache(); // pick up JIRA_LEAVES_FILE

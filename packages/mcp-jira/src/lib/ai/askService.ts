@@ -121,7 +121,7 @@ function buildSystem(ctx: AskContext): string {
       : [];
 
   return [
-    "You are Loopboard's Scrum assistant. Answer the user's question about the team's current",
+    "You are InvokeBoard's Scrum assistant. Answer the user's question about the team's current",
     "sprint using ONLY the provided tools and their results — never invent data.",
     "Be concise and concrete; prefer a short, direct answer. If a tool returns nothing relevant,",
     "say so plainly rather than guessing.",

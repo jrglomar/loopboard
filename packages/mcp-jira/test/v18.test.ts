@@ -99,7 +99,7 @@ beforeEach(() => {
   // Point JIRA_TEAM_FILE at a unique temp file so tests don't touch the real default
   tempTeamFile = path.join(
     os.tmpdir(),
-    `loopboard-team-test-${process.pid}-${Date.now()}.json`
+    `invokeboard-team-test-${process.pid}-${Date.now()}.json`
   );
   process.env["JIRA_TEAM_FILE"] = tempTeamFile;
   resetConfigCache(); // pick up JIRA_TEAM_FILE

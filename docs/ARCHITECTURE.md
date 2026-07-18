@@ -1,4 +1,4 @@
-# Loopboard — Architecture
+# InvokeBoard — Architecture
 
 **Version:** 1.0  
 **Date:** 2026-06-11  
@@ -25,7 +25,7 @@
           │                     │                      │
           ▼                     ▼                      ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                         LOOPBOARD [System]                                 │
+│                         INVOKEBOARD [System]                               │
 │                                                                                     │
 │   Exposes:                                                                          │
 │   • MCP tools via stdio (consumed by GitHub Copilot / Claude)                      │
@@ -61,7 +61,7 @@ The system talks to two external services:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────┐
-│                              LOOPBOARD (monorepo)                         │
+│                              INVOKEBOARD (monorepo)                       │
 │                                                                                    │
 │  ┌─────────────────────────────────────────────────────────┐                      │
 │  │  packages/mcp-jira  (Node.js + TypeScript)              │                      │
@@ -194,7 +194,7 @@ The system talks to two external services:
 
 **What:** All three packages live in one git repository under `packages/`, connected by `npm workspaces` in the root `package.json`.
 
-**Why:** The React app and the MCP servers share type definitions and must agree on interface shapes without a published npm registry. Workspaces allow `import` across packages during development. The decision not to create a shared `@loopboard/shared` types package for the POC is documented in ADR-005.
+**Why:** The React app and the MCP servers share type definitions and must agree on interface shapes without a published npm registry. Workspaces allow `import` across packages during development. The decision not to create a shared `@invokeboard/shared` types package for the POC is documented in ADR-005.
 
 ---
 
@@ -362,7 +362,7 @@ When this POC graduates to a team-hosted service, the following changes are expe
 | Multi-user | `getConfig()` becomes request-scoped, reading per-user credentials from session |
 | Persistence | Optional: a lightweight store for audit log of AI-created tickets |
 | Observability | Structured JSON logging, request tracing, Sentry or similar |
-| Shared types | Extract `@loopboard/shared` package (see ADR-005) |
+| Shared types | Extract `@invokeboard/shared` package (see ADR-005) |
 | MCP transport | `StreamableHTTP` transport for hosted Copilot Extension or other remote MCP clients |
 
 ---
@@ -466,7 +466,7 @@ flowchart TB
     web["web (nginx)<br/>SPA + reverse proxy"]
     jira["jira<br/>tsx src/http.ts :4001"]
     gh["github<br/>tsx src/http.ts :4002"]
-    vol[("loopboard-data volume<br/>/data/.loopboard-*.json")]
+    vol[("invokeboard-data volume<br/>/data/.invokeboard-*.json")]
   end
   user --> web
   web -- "/jira/* → :4001/*" --> jira
@@ -480,7 +480,7 @@ flowchart TB
 | Container | Image base | Runs | Port | Notes |
 |---|---|---|---|---|
 | `web` | `nginx:alpine` (multi-stage build via `node:20-alpine`) | SPA + reverse proxy | `8080:80` | SPA built with `VITE_MCP_JIRA_URL=/jira`, `VITE_MCP_GITHUB_URL=/github` |
-| `jira` | `node:20-alpine` | `tsx src/http.ts` | `4001` | mounts `loopboard-data:/data`; `JIRA_LEAVES_FILE`/`JIRA_TEAM_FILE` → `/data` |
+| `jira` | `node:20-alpine` | `tsx src/http.ts` | `4001` | mounts `invokeboard-data:/data`; `JIRA_LEAVES_FILE`/`JIRA_TEAM_FILE` → `/data` |
 | `github` | `node:20-alpine` | `tsx src/http.ts` | `4002` | — |
 
 **Why `tsx` at runtime:** the MCP packages' `build` script is `tsc --noEmit`

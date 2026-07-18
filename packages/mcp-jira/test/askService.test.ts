@@ -15,7 +15,7 @@ let dir: string;
 let impFile: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "loopboard-ask-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "invokeboard-ask-"));
   impFile = path.join(dir, "imp.json");
   fs.writeFileSync(impFile, JSON.stringify({ "100": [{ id: "a", text: "infra is down", createdAt: "t" }] }));
   process.env["JIRA_BASE_URL"] = "https://test.atlassian.net";

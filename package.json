@@ -1,8 +1,8 @@
 {
-  "name": "loopboard",
+  "name": "invokeboard",
   "version": "0.1.0",
   "private": true,
-  "description": "Loopboard POC — MCP servers + React dashboard for AI-assisted sprint management",
+  "description": "InvokeBoard POC — MCP servers + React dashboard for AI-assisted sprint management",
   "workspaces": [
     "packages/*"
   ],

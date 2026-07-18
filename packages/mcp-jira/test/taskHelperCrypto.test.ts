@@ -99,13 +99,13 @@ describe("session (HMAC token)", () => {
 
 describe("readCookie", () => {
   it("extracts a named cookie from the Cookie header", () => {
-    const req = { headers: { cookie: "foo=1; lb_session=abc.def; bar=2" } } as unknown as Request;
-    expect(readCookie(req, "lb_session")).toBe("abc.def");
+    const req = { headers: { cookie: "foo=1; ib_session=abc.def; bar=2" } } as unknown as Request;
+    expect(readCookie(req, "ib_session")).toBe("abc.def");
     expect(readCookie(req, "missing")).toBeUndefined();
   });
 
   it("returns undefined when there is no Cookie header", () => {
     const req = { headers: {} } as unknown as Request;
-    expect(readCookie(req, "lb_session")).toBeUndefined();
+    expect(readCookie(req, "ib_session")).toBeUndefined();
   });
 });

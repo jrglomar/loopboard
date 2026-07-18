@@ -8,7 +8,7 @@
 # emitting JS and running plain `node`.
 #
 # Build context = repo ROOT (npm workspaces need the root manifest + lockfile).
-#   docker build -f docker/jira.Dockerfile -t loopboard/mcp-jira .
+#   docker build -f docker/jira.Dockerfile -t invokeboard/mcp-jira .
 # ─────────────────────────────────────────────────────────────────────────────
 FROM node:20-alpine
 WORKDIR /app

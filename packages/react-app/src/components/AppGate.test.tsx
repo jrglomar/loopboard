@@ -42,7 +42,7 @@ describe("AppGate (v1.45)", () => {
   it("shows the login form (not the app) when not signed in", async () => {
     auth.getMe.mockRejectedValue({ code: "UNAUTHENTICATED", message: "Sign in" });
     renderGate();
-    await waitFor(() => expect(screen.getByText(/Sign in to Loopboard/i)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Sign in to InvokeBoard/i)).toBeTruthy());
     expect(screen.queryByText("PROTECTED APP")).toBeNull();
   });
 

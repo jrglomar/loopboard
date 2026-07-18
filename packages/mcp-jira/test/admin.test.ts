@@ -11,7 +11,7 @@ import { resetConfigCache, USER_STORES_DIR } from "../src/lib/config.js";
 import { upsertConnection, findUserByEmail } from "../src/lib/userStore.js";
 import { seal } from "../src/lib/crypto/secretBox.js";
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loopboard-admin-"));
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), "invokeboard-admin-"));
 const storeFile = path.join(dir, "users.json");
 
 process.env["JIRA_BASE_URL"] = "https://test.atlassian.net";
@@ -51,7 +51,7 @@ async function req(method: string, p: string, body?: unknown, cookie?: string) {
   const r = await fetch(`${baseUrl}${p}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const h = r.headers as unknown as { getSetCookie?: () => string[] };
   const cookies = h.getSetCookie ? h.getSetCookie() : [r.headers.get("set-cookie") ?? ""];
-  const session = cookies.map((c) => c.split(";")[0]).find((c) => c.startsWith("lb_session="));
+  const session = cookies.map((c) => c.split(";")[0]).find((c) => c.startsWith("ib_session="));
   const text = await r.text();
   return { status: r.status, text, json: JSON.parse(text) as any, cookie: session ?? null };
 }

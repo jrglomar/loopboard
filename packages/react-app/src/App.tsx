@@ -92,7 +92,7 @@ function AppShell() {
               <LayoutDashboard className="h-4 w-4 text-primary" aria-hidden="true" />
             </span>
             <span className="text-[1.0625rem] font-bold tracking-tight text-foreground select-none whitespace-nowrap">
-              Loop<span className="text-primary">board</span>
+              Invoke<span className="text-primary">Board</span>
             </span>
           </div>
 

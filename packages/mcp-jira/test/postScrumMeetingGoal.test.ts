@@ -15,7 +15,7 @@ let psFile: string;
 let mgFile: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "loopboard-daily-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "invokeboard-daily-"));
   psFile = path.join(dir, "post-scrum.json");
   mgFile = path.join(dir, "meeting-goal.json");
   process.env["JIRA_BASE_URL"] = "https://test.atlassian.net";

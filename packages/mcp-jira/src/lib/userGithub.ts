@@ -18,7 +18,7 @@ export async function validateGithub(token: string): Promise<GithubIdentity> {
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: "application/vnd.github+json",
-        "User-Agent": "loopboard-task-helper",
+        "User-Agent": "invokeboard-task-helper",
       },
     });
   } catch {

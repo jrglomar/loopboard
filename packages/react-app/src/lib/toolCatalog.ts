@@ -249,7 +249,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     group: "Assignment & roster",
     surface: "local",
     access: "read",
-    blurb: "The curated team roster Loopboard plans around, per board.",
+    blurb: "The curated team roster InvokeBoard plans around, per board.",
     appSurface: "Planning · Team roster",
     aiAssistant: "read",
   },

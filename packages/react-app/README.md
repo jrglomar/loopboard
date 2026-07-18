@@ -1,6 +1,6 @@
-# @loopboard/react-app
+# @invokeboard/react-app
 
-> Loopboard dashboard — sprint board, daily huddle digest, ticket generator, and chat command panel, built with Vite + React + TypeScript.
+> InvokeBoard dashboard — sprint board, daily huddle digest, ticket generator, and chat command panel, built with Vite + React + TypeScript.
 
 ## Pages
 

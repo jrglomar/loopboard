@@ -25,7 +25,7 @@ import { fetchMySprintIssues, fetchIssueDetail } from "../src/lib/userJira.js";
 import { getAiProvider } from "../src/lib/ai/provider.js";
 import { runTaskHelper } from "../src/lib/ai/taskHelperService.js";
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loopboard-tasks-"));
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), "invokeboard-tasks-"));
 process.env["JIRA_BASE_URL"] = "https://test.atlassian.net";
 process.env["JIRA_EMAIL"] = "t@example.com";
 process.env["JIRA_API_TOKEN"] = "tok";
@@ -62,7 +62,7 @@ async function req(method: string, p: string, body?: unknown, cookie?: string) {
   const r = await fetch(`${baseUrl}${p}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const h = r.headers as unknown as { getSetCookie?: () => string[] };
   const cookies = h.getSetCookie ? h.getSetCookie() : [r.headers.get("set-cookie") ?? ""];
-  const session = cookies.map((c) => c.split(";")[0]).find((c) => c.startsWith("lb_session="));
+  const session = cookies.map((c) => c.split(";")[0]).find((c) => c.startsWith("ib_session="));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return { status: r.status, json: (await r.json()) as any, cookie: session ?? null };
 }

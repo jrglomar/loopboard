@@ -17,7 +17,7 @@ let dir: string;
 let offsetFile: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "loopboard-offset-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "invokeboard-offset-"));
   offsetFile = path.join(dir, "offset.json");
   process.env["JIRA_BASE_URL"] = "https://test.atlassian.net";
   process.env["JIRA_EMAIL"] = "t@example.com";

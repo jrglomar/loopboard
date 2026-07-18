@@ -6,7 +6,7 @@
  *
  * Back-compat: the legacy shape was { [sprintId]: { [assignee]: string[] } } (untyped dates).
  * `readLeaves` NORMALIZES on read — a legacy `string[]` becomes `{ [date]: "VL" }` — so the
- * existing `.loopboard-leaves.json` keeps working without a migration step.
+ * existing `.invokeboard-leaves.json` keeps working without a migration step.
  *
  * v1.5 (ADR-016): first stateful store. Path read from config at call time (getLeavesFilePath()).
  * Reads tolerate a missing/corrupt file (returns {}). Writes create the file + parent dirs.

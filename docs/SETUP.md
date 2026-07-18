@@ -1,4 +1,4 @@
-# Set Up the Loopboard for Local Development
+# Set Up the InvokeBoard for Local Development
 
 By the end of this guide you will have all three processes running locally, the MCP servers registered in VS Code, and a working dashboard at http://localhost:5173.
 
@@ -59,7 +59,7 @@ The email address of your Atlassian account — the one you use to log in to Jir
 Your Atlassian API token. To create one:
 1. Go to https://id.atlassian.com/manage-profile/security/api-tokens
 2. Click **Create API token**
-3. Give it a label (e.g. `loopboard`)
+3. Give it a label (e.g. `invokeboard`)
 4. Click **Create** and copy the token immediately — it is shown only once
 
 **`JIRA_PO_BOARD_ID` and `JIRA_DEV_BOARD_ID`**
@@ -134,12 +134,12 @@ If you prefer global registration, open VS Code Settings (Ctrl+,), click **Open 
     "servers": {
       "jira": {
         "command": "npx",
-        "args": ["tsx", "C:\\Projects\\loopboard\\packages\\mcp-jira\\src\\index.ts"],
+        "args": ["tsx", "C:\\Projects\\invokeboard\\packages\\mcp-jira\\src\\index.ts"],
         "env": {}
       },
       "github-prs": {
         "command": "npx",
-        "args": ["tsx", "C:\\Projects\\loopboard\\packages\\mcp-github\\src\\index.ts"],
+        "args": ["tsx", "C:\\Projects\\invokeboard\\packages\\mcp-github\\src\\index.ts"],
         "env": {}
       }
     }
