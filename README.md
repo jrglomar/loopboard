@@ -1,4 +1,4 @@
-# Loopboard
+# InvokeBoard
 
 > AI-assisted sprint management POC — Jira ticket automation, sprint dashboard, and PR auto-linking, powered by GitHub Copilot (Claude) + MCP.
 
@@ -35,7 +35,7 @@ npm run dev:app
 
 ## What you get
 
-The Loopboard puts three capabilities directly into your sprint workflow without leaving VS Code or a browser tab.
+The InvokeBoard puts three capabilities directly into your sprint workflow without leaving VS Code or a browser tab.
 
 **Ticket creation engine (Phase 1):** describe a feature in plain English and get a structured PO story and linked Dev task created in Jira instantly, with Given/When/Then acceptance criteria. Works via Copilot Chat in VS Code (say "Create a PO story and dev task for password reset via email") or via the **TicketGen** page in the dashboard. Existing tickets can be enhanced with acceptance criteria using the `enhance_ticket` prompt.
 
@@ -110,7 +110,7 @@ Copy `.env.example` to `.env` and fill in your values. Full key-acquisition inst
 ### Repository structure
 
 ```
-loopboard/
+invokeboard/
 ├── packages/
 │   ├── mcp-jira/              Phase 1 — Jira MCP server
 │   │   ├── src/

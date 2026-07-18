@@ -13,7 +13,7 @@
 # (e.g. VITE_MCP_JIRA_URL=https://api.example.com).
 #
 # Build context = repo ROOT:
-#   docker build -f docker/web.Dockerfile -t loopboard/web .
+#   docker build -f docker/web.Dockerfile -t invokeboard/web .
 # ─────────────────────────────────────────────────────────────────────────────
 FROM node:20-alpine AS build
 WORKDIR /app

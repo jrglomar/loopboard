@@ -134,7 +134,7 @@ const SECTIONS: Section[] = [
         <li><T>Ticket generator</T> — draft PO stories and Dev tasks (AI-assisted when AI is on, deterministic templates otherwise), created straight into the chosen board.</li>
         <li><T>Leaves &amp; capacity</T> — plot each teammate's leave by type; the plotter shows each developer's remaining capacity.</li>
         <li><T>Assignment list</T> — assign the sprint's tickets (bulk-assign supported), edit story points inline, and change status or move a ticket between sprints.</li>
-        <li><T>Team roster</T> — curate the people Loopboard plans around.</li>
+        <li><T>Team roster</T> — curate the people InvokeBoard plans around.</li>
       </ul>
     ),
   },
@@ -234,7 +234,7 @@ const SECTIONS: Section[] = [
     body: (
       <>
         <p>
-          Everything in Loopboard runs on <T>48 MCP tools</T> spread across two servers —{" "}
+          Everything in InvokeBoard runs on <T>48 MCP tools</T> spread across two servers —{" "}
           <T>mcp-jira</T> and <T>mcp-github</T>. There are two ways to reach them.
         </p>
 
@@ -271,7 +271,7 @@ const SECTIONS: Section[] = [
           <code className="font-mono text-xs">get_ticket</code>,{" "}
           <code className="font-mono text-xs">transition_issue</code> and{" "}
           <code className="font-mono text-xs">link_pr_to_ticket</code>. Others read or write{" "}
-          Loopboard's own local stores — team data Jira has no field for — like{" "}
+          InvokeBoard's own local stores — team data Jira has no field for — like{" "}
           <code className="font-mono text-xs">get_leaves</code>,{" "}
           <code className="font-mono text-xs">get_impediments</code> and{" "}
           <code className="font-mono text-xs">get_offset_ledger</code>. The <T>Tool reference</T>{" "}
@@ -281,7 +281,7 @@ const SECTIONS: Section[] = [
         <p className="mt-3">
           On <T>shared credentials</T>, every read works as normal. Writes that touch real Jira
           need an admin to grant write access first — otherwise you'll see a read-only error.
-          Writes to Loopboard's own local stores work either way.
+          Writes to InvokeBoard's own local stores work either way.
         </p>
       </>
     ),
@@ -292,7 +292,7 @@ const SECTIONS: Section[] = [
     icon: Table2,
     body: (
       <>
-        <p>Every tool Loopboard and Copilot can call, grouped by what it does.</p>
+        <p>Every tool InvokeBoard and Copilot can call, grouped by what it does.</p>
 
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground pb-3 mb-4 border-b border-border">
           <span className="inline-flex items-center gap-1.5">
@@ -302,7 +302,7 @@ const SECTIONS: Section[] = [
             <ToolTypeBadge surface="jira" access="write" /> changes data — the assistant always
             asks first
           </span>
-          <span>Jira / GitHub = the real service · Local = Loopboard's own store, not Jira</span>
+          <span>Jira / GitHub = the real service · Local = InvokeBoard's own store, not Jira</span>
           <span>
             AI column: Ask = the assistant can read it · Propose = it can suggest the change (you
             confirm) · — = app/Copilot only
@@ -323,7 +323,7 @@ const SECTIONS: Section[] = [
       <ul className="list-disc pl-5 space-y-1.5">
         <li><T>Board switcher</T> (top-right) flips PO ⇄ Dev context; Linking works across both.</li>
         <li>Every Huddle sidebar card collapses via the chevron in its header — handy on long sprints.</li>
-        <li><T>“Bridge is offline”</T> — a page can't reach the Jira/GitHub server. Ask whoever runs Loopboard to start the bridges.</li>
+        <li><T>“Bridge is offline”</T> — a page can't reach the Jira/GitHub server. Ask whoever runs InvokeBoard to start the bridges.</li>
         <li><T>A report looks empty?</T> Check the board is right and the sprint has issues assigned to your rostered team.</li>
         <li><T>Security</T> — tokens live only in the server config or the encrypted per-user vault; they're never logged or sent to your browser.</li>
       </ul>
@@ -336,10 +336,10 @@ export function Guide() {
     <div className="max-w-5xl mx-auto">
       <header className="mb-6">
         <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
-          <BookOpen className="h-5 w-5 text-primary" aria-hidden="true" /> Using Loopboard
+          <BookOpen className="h-5 w-5 text-primary" aria-hidden="true" /> Using InvokeBoard
         </h1>
         <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-          Loopboard turns your Jira sprint into a live board, a daily-huddle digest, planning and
+          InvokeBoard turns your Jira sprint into a live board, a daily-huddle digest, planning and
           reporting tools, leave tracking, and an AI helper. Here's what each part does.
         </p>
       </header>
@@ -388,7 +388,7 @@ export function Guide() {
           ))}
 
           <p className="text-xs text-muted-foreground pt-1">
-            Setting up Loopboard for a team (connecting Jira, enabling AI, deploying) is covered in the
+            Setting up InvokeBoard for a team (connecting Jira, enabling AI, deploying) is covered in the
             project's <code className="font-mono">docs/</code> folder — see <code className="font-mono">USER-GUIDE.md</code> and <code className="font-mono">SETUP.md</code>.
           </p>
         </div>

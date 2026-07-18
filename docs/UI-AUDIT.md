@@ -1,4 +1,4 @@
-# UI Audit — Loopboard Dashboard
+# UI Audit — InvokeBoard Dashboard
 ## Phase 2 Modernization (ADR-009)
 ### Date: 2026-06-12
 
@@ -157,7 +157,7 @@ Two-specialist (UI/UX + Scrum Master) review applied as a single pass against §
 
 **Blocker banner:** `Alert` above columns when `totals.blocked > 0`; up to 5 key links; "Show blocked" toggle (aria-pressed) composes with assignee filter. Hidden when 0 blocked.
 
-**My Issues quick filter:** `localStorage` key `loopboard.me`; first click opens inline picker; remembered name applied with aria-pressed toggle. Initials avatar chips added to issue cards and filter.
+**My Issues quick filter:** `localStorage` key `invokeboard.me`; first click opens inline picker; remembered name applied with aria-pressed toggle. Initials avatar chips added to issue cards and filter.
 
 **Huddle By-person toggle:** `regroupByPerson` + `buildByPersonClipboardText` in `src/lib/huddleRegroup.ts` (21 unit tests). summaryText and By-status clipboard text unchanged.
 

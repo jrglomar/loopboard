@@ -11,34 +11,34 @@ coverage/
 !.env.example
 
 # Leaves/offset + team roster stores (v1.5/v1.8 — host-local JSON, never committed)
-.loopboard-leaves.json
-*.loopboard-leaves.json
-.loopboard-team.json
-*.loopboard-team.json
+.invokeboard-leaves.json
+*.invokeboard-leaves.json
+.invokeboard-team.json
+*.invokeboard-team.json
 # Huddle impediments + pending-PR stores (v1.16 — host-local JSON, never committed)
-.loopboard-impediments.json
-*.loopboard-impediments.json
-.loopboard-prs.json
-*.loopboard-prs.json
+.invokeboard-impediments.json
+*.invokeboard-impediments.json
+.invokeboard-prs.json
+*.invokeboard-prs.json
 # Huddle post-scrum + meeting-goal stores (v1.20 — host-local JSON, never committed)
-.loopboard-post-scrum.json
-*.loopboard-post-scrum.json
-.loopboard-meeting-goal.json
-*.loopboard-meeting-goal.json
+.invokeboard-post-scrum.json
+*.invokeboard-post-scrum.json
+.invokeboard-meeting-goal.json
+*.invokeboard-meeting-goal.json
 # Offset-ledger store (v1.26 — host-local JSON, never committed)
-.loopboard-offset.json
-*.loopboard-offset.json
+.invokeboard-offset.json
+*.invokeboard-offset.json
 # Huddle meeting-notes store (v1.41 — host-local JSON, never committed)
-.loopboard-meeting-notes.json
-*.loopboard-meeting-notes.json
+.invokeboard-meeting-notes.json
+*.invokeboard-meeting-notes.json
 # Retro store (v1.42 — host-local JSON, never committed)
-.loopboard-retro.json
-*.loopboard-retro.json
+.invokeboard-retro.json
+*.invokeboard-retro.json
 # Task Helper user store (v1.44 — accounts + ENCRYPTED connections, NEVER committed)
-.loopboard-users.json
-*.loopboard-users.json
+.invokeboard-users.json
+*.invokeboard-users.json
 # Per-user store dir (v1.45 — each user's leaves/team/retro/etc. JSON, NEVER committed)
-.loopboard-user-stores/
+.invokeboard-user-stores/
 # Crash-leftover atomic-write temp files (v1.63 — writeJsonAtomic's same-dir *.tmp before rename)
 *.tmp
 

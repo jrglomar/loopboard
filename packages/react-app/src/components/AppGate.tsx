@@ -14,7 +14,7 @@ function Brand() {
   return (
     <div className="flex items-center gap-2 justify-center py-6">
       <span className="text-xl font-bold tracking-tight">
-        <span className="text-foreground">Loop</span><span className="text-primary">board</span>
+        <span className="text-foreground">Invoke</span><span className="text-primary">Board</span>
       </span>
     </div>
   );
@@ -26,7 +26,7 @@ function NotEnabled() {
       <Brand />
       <Card className="shadow-sm">
         <CardContent className="px-5 py-6 text-sm text-muted-foreground space-y-2">
-          <p className="font-semibold text-foreground">Loopboard isn't configured for accounts yet.</p>
+          <p className="font-semibold text-foreground">InvokeBoard isn't configured for accounts yet.</p>
           <p>
             Ask an admin to set <code className="font-mono text-xs">TOKEN_ENC_KEY</code> and{" "}
             <code className="font-mono text-xs">SESSION_SECRET</code> on the server (see docs/SETUP.md),
@@ -49,7 +49,7 @@ function Onboarding({ email, onLogout, onChange }: {
         <div>
           <h1 className="text-xl font-semibold text-foreground">Connect your accounts</h1>
           <p className="text-sm text-muted-foreground">
-            Loopboard runs on your own Jira &amp; GitHub. Connect them to unlock the app.
+            InvokeBoard runs on your own Jira &amp; GitHub. Connect them to unlock the app.
           </p>
         </div>
         <div className="flex items-center gap-2 text-sm">

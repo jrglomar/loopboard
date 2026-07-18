@@ -1,4 +1,4 @@
-# Deployment Guide — Loopboard
+# Deployment Guide — InvokeBoard
 
 How to run the stack with Docker, what to configure, and what to harden before a
 real (non-local) deployment. For local dev without Docker, see `docs/SETUP.md`.
@@ -52,7 +52,7 @@ Tear down:
 
 ```bash
 docker compose down            # stop + remove containers
-docker compose down -v         # …and delete the loopboard-data volume (leaves/team JSON)
+docker compose down -v         # …and delete the invokeboard-data volume (leaves/team JSON)
 ```
 
 ---
@@ -94,13 +94,13 @@ docker compose build web && docker compose up -d web
 ### 3.3 Persistent state
 
 `mcp-jira` keeps two JSON files (per-sprint leaves, curated team roster). Compose
-mounts the named volume `loopboard-data` at `/data` and points `JIRA_LEAVES_FILE` /
+mounts the named volume `invokeboard-data` at `/data` and points `JIRA_LEAVES_FILE` /
 `JIRA_TEAM_FILE` there, so they survive `up`/`down`/rebuilds. Back them up by
 copying out of the volume:
 
 ```bash
-docker run --rm -v loopboard_loopboard-data:/data -v "$PWD":/backup alpine \
-  sh -c "cp /data/.loopboard-*.json /backup/ 2>/dev/null || true"
+docker run --rm -v invokeboard_invokeboard-data:/data -v "$PWD":/backup alpine \
+  sh -c "cp /data/.invokeboard-*.json /backup/ 2>/dev/null || true"
 ```
 
 Store writes are crash-atomic as of v1.63 (ADR-075): each write lands in a same-directory
@@ -164,17 +164,17 @@ were added/expanded per a v1.63 security review — ADR-075):
    is just a reconnect: paste the new token into the Connections tab and it
    seals + replaces the stored one — no restart needed.
 5. **Back up the data volume — and never bundle it with `.env`.** Schedule a
-   periodic backup of the `loopboard-data` volume (the per-sprint JSON stores —
+   periodic backup of the `invokeboard-data` volume (the per-sprint JSON stores —
    see §3.3), e.g. a nightly cron on the Docker host:
    ```bash
    # crontab -e
-   0 2 * * * docker run --rm -v loopboard_loopboard-data:/data \
-     -v /backups/loopboard:/backup alpine \
-     tar czf /backup/loopboard-data-$(date +\%Y\%m\%d).tar.gz -C /data .
+   0 2 * * * docker run --rm -v invokeboard_invokeboard-data:/data \
+     -v /backups/invokeboard:/backup alpine \
+     tar czf /backup/invokeboard-data-$(date +\%Y\%m\%d).tar.gz -C /data .
    ```
    **Hard rule: `.env` must NEVER travel in the same backup artifact as the data
    volume.** `.env` holds `TOKEN_ENC_KEY`, the AES-256-GCM key that decrypts
-   every sealed Jira/GitHub/AI token sitting in `.loopboard-users.json` inside
+   every sealed Jira/GitHub/AI token sitting in `.invokeboard-users.json` inside
    that same volume — ship them together and whoever gets the backup gets the
    plaintext tokens too, no different from committing `.env` outright. Keep
    `TOKEN_ENC_KEY` (and `SESSION_SECRET`) in your platform's secret manager, or
@@ -246,7 +246,7 @@ reason about, but exposes the bridge ports and requires CORS.
 | CORS error in console | split topology without `CORS_ORIGINS` | set `CORS_ORIGINS` to the SPA origin on both bridges, redeploy |
 | `jira` container exits at startup | missing required env (`JIRA_BASE_URL`/board IDs) | check `docker compose logs jira`; fill `.env` |
 | `EADDRINUSE` on 4001/4002 | a host process already owns the port | stop it, or remove the `ports:` mapping (proxy still works) |
-| Leaves/team reset after redeploy | volume not mounted / `down -v` used | ensure `loopboard-data` volume exists; don't use `-v` unless you mean it |
+| Leaves/team reset after redeploy | volume not mounted / `down -v` used | ensure `invokeboard-data` volume exists; don't use `-v` unless you mean it |
 | AI drafting shows "off" | `AI_PROVIDER` unset or wrong key | set `AI_PROVIDER` + the matching token, `docker compose up -d jira` |
 
 ---
@@ -255,7 +255,7 @@ reason about, but exposes the bridge ports and requires CORS.
 
 | Artifact | Purpose |
 |---|---|
-| `docker-compose.yml` | the 3-service stack (web/jira/github) + `loopboard-data` volume |
+| `docker-compose.yml` | the 3-service stack (web/jira/github) + `invokeboard-data` volume |
 | `docker/jira.Dockerfile`, `docker/github.Dockerfile` | bridge images (node:20 + `tsx`) |
 | `docker/web.Dockerfile` | multi-stage: Vite build → nginx |
 | `docker/nginx.conf` | SPA serving + `/jira`,`/github` reverse proxy |

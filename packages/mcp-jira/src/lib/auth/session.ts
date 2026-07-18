@@ -7,7 +7,7 @@
 import * as crypto from "crypto";
 import { getTaskHelperSecrets } from "../config.js";
 
-export const SESSION_COOKIE = "lb_session";
+export const SESSION_COOKIE = "ib_session";
 const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 interface SessionPayload {

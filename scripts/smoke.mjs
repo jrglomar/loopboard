@@ -47,9 +47,9 @@ const JIRA_ENV = {
   JIRA_DEV_BOARD_ID: "2",
   MCP_JIRA_HTTP_PORT: String(JIRA_PORT),
   // Point the leaves + team stores at throwaway temp files so smoke never touches the real ones.
-  JIRA_LEAVES_FILE: path.join(os.tmpdir(), `loopboard-smoke-leaves-${process.pid}.json`),
-  JIRA_TEAM_FILE: path.join(os.tmpdir(), `loopboard-smoke-team-${process.pid}.json`),
-  JIRA_OFFSET_FILE: path.join(os.tmpdir(), `loopboard-smoke-offset-${process.pid}.json`),
+  JIRA_LEAVES_FILE: path.join(os.tmpdir(), `invokeboard-smoke-leaves-${process.pid}.json`),
+  JIRA_TEAM_FILE: path.join(os.tmpdir(), `invokeboard-smoke-team-${process.pid}.json`),
+  JIRA_OFFSET_FILE: path.join(os.tmpdir(), `invokeboard-smoke-offset-${process.pid}.json`),
   // Pin AI off so the AI_UNAVAILABLE checks are deterministic even when the
   // developer's .env configures a provider (set vars are never overridden by dotenv)
   AI_PROVIDER: "",

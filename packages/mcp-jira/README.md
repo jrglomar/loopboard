@@ -1,4 +1,4 @@
-# @loopboard/mcp-jira
+# @invokeboard/mcp-jira
 
 > Jira MCP server — exposes ticket and sprint tools to GitHub Copilot (Claude) via MCP stdio, and to the React dashboard via an HTTP bridge on port 4001.
 

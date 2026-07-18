@@ -116,7 +116,7 @@ describe("AgingCard (v1.58)", () => {
     expect(screen.getByRole("list", { name: /ticket aging/i })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /ticket aging/i }));
     expect(screen.queryByRole("list", { name: /ticket aging/i })).toBeNull();
-    expect(localStorage.getItem("loopboard.collapse.aging")).toBeTruthy();
+    expect(localStorage.getItem("invokeboard.collapse.aging")).toBeTruthy();
   });
 
   it("links each row to the ticket in Jira", () => {

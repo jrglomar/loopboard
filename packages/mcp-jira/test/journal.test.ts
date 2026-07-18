@@ -21,7 +21,7 @@ function cleanStores() {
 }
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "loopboard-journal-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "invokeboard-journal-"));
   process.env["JIRA_BASE_URL"] = "https://x.atlassian.net";
   process.env["JIRA_EMAIL"] = "x@example.com";
   process.env["JIRA_API_TOKEN"] = "t";

@@ -32,7 +32,7 @@ import { writeLeaves, readLeaves } from "../src/lib/leavesStore.js";
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "loopboard-atomicfile-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "invokeboard-atomicfile-"));
 });
 
 afterEach(() => {

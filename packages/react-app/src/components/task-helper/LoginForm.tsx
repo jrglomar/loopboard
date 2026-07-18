@@ -39,10 +39,10 @@ export function LoginForm() {
       <Card className="shadow-sm">
         <CardHeader className="px-5 pt-5 pb-2">
           <h1 className="text-lg font-semibold text-foreground">
-            {mode === "login" ? "Sign in to Loopboard" : "Create your Loopboard account"}
+            {mode === "login" ? "Sign in to InvokeBoard" : "Create your InvokeBoard account"}
           </h1>
           <p className="text-sm text-muted-foreground">
-            Loopboard runs on your own Jira &amp; GitHub — sign in to connect them and open your board.
+            InvokeBoard runs on your own Jira &amp; GitHub — sign in to connect them and open your board.
           </p>
         </CardHeader>
         <CardContent className="px-5 pb-5">

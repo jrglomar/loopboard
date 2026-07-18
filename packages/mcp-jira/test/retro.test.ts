@@ -21,7 +21,7 @@ interface RetroEntry {
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "loopboard-retro-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "invokeboard-retro-"));
   process.env["JIRA_BASE_URL"] = "https://test.atlassian.net";
   process.env["JIRA_EMAIL"] = "t@example.com";
   process.env["JIRA_API_TOKEN"] = "tok";

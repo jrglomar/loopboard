@@ -15,7 +15,7 @@ const _packageDir = path.resolve(_thisDir, "../..");
  * Per-user store root (v1.45, ADR-055). When a request runs in a user context, the local
  * JSON stores live under `<usersDir>/<userId>/…` so board-id keys can't collide across users.
  */
-export const USER_STORES_DIR = path.join(_packageDir, ".loopboard-user-stores");
+export const USER_STORES_DIR = path.join(_packageDir, ".invokeboard-user-stores");
 
 /**
  * Resolve a store file path. In a per-user request context → that user's directory; otherwise the
@@ -31,34 +31,34 @@ function resolveStorePath(perUserBasename: string, override: string, sharedDefau
 }
 
 /** Default path for the leaves JSON file — inside the mcp-jira package dir. */
-export const DEFAULT_LEAVES_FILE = path.join(_packageDir, ".loopboard-leaves.json");
+export const DEFAULT_LEAVES_FILE = path.join(_packageDir, ".invokeboard-leaves.json");
 
 /** Default path for the team roster JSON file — inside the mcp-jira package dir. */
-export const DEFAULT_TEAM_FILE = path.join(_packageDir, ".loopboard-team.json");
+export const DEFAULT_TEAM_FILE = path.join(_packageDir, ".invokeboard-team.json");
 
 /** Default path for the impediments JSON file — inside the mcp-jira package dir (v1.16). */
-export const DEFAULT_IMPEDIMENTS_FILE = path.join(_packageDir, ".loopboard-impediments.json");
+export const DEFAULT_IMPEDIMENTS_FILE = path.join(_packageDir, ".invokeboard-impediments.json");
 
 /** Default path for the pull-requests JSON file — inside the mcp-jira package dir (v1.16). */
-export const DEFAULT_PRS_FILE = path.join(_packageDir, ".loopboard-prs.json");
+export const DEFAULT_PRS_FILE = path.join(_packageDir, ".invokeboard-prs.json");
 
 /** Default path for the post-scrum notes JSON file — inside the mcp-jira package dir (v1.20). */
-export const DEFAULT_POST_SCRUM_FILE = path.join(_packageDir, ".loopboard-post-scrum.json");
+export const DEFAULT_POST_SCRUM_FILE = path.join(_packageDir, ".invokeboard-post-scrum.json");
 
 /** Default path for the meeting-goal JSON file — inside the mcp-jira package dir (v1.20). */
-export const DEFAULT_MEETING_GOAL_FILE = path.join(_packageDir, ".loopboard-meeting-goal.json");
+export const DEFAULT_MEETING_GOAL_FILE = path.join(_packageDir, ".invokeboard-meeting-goal.json");
 
 /** Default path for the meeting-notes JSON file — inside the mcp-jira package dir (v1.41). */
-export const DEFAULT_MEETING_NOTES_FILE = path.join(_packageDir, ".loopboard-meeting-notes.json");
+export const DEFAULT_MEETING_NOTES_FILE = path.join(_packageDir, ".invokeboard-meeting-notes.json");
 
 /** Default path for the retro JSON file — inside the mcp-jira package dir (v1.42). */
-export const DEFAULT_RETRO_FILE = path.join(_packageDir, ".loopboard-retro.json");
+export const DEFAULT_RETRO_FILE = path.join(_packageDir, ".invokeboard-retro.json");
 
 /** Default path for the offset-ledger JSON file — inside the mcp-jira package dir (v1.26). */
-export const DEFAULT_OFFSET_FILE = path.join(_packageDir, ".loopboard-offset.json");
+export const DEFAULT_OFFSET_FILE = path.join(_packageDir, ".invokeboard-offset.json");
 
 /** Default path for the Task Helper user store (v1.44) — users + encrypted connections. */
-export const DEFAULT_TASK_HELPER_FILE = path.join(_packageDir, ".loopboard-users.json");
+export const DEFAULT_TASK_HELPER_FILE = path.join(_packageDir, ".invokeboard-users.json");
 
 // Config schema — validated lazily on first call to getConfig().
 // All env reads happen inside getConfig(), never at module-import time,

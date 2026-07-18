@@ -10,7 +10,7 @@ afterEach(() => cleanup());
 describe("Guide page (v1.49)", () => {
   it("renders the title and a getting-started section", () => {
     render(<Guide />);
-    expect(screen.getByRole("heading", { level: 1, name: /using loopboard/i })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: /using invokeboard/i })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 2, name: /getting started/i })).toBeTruthy();
   });
 

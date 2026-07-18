@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Run all dev services for the Loopboard in one terminal:
+ * Run all dev services for the InvokeBoard in one terminal:
  *   - mcp-jira   HTTP bridge   → http://localhost:4001
  *   - mcp-github HTTP bridge   → http://localhost:4002
  *   - react-app  Vite dev      → http://localhost:5173

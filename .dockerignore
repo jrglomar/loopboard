@@ -13,8 +13,8 @@ coverage
 .env
 .env.*
 **/.env
-**/.loopboard-leaves.json
-**/.loopboard-team.json
+**/.invokeboard-leaves.json
+**/.invokeboard-team.json
 
 # VCS / tooling / editor
 .git

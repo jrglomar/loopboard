@@ -1,13 +1,13 @@
-# Loopboard — User Guide
+# InvokeBoard — User Guide
 
-**Loopboard** is an Agile team dashboard and AI assistant that sits on top of your Jira (and,
+**InvokeBoard** is an Agile team dashboard and AI assistant that sits on top of your Jira (and,
 optionally, GitHub). It turns your sprint into a live board, a daily-huddle digest, planning and
 reporting tools, leave/capacity tracking, and an AI helper that drafts tickets and answers
 questions.
 
 This guide has two parts:
-- **[What Loopboard offers](#what-loopboard-offers)** — a tour of every feature.
-- **[Setting up Loopboard](#setting-up-loopboard)** — how to connect it to your Jira and run it.
+- **[What InvokeBoard offers](#what-invokeboard-offers)** — a tour of every feature.
+- **[Setting up InvokeBoard](#setting-up-invokeboard)** — how to connect it to your Jira and run it.
 
 > Deeper docs: developer setup in [`docs/SETUP.md`](SETUP.md), deployment in
 > [`docs/DEPLOYMENT.md`](DEPLOYMENT.md), the AI assistant in [`docs/ASSISTANT.md`](ASSISTANT.md),
@@ -15,9 +15,9 @@ This guide has two parts:
 
 ---
 
-## What Loopboard offers
+## What InvokeBoard offers
 
-Loopboard is organized into tabs across the top. Your team works against two Jira boards — a **PO
+InvokeBoard is organized into tabs across the top. Your team works against two Jira boards — a **PO
 board** (product / stories) and a **Dev board** (development tasks) — and a board switcher in the
 top‑right lets you flip between them on most pages.
 
@@ -59,7 +59,7 @@ Everything you need to prepare the next sprint.
   Offset); the plotter shows each developer's remaining capacity (required points − leave days).
 - **Assignment list** — assign the sprint's tickets to developers (bulk‑assign supported), and edit
   story points inline.
-- **Team roster** — curate the team members Loopboard plans around (drawn from recent sprint activity).
+- **Team roster** — curate the team members InvokeBoard plans around (drawn from recent sprint activity).
 
 ### 📅 Offset Tracker — leaves & offset wallet
 
@@ -97,7 +97,7 @@ Everything you need to prepare the next sprint.
 
 ### 🔌 Accounts & Connections
 
-Loopboard is **login‑gated and per‑user**: sign up, then open the **Connections** tab and connect
+InvokeBoard is **login‑gated and per‑user**: sign up, then open the **Connections** tab and connect
 **your own** Jira and GitHub tokens (plus an AI token if you want the AI features) — the app
 unlocks the moment Jira and GitHub are connected.
 
@@ -133,9 +133,9 @@ tools — tickets, sprints, reports, leaves, the offset wallet, the Huddle store
 
 **Jira/GitHub tools vs. local tools.** Most tools act on your real Jira boards (or, for the PR
 tools, GitHub) — those changes land immediately. A second group instead reads and writes
-Loopboard's own local store: the team roster, typed leaves, the offset ledger, and the Huddle
+InvokeBoard's own local store: the team roster, typed leaves, the offset ledger, and the Huddle
 sidebar's impediments, post‑scrum notes, meeting goal, meeting notes, and retro. Those are
-Loopboard app state rather than Jira history, so they work the same for everyone regardless of
+InvokeBoard app state rather than Jira history, so they work the same for everyone regardless of
 Jira write permissions.
 
 **Shared‑credential users:** an account that's borrowing someone else's Jira connection has its
@@ -201,7 +201,7 @@ it itself (`Ask`), only propose it for your confirmation (`Propose`), or not rea
 | `get_assignable_users` | List the developers eligible to be assigned tickets on a project or board. | Jira·Read | — | Planning · Assignment list |
 | `assign_issue` | Assign (or unassign) a ticket to a developer. | Jira·Write | Propose | Planning · Assignment list |
 | `get_recent_assignees` | Suggest roster members from everyone assigned a ticket recently on the board. | Jira·Read | — | Planning · Team roster |
-| `get_team_members` | The curated team roster Loopboard plans around, per board. | Local·Read | Ask | Planning · Team roster |
+| `get_team_members` | The curated team roster InvokeBoard plans around, per board. | Local·Read | Ask | Planning · Team roster |
 | `set_team_members` | Replace the curated team roster for a board. | Local·Write | — | Planning · Team roster |
 
 #### Leaves & offset wallet (8)
@@ -257,7 +257,7 @@ the dashboard's UI (or, for three GitHub tools, reachable only via Copilot).
 
 ---
 
-## Setting up Loopboard
+## Setting up InvokeBoard
 
 ### Prerequisites
 
@@ -267,7 +267,7 @@ the dashboard's UI (or, for three GitHub tools, reachable only via Copilot).
 - The IDs of your **PO board** and **Dev board** (the number in a board URL:
   `…/RapidBoard.jspa?rapidView=<ID>`).
 - *(Optional)* An **AI provider** — an Anthropic API key, or a GitHub token with the **Models: read**
-  permission — to enable the AI features. Without it, Loopboard falls back to deterministic templates.
+  permission — to enable the AI features. Without it, InvokeBoard falls back to deterministic templates.
 - *(Optional)* A **GitHub** token if you want linked‑PR and repo features.
 
 ### 1. Configure your environment
@@ -367,6 +367,6 @@ to the browser.
 
 ---
 
-*Loopboard is a proof‑of‑concept that integrates Jira/GitHub into an Agile workflow via the Model
+*InvokeBoard is a proof‑of‑concept that integrates Jira/GitHub into an Agile workflow via the Model
 Context Protocol (MCP). For architecture and design decisions, see [`docs/ARCHITECTURE.md`](ARCHITECTURE.md)
 and the ADRs under [`docs/adr/`](adr/).*

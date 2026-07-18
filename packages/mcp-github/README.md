@@ -1,4 +1,4 @@
-# @loopboard/mcp-github
+# @invokeboard/mcp-github
 
 > GitHub MCP server — links pull requests to Jira tickets via MCP stdio (Copilot) and an HTTP bridge on port 4002 (React dashboard).
 

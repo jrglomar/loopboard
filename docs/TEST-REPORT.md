@@ -1,4 +1,4 @@
-# Test Report — Loopboard POC
+# Test Report — InvokeBoard POC
 
 **Date:** 2026-06-11  
 **Role:** QA Engineer  

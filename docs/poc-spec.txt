@@ -1,5 +1,5 @@
 --- PAGE 1 ---
-LOOPBOARD
+INVOKEBOARD
 Proof of Concept — Technical Documentation
 MCP Server + React Dashboard + GitHub Copilot Integration
 Version 1.0  •  June 2025
@@ -7,9 +7,9 @@ Status: POC / In Development
 Audience: Engineering Team, Product Owners, Scrum Masters
 INTERNAL — NOT FOR DISTRIBUTION
 --- PAGE 2 ---
-Loopboard — POC Technical Documentation Internal
+InvokeBoard — POC Technical Documentation Internal
 1. Executive Summary
-This document describes the Loopboard — a proof of concept (POC) that integrates AI 
+This document describes the InvokeBoard — a proof of concept (POC) that integrates AI 
 capabilities directly into the team's existing Agile workflow. The system uses GitHub Copilot 
 (powered by Claude) and the Model Context Protocol (MCP) to automate the most time-
 consuming parts of sprint management: writing tickets, reporting on sprints, and running daily 
@@ -37,9 +37,9 @@ and a technical task for the Dev board. These are currently written separately, 
 inconsistencies between the two.
 Confidential — Engineering Team Page 2 of 10
 --- PAGE 3 ---
-Loopboard — POC Technical Documentation Internal
+InvokeBoard — POC Technical Documentation Internal
 3. Solution Overview
-The Loopboard is composed of three layers that work together:
+The InvokeBoard is composed of three layers that work together:
 Layer Technology Purpose
 AI / Chat interface GitHub Copilot + 
 Claude model
@@ -77,7 +77,7 @@ Source of truth for tickets and
 sprints
 Confidential — Engineering Team Page 3 of 10
 --- PAGE 4 ---
-Loopboard — POC Technical Documentation Internal
+InvokeBoard — POC Technical Documentation Internal
 4.2  MCP server — tool registry
 The Jira MCP server registers the following tools. Each tool has a name, a description (read by 
 Claude to decide when to call it), and a typed input schema validated with Zod.
@@ -123,14 +123,14 @@ Credential Where it lives
 JIRA_API_TOKEN .env file on developer machine only
 Confidential — Engineering Team Page 4 of 10
 --- PAGE 5 ---
-Loopboard — POC Technical Documentation Internal
+InvokeBoard — POC Technical Documentation Internal
 JIRA_EMAIL .env file — the email tied to the Atlassian account
 JIRA_BASE_URL .env file — e.g. https://yourcompany.atlassian.net
 GITHUB_TOKEN .env file — for GitHub MCP server (Phase 2)
 5. Repository Structure
 The project uses a monorepo layout. Each package is independently runnable. The React app 
 and MCP server communicate over a local HTTP connection during development.
-loopboard/
+invokeboard/
 ├── packages/
 │   ├── mcp-jira/              ← Jira MCP server (Phase 1 — built)
 │   │   ├── src/
@@ -165,7 +165,7 @@ This guide works identically on a personal PC and a company laptop. The credenti
 your Atlassian account, not the machine.
 Confidential — Engineering Team Page 5 of 10
 --- PAGE 6 ---
-Loopboard — POC Technical Documentation Internal
+InvokeBoard — POC Technical Documentation Internal
 6.1  Prerequisites
 Requirement Details
 Node.js 18+ Check with: node --version
@@ -175,8 +175,8 @@ GitHub Copilot License with Claude model enabled
 Jira access Project-level access on PO and Dev boards
 6.2  Step-by-step setup
 Step 1 — Clone the repository
-git clone https://github.com/your-org/loopboard.git
-cd loopboard/packages/mcp-jira
+git clone https://github.com/your-org/invokeboard.git
+cd invokeboard/packages/mcp-jira
 Step 2 — Install dependencies
 npm install
 Step 3 — Create your .env file
@@ -197,7 +197,7 @@ add:
         "env": {}
 Confidential — Engineering Team Page 6 of 10
 --- PAGE 7 ---
-Loopboard — POC Technical Documentation Internal
+InvokeBoard — POC Technical Documentation Internal
       }
     }
   }
@@ -236,7 +236,7 @@ briefing from sprint data
 Weeks 4–7 Planned
 Confidential — Engineering Team Page 7 of 10
 --- PAGE 8 ---
-Loopboard — POC Technical Documentation Internal
+InvokeBoard — POC Technical Documentation Internal
 Phase 2 Centralized chat panel — ask anything 
 about the sprint in the UI
 Weeks 4–7 Planned
@@ -281,7 +281,7 @@ redirect URL configuration — significant setup overhead for a POC. Calendar au
 added in Phase 3 once the core ticket and sprint features are validated.
 Confidential — Engineering Team Page 8 of 10
 --- PAGE 9 ---
-Loopboard — POC Technical Documentation Internal
+InvokeBoard — POC Technical Documentation Internal
 Why Node.js for the MCP server?
 The official @modelcontextprotocol/sdk is first-class in Node.js/TypeScript. The Jira REST API 
 client (axios) and schema validation (Zod) also have mature TypeScript support. The entire 
@@ -330,7 +330,7 @@ MCP Server A Node.js service that exposes tools (functions) that Claude can call
 via the MCP protocol
 Confidential — Engineering Team Page 9 of 10
 --- PAGE 10 ---
-Loopboard — POC Technical Documentation Internal
+InvokeBoard — POC Technical Documentation Internal
 MCP Tool A named, typed function registered on the MCP server — e.g. 
 create_po_ticket
 Copilot GitHub Copilot — the AI coding assistant; uses Claude as its model in 
@@ -343,5 +343,5 @@ Zod A TypeScript schema validation library used to type-check MCP tool
 inputs
 Vite A fast frontend build tool used to scaffold the React app
 Sprint digest A short AI-generated summary of sprint status used in daily standups
-End of document — Loopboard POC v1.0
+End of document — InvokeBoard POC v1.0
 Confidential — Engineering Team Page 10 of 10

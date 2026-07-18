@@ -7,7 +7,7 @@ import * as os from "os";
 import * as path from "path";
 import { resetConfigCache } from "../src/lib/config.js";
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), "loopboard-users-"));
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), "invokeboard-users-"));
 
 process.env["JIRA_BASE_URL"] = "https://test.atlassian.net";
 process.env["JIRA_EMAIL"] = "t@example.com";
@@ -62,7 +62,7 @@ async function req(method: string, pathname: string, body?: unknown, cookie?: st
   const setCookies = h.getSetCookie ? h.getSetCookie() : [r.headers.get("set-cookie") ?? ""];
   const sessionCookie = setCookies
     .map((c) => c.split(";")[0])
-    .find((c) => c.startsWith("lb_session="));
+    .find((c) => c.startsWith("ib_session="));
   return { status: r.status, json: await r.json(), cookie: sessionCookie ?? null };
 }
 
@@ -71,7 +71,7 @@ describe("Task Helper auth (v1.44)", () => {
     const r = await req("POST", "/api/auth/signup", { email: "alice@team.com", password: "password123" });
     expect(r.status).toBe(200);
     expect(r.json.data.email).toBe("alice@team.com");
-    expect(r.cookie).toMatch(/^lb_session=/);
+    expect(r.cookie).toMatch(/^ib_session=/);
   });
 
   it("the session cookie authenticates /api/auth/me", async () => {
@@ -98,7 +98,7 @@ describe("Task Helper auth (v1.44)", () => {
     await req("POST", "/api/auth/signup", { email: "dave@team.com", password: "password123" });
     const ok = await req("POST", "/api/auth/login", { email: "dave@team.com", password: "password123" });
     expect(ok.status).toBe(200);
-    expect(ok.cookie).toMatch(/^lb_session=/);
+    expect(ok.cookie).toMatch(/^ib_session=/);
 
     const bad = await req("POST", "/api/auth/login", { email: "dave@team.com", password: "wrongpass!" });
     expect(bad.status).toBe(401);

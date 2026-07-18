@@ -122,13 +122,13 @@ so tests run with no `.env`.
 | `JIRA_FLAGGED_FIELD` | mcp-jira | optional | `""` (disabled) |
 | `JIRA_CODE_REVIEW_STATUSES` | mcp-jira | optional | `"code review,in review,peer review,review"` (v1.2) |
 | `JIRA_VELOCITY_SPRINTS` | mcp-jira | optional | `6` — closed sprints averaged for velocity/forecast (v1.4) |
-| `JIRA_LEAVES_FILE` | mcp-jira | optional | `<mcp-jira pkg>/.loopboard-leaves.json` — JSON store for per-sprint leaves (v1.5) |
+| `JIRA_LEAVES_FILE` | mcp-jira | optional | `<mcp-jira pkg>/.invokeboard-leaves.json` — JSON store for per-sprint leaves (v1.5) |
 | `JIRA_REQUIRED_POINTS` | mcp-jira | optional | `8` — N, required points/sprint per member (offset engine, v1.26) |
 | `JIRA_OFFSET_THRESHOLD` | mcp-jira | optional | `2` — N2, surplus threshold to earn an offset point (v1.26) |
 | `JIRA_AGING_BASE_DAYS` | mcp-jira | optional | `1` — aging policy: base expected days in a status (v1.58, ADR-070) |
 | `JIRA_AGING_DAYS_PER_POINT` | mcp-jira | optional | `1` — aging policy: extra expected days per story point; expected = base + perPoint×points, unpointed = base only (v1.58) |
-| `JIRA_OFFSET_FILE` | mcp-jira | optional | `<mcp-jira pkg>/.loopboard-offset.json` — JSON store for the offset ledger (v1.26) |
-| `JIRA_TEAM_FILE` | mcp-jira | optional | `<mcp-jira pkg>/.loopboard-team.json` — JSON store for the per-board team roster (v1.8) |
+| `JIRA_OFFSET_FILE` | mcp-jira | optional | `<mcp-jira pkg>/.invokeboard-offset.json` — JSON store for the offset ledger (v1.26) |
+| `JIRA_TEAM_FILE` | mcp-jira | optional | `<mcp-jira pkg>/.invokeboard-team.json` — JSON store for the per-board team roster (v1.8) |
 | `GITHUB_TOKEN` | mcp-github | yes (no default) | — |
 | `GITHUB_REPO` | mcp-github | optional (used as default repo) | — |
 | `MCP_JIRA_HTTP_PORT` | mcp-jira | optional | `4001` |
@@ -715,7 +715,7 @@ export interface SprintRef {
 ### 4.14 `get_leaves` / `set_leaves` (v1.5 — per-sprint leaves/offset tracker; ADR-016)
 
 Real MCP tools backed by a **JSON file on the mcp-jira host** (`JIRA_LEAVES_FILE`, default
-`<mcp-jira pkg>/.loopboard-leaves.json` — git-ignored). This is the project's first stateful
+`<mcp-jira pkg>/.invokeboard-leaves.json` — git-ignored). This is the project's first stateful
 store (a deliberate, user-chosen exception to the stateless-bridge norm).
 
 **v1.26 (ADR-038): leaves are now TYPED.** `LeaveType = "VL" | "EL" | "Holiday" | "Offset"`. File shape:
@@ -723,7 +723,7 @@ store (a deliberate, user-chosen exception to the stateless-bridge norm).
 { "<sprintId>": { "<assigneeName>": { "2026-06-03": "VL", "2026-06-04": "Offset" }, ... }, ... }
 ```
 `readLeaves` (`src/lib/leavesStore.ts`) **normalizes on read** — a legacy `string[]` of dates becomes
-`{ [date]: "VL" }` — so the pre-v1.26 `.loopboard-leaves.json` keeps working with no migration. Path
+`{ [date]: "VL" }` — so the pre-v1.26 `.invokeboard-leaves.json` keeps working with no migration. Path
 read from config at call time. `readLeaves`/`writeLeaves` tolerate a missing/corrupt file (treat `{}`).
 
 - **`get_leaves`** — Input `{ sprintId: number }`. Output
@@ -774,7 +774,7 @@ Jira has no portable "team" primitive (assignable-search is permission-wide; pro
 and groups are instance-specific and need elevated perms). So we maintain a **curated team
 roster per board**, **seeded from who's actually been assigned tickets in recent sprints**
 ("usual members"), editable (add/remove), persisted to a **bridge-side JSON file**
-(`JIRA_TEAM_FILE`, default `<mcp-jira pkg>/.loopboard-team.json`, git-ignored — same store pattern
+(`JIRA_TEAM_FILE`, default `<mcp-jira pkg>/.invokeboard-team.json`, git-ignored — same store pattern
 as leaves, §4.14). File shape: `{ "<boardId>": [ { "accountId": "...", "displayName": "..." }, … ] }`.
 Helpers in `src/lib/teamStore.ts` (`readTeams()`/`writeTeams()`, missing/corrupt → `{}`).
 
@@ -884,7 +884,7 @@ bridge-side JSON store (mirrors the leaves/team stores) — NOT a Jira object.
 - **`set_impediments`** (full-replace) — **Input:** `{ sprintId: number, impediments: Array<{ id?: string; text: string; ticketKey?: string; createdAt?: string; resolved?: boolean }> }` (max 200).
   The tool fills `id` (uuid) and `createdAt` (now) when omitted. **Output:** `{ sprintId, impediments: Impediment[] }`.
 - `Impediment = { id: string; text: string; ticketKey?: string; createdAt: string; resolved?: boolean }`.
-- Store path from `JIRA_IMPEDIMENTS_FILE` (default `<mcp-jira>/.loopboard-impediments.json`, git-ignored).
+- Store path from `JIRA_IMPEDIMENTS_FILE` (default `<mcp-jira>/.invokeboard-impediments.json`, git-ignored).
 - Registered MCP tools. Tests use a temp file; keyless/offline.
 
 ### 4.22 `get_pull_requests` / `set_pull_requests` (v1.16 — Huddle code-review store; ADR-027)
@@ -897,7 +897,7 @@ bridge-side JSON store pattern.
 - **`set_pull_requests`** (full-replace) — **Input:** `{ sprintId: number, pullRequests: Array<{ id?: string; url: string; title?: string; ticketKey?: string; status?: string; addedAt?: string }> }` (max 200).
   The tool fills `id` (uuid) and `addedAt` (now) when omitted. **Output:** `{ sprintId, pullRequests: PullRequest[] }`.
 - `PullRequest = { id: string; url: string; title?: string; ticketKey?: string; status?: string; addedAt: string }`.
-- Store path from `JIRA_PRS_FILE` (default `<mcp-jira>/.loopboard-prs.json`, git-ignored).
+- Store path from `JIRA_PRS_FILE` (default `<mcp-jira>/.invokeboard-prs.json`, git-ignored).
 - Registered MCP tools. Tests use a temp file; keyless/offline.
 - **Auto-PRs (v1.20, frontend-only — no tool change):** the Huddle code-review card ALSO shows
   open GitHub PRs whose detected `jiraKeys` intersect the **current sprint's** ticket keys —
@@ -916,7 +916,7 @@ Jira object.
 - **`set_post_scrum`** (full-replace) — **Input:** `{ sprintId: number, notes: Array<{ id?: string; person: string; note: string; createdAt?: string; resolved?: boolean }> }` (max 200).
   The tool fills `id` (uuid) and `createdAt` (now) when omitted. **Output:** `{ sprintId, notes: PostScrumNote[] }`.
 - `PostScrumNote = { id: string; person: string; note: string; createdAt: string; resolved?: boolean }`.
-- Store path from `JIRA_POST_SCRUM_FILE` (default `<mcp-jira>/.loopboard-post-scrum.json`, git-ignored).
+- Store path from `JIRA_POST_SCRUM_FILE` (default `<mcp-jira>/.invokeboard-post-scrum.json`, git-ignored).
 - Registered MCP tools (and exposed to the AI Q&A read-allowlist, §4.9). Tests use a temp file; keyless/offline.
 
 ### 4.24 `get_meeting_goal` / `set_meeting_goal` (v1.20 — Huddle meeting-goal store; ADR-031)
@@ -929,7 +929,7 @@ Jira **sprint** goal (§4.10b). Same bridge-side JSON store pattern.
 - **`set_meeting_goal`** — **Input:** `{ sprintId: number, goal: string }` (`goal` may be empty to clear).
   The tool stamps `updatedAt` (now). **Output:** `{ sprintId, goal: string, updatedAt: string | null }`.
 - Store shape: `{ [sprintId]: { goal: string; updatedAt: string } }`.
-- Store path from `JIRA_MEETING_GOAL_FILE` (default `<mcp-jira>/.loopboard-meeting-goal.json`, git-ignored).
+- Store path from `JIRA_MEETING_GOAL_FILE` (default `<mcp-jira>/.invokeboard-meeting-goal.json`, git-ignored).
 - Registered MCP tools (and exposed to the AI Q&A read-allowlist, §4.9). Tests use a temp file; keyless/offline.
 
 ### 4.25 `get_issue_pull_requests` (v1.22, ADR-034 — multi-repo PRs from Jira Development Information)
@@ -968,7 +968,7 @@ data, so the Huddle's code-review card uses it for both the PR list and the appr
 ### 4.26 `get_offset_ledger` / `set_offset_for_sprint` / `set_offset_adjustment` / `add_offset_adjustment` / `delete_offset_adjustment` (v1.26, ADR-038; v1.54, ADR-065 — offset ledger)
 
 Per-developer offset-point tracking, backed by a bridge-side JSON store (`JIRA_OFFSET_FILE`, default
-`<mcp-jira>/.loopboard-offset.json`, git-ignored). Store shape:
+`<mcp-jira>/.invokeboard-offset.json`, git-ignored). Store shape:
 `{ [assignee]: { bySprint: { [sprintId]: { earned, spent } }, manualAdjust, adjustments?: OffsetAdjustment[] } }`,
 where **`OffsetAdjustment = { id, amount: number (non-zero, ±), note?: string, createdAt: ISO }`** (v1.54).
 **All offset amounts are DECIMAL-capable (v1.55, ADR-066)** — `earned`, `spent`, `manualAdjust`, and each
@@ -1014,7 +1014,7 @@ React app sanitizes with DOMPurify **both on save and on render** (the server do
   An **empty/whitespace-only `html` clears the entry** (subsequent `get` → `notes: null`). The tool
   stamps `updatedAt` (now). **Output:** same shape as `get_meeting_notes`.
 - Store shape: `{ [sprintId: string]: { html: string; updatedAt: string } }`.
-- Store path from `JIRA_MEETING_NOTES_FILE` (default `<mcp-jira>/.loopboard-meeting-notes.json`,
+- Store path from `JIRA_MEETING_NOTES_FILE` (default `<mcp-jira>/.invokeboard-meeting-notes.json`,
   git-ignored).
 - Registered MCP tools; `get_meeting_notes` joins the AI Q&A read-allowlist (§4.9). jira tools
   **36 → 38**. Tests use a temp file; keyless/offline.
@@ -1032,7 +1032,7 @@ export** (no more retyping at export time). Same bridge-side JSON store pattern.
   **All-empty fields clear the entry** (subsequent `get` → `retro: null`). Stamps `updatedAt`.
   **Output:** same shape as `get_retro`.
 - Store shape: `{ [sprintId: string]: RetroEntry }`; path from `JIRA_RETRO_FILE` (default
-  `<mcp-jira>/.loopboard-retro.json`, git-ignored).
+  `<mcp-jira>/.invokeboard-retro.json`, git-ignored).
 - Registered MCP tools; `get_retro` joins the AI Q&A read-allowlist (§4.9, 18 read tools).
   jira tools **38 → 40**. Tests use a temp file; keyless/offline.
 
@@ -1625,7 +1625,7 @@ stdio entry — the tool set stays at 40.
 |---|---|---|
 | `TOKEN_ENC_KEY` | for Task Helper | base64 **32 bytes** — AES-256-GCM key encrypting connection tokens at rest |
 | `SESSION_SECRET` | for Task Helper | HMAC key signing the session cookie |
-| `TASK_HELPER_FILE` | optional | user-store path (default `<mcp-jira>/.loopboard-users.json`, git-ignored) |
+| `TASK_HELPER_FILE` | optional | user-store path (default `<mcp-jira>/.invokeboard-users.json`, git-ignored) |
 
 The feature is **enabled only when BOTH secrets are set** (`isTaskHelperConfigured()`); otherwise every
 Task Helper route returns **503 `TASK_HELPER_UNAVAILABLE`**. AI steps reuse the existing `AI_PROVIDER` + key
@@ -1667,7 +1667,7 @@ timing-safe verify). No native deps (Node `crypto` + JSON store, mirroring §4 s
 ### 8.6 Personal sprint journal (v1.48, ADR-057/058) — require auth
 
 A notes **feed** + a to-do checklist for the signed-in user, scoped to one sprint. **Personal**:
-stored under the user's REAL id (`.loopboard-user-stores/<userId>/journal.json`), never the credential
+stored under the user's REAL id (`.invokeboard-user-stores/<userId>/journal.json`), never the credential
 source's (§9.8) — a shared-credential viewer keeps their own journal.
 
 - `GET /api/me/journal?sprintId=<id>` → `{ notes: JournalNote[] (newest first), todos: JournalTodo[] (oldest first) }`.
@@ -1712,7 +1712,7 @@ holds an `AsyncLocalStorage<{ userId, config }>`; `getConfig()` returns the cont
 else the global `.env` (stdio/Copilot + keyless tests unchanged). Bridge middleware `perUserContext` on
 `/api/tools` + `/api/ai` resolves session → the user's merged config → `runWithUser(...)`, so **all 40 tools
 run on the user's own Jira with zero tool changes**. `jiraClient` caches its axios client **per credential
-set**. Per-user JSON stores live under `.loopboard-user-stores/<userId>/…json`.
+set**. Per-user JSON stores live under `.invokeboard-user-stores/<userId>/…json`.
 
 ### 9.2 Per-user config = merge
 
@@ -2123,7 +2123,7 @@ Changes made by the Architect agent during finalization:
     (editable, persisted), a **Leaves** column in the by-assignee table, and a
     capacity-adjusted **"possible committed velocity"** (`capacity.ts`: avg × availability),
     labeled a heuristic, shown beside the raw forecast.
-57. **§3 — env** — added `JIRA_LEAVES_FILE` (default `<mcp-jira pkg>/.loopboard-leaves.json`,
+57. **§3 — env** — added `JIRA_LEAVES_FILE` (default `<mcp-jira pkg>/.invokeboard-leaves.json`,
     git-ignored).
 
 ---
@@ -2180,7 +2180,7 @@ Changes made by the Architect agent during finalization:
     the curated team (`useTeamMembers`); a "Manage team" editor (add from recent sprints /
     optional name search / remove) with first-run seeding; `get_assignable_users` is kept
     only for the optional add-by-name search.
-68. **§3 — env `JIRA_TEAM_FILE`** (default `<mcp-jira pkg>/.loopboard-team.json`, git-ignored).
+68. **§3 — env `JIRA_TEAM_FILE`** (default `<mcp-jira pkg>/.invokeboard-team.json`, git-ignored).
 69. **v1.8.1 — Reports leaves editable again** (user request): the Reports leaves calendar is
     clickable again (reverses the v1.7/ADR-018 read-only), rostered from the report sprint's
     assignees, persisting to the same `get_leaves`/`set_leaves` store as Planning
@@ -2707,7 +2707,7 @@ All frontend/presentation; **no new tool, jira tools stay 36, IO shapes unchange
 
 152. **§4.27 (new) — `get_meeting_notes` / `set_meeting_notes`.** Per-sprint rich-text meeting notes
     (deployment notes, links) as an HTML string in a bridge-side JSON store
-    (`JIRA_MEETING_NOTES_FILE`, default `<mcp-jira>/.loopboard-meeting-notes.json`). Empty html clears
+    (`JIRA_MEETING_NOTES_FILE`, default `<mcp-jira>/.invokeboard-meeting-notes.json`). Empty html clears
     the entry. jira tools **36 → 38**; smoke's expected-tool lists updated.
 153. **Huddle "Meeting notes" card (react-app).** New `MeetingNotesCard` on the Huddle sidebar (under
     Meeting goal): renders the saved notes as sanitized HTML (links open in a new tab) and edits them in
@@ -2730,7 +2730,7 @@ All frontend/presentation; **no new tool, jira tools stay 36, IO shapes unchange
     code-review-complete issues burn only when Jira marks them resolved.
 157. **§4.28 (new) — `get_retro` / `set_retro` (persisted retrospective).** Per-sprint retro fields
     `{ reasonForDelays, whatWorkedWell, whatDidNotWork, plannedImprovements, kudos }` (each ≤ 4000) in a
-    bridge-side JSON store (`JIRA_RETRO_FILE`, default `<mcp-jira>/.loopboard-retro.json`); `set_retro`
+    bridge-side JSON store (`JIRA_RETRO_FILE`, default `<mcp-jira>/.invokeboard-retro.json`); `set_retro`
     stamps `updatedAt`; all-empty fields clear the entry. jira tools **38 → 40**; smoke lists updated.
     Reports gains a **Retrospective card** (inline editable, saved to the store) and the Full-report
     dialog **pre-fills from the store** (and saves typed values back on export) — the retro is written
@@ -2754,7 +2754,7 @@ All frontend/presentation; **no new tool, jira tools stay 36, IO shapes unchange
 160. **§6 — Huddle sidebar cards are collapsible (react-app, presentation-only).** Each right-column
     card (Needs attention, Meeting goal, Meeting notes, Impediments, On leave, Code review, and the Daily
     Huddle digest) gets a chevron in its header that collapses/expands the card body independently. State
-    is remembered per browser in `localStorage` (`loopboard.collapse.<key>`, default expanded). Shared
+    is remembered per browser in `localStorage` (`invokeboard.collapse.<key>`, default expanded). Shared
     `hooks/useCollapse.ts` + `components/CollapseToggle.tsx`; no tool/HTTP/IO change. react-app pill
     **1.42.0 → 1.43.0**. Live-verified: toggle hides the body and the choice survives a reload.
 
@@ -2891,3 +2891,22 @@ No tool/route/env surface changes — a durability guarantee + docs. Store file 
     API tokens with expiries (rotation = reconnect in Connections); exactly ONE bridge replica
     (JSON stores cannot be shared across instances). Login brute-force protection status
     verified and documented (report-only this release).
+
+## Changelog v1.64 (2026-07-18 — total rebrand: Loopboard → InvokeBoard; ADR-076)
+
+No tool names, routes, ports, or error codes change. The rename touches identity surfaces only.
+
+183. **App identity: "InvokeBoard"** — UI banner/title and every user-facing mention; root package
+    `invokeboard`; npm scope `@loopboard/*` → `@invokeboard/*` (lockfile regenerated); Docker
+    images `invokeboard/*` + volume `invokeboard-data`.
+184. **§3 store-file DEFAULTS renamed**: `.loopboard-*.json` → `.invokeboard-*.json` and the
+    per-user store dir → `.invokeboard-user-stores/` (config.ts DEFAULT_*_FILE constants +
+    .gitignore patterns). Existing host-local data files are MIGRATED by rename (`mv`) — data
+    preserved; explicit `*_FILE` env overrides keep working unchanged. Frontend localStorage
+    keys `loopboard.*` → `invokeboard.*` (persisted UI prefs like card-collapse reset once).
+185. **Docs**: all LIVING docs fully renamed (README, CLAUDE.md, this contract, SETUP,
+    DEPLOYMENT, ARCHITECTURE, USER-GUIDE, ASSISTANT). ADR-001..075 are dated history and keep
+    the old name (the ADR-076 precedent, same as the Agile-AI-Companion → Loopboard rename).
+    Jira's `/rest/agile/1.0/` API paths are Atlassian's, not brand strings — untouched.
+186. **Repo + folder**: GitHub repo renamed `jrglomar/invokeboard` (old URLs redirect; open PRs
+    survive); working folder `C:\Projects\invokeboard`; `origin` remote URL updated.

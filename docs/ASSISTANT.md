@@ -1,6 +1,6 @@
-# Loopboard Assistant — what the chatbot can do (v1.40)
+# InvokeBoard Assistant — what the chatbot can do (v1.40)
 
-The floating chat bubble (bottom-right, every page) is Loopboard's assistant. It has **two modes**
+The floating chat bubble (bottom-right, every page) is InvokeBoard's assistant. It has **two modes**
 in one input box:
 
 1. **Structured commands** — deterministic, always available, no AI needed (ADR-002).

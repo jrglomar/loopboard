@@ -1,10 +1,10 @@
 // useCollapse (v1.43) — per-card collapse state for the Huddle sidebar, remembered per browser
-// under `loopboard.collapse.<key>`. Defaults to expanded so nothing hides unexpectedly.
+// under `invokeboard.collapse.<key>`. Defaults to expanded so nothing hides unexpectedly.
 
 import { useCallback, useState } from "react";
 
 export function useCollapse(key: string, defaultCollapsed = false): [boolean, () => void] {
-  const storageKey = `loopboard.collapse.${key}`;
+  const storageKey = `invokeboard.collapse.${key}`;
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
       const v = localStorage.getItem(storageKey);

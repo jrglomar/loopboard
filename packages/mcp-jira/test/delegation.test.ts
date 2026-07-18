@@ -27,7 +27,7 @@ function connectJira(userId: string, token: string, baseUrl: string, email: stri
 }
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "loopboard-deleg-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "invokeboard-deleg-"));
   process.env["JIRA_BASE_URL"] = "https://global.atlassian.net";
   process.env["JIRA_EMAIL"] = "global@example.com";
   process.env["JIRA_API_TOKEN"] = "global-token";

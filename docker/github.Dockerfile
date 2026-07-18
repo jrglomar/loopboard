@@ -6,7 +6,7 @@
 # (npm run start:http), so devDependencies stay in the image.
 #
 # Build context = repo ROOT:
-#   docker build -f docker/github.Dockerfile -t loopboard/mcp-github .
+#   docker build -f docker/github.Dockerfile -t invokeboard/mcp-github .
 # ─────────────────────────────────────────────────────────────────────────────
 FROM node:20-alpine
 WORKDIR /app

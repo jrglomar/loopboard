@@ -1,6 +1,6 @@
-# Loopboard — Project Brief (build team)
+# InvokeBoard — Project Brief (build team)
 
-Source spec: `docs/poc-spec.txt` (text extracted from `loopboard-poc_1.pdf`, v1.0, June 2025).
+Source spec: `docs/poc-spec.txt` (text extracted from `invokeboard-poc_1.pdf`, v1.0, June 2025).
 Read the spec for full detail; this brief distills scope and constraints.
 
 ## What we are building

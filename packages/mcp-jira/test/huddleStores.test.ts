@@ -15,7 +15,7 @@ let impFile: string;
 let prFile: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "loopboard-huddle-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "invokeboard-huddle-"));
   impFile = path.join(dir, "imp.json");
   prFile = path.join(dir, "prs.json");
   process.env["JIRA_BASE_URL"] = "https://test.atlassian.net";

@@ -16,7 +16,7 @@ import { seal } from "../src/lib/crypto/secretBox.js";
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "loopboard-rc-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "invokeboard-rc-"));
   process.env["JIRA_BASE_URL"] = "https://global.atlassian.net";
   process.env["JIRA_EMAIL"] = "global@example.com";
   process.env["JIRA_API_TOKEN"] = "global-token";
@@ -50,7 +50,7 @@ describe("request context (ADR-055)", () => {
   });
 
   it("store paths are namespaced per user inside a context, shared outside", () => {
-    expect(getLeavesFilePath()).toContain(".loopboard-leaves.json"); // shared default
+    expect(getLeavesFilePath()).toContain(".invokeboard-leaves.json"); // shared default
     runWithUser({ userId: "userB", config: getConfig() }, () => {
       const p = getLeavesFilePath();
       expect(p.startsWith(USER_STORES_DIR)).toBe(true);
