@@ -11,6 +11,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { getPrsFilePath } from "./config.js";
+import { writeJsonAtomic } from "./atomicFile.js";
 
 export interface PullRequest {
   id: string;
@@ -43,5 +44,5 @@ export function readPrs(): PrsFile {
 export function writePrs(data: PrsFile): void {
   const filePath = getPrsFilePath();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+  writeJsonAtomic(filePath, data);
 }

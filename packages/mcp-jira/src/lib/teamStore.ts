@@ -18,6 +18,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { TeamMember } from "./types.js";
 import { getTeamFilePath } from "./config.js";
+import { writeJsonAtomic } from "./atomicFile.js";
 
 /**
  * File-level shape: boardId (as string key) → TeamMember[]
@@ -52,5 +53,5 @@ export function writeTeams(data: TeamFile): void {
   const filePath = getTeamFilePath();
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+  writeJsonAtomic(filePath, data);
 }

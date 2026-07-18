@@ -12,6 +12,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { getImpedimentsFilePath } from "./config.js";
+import { writeJsonAtomic } from "./atomicFile.js";
 
 export interface Impediment {
   id: string;
@@ -43,5 +44,5 @@ export function readImpediments(): ImpedimentsFile {
 export function writeImpediments(data: ImpedimentsFile): void {
   const filePath = getImpedimentsFilePath();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+  writeJsonAtomic(filePath, data);
 }

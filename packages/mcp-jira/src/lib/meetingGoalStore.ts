@@ -12,6 +12,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { getMeetingGoalFilePath } from "./config.js";
+import { writeJsonAtomic } from "./atomicFile.js";
 
 export interface MeetingGoal {
   goal: string;
@@ -40,5 +41,5 @@ export function readMeetingGoals(): MeetingGoalFile {
 export function writeMeetingGoals(data: MeetingGoalFile): void {
   const filePath = getMeetingGoalFilePath();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+  writeJsonAtomic(filePath, data);
 }

@@ -2871,3 +2871,23 @@ UI-only (export layer); no tool/route/env changes.
     Avg done / sprint (raw `avgDonePoints` — the FULL-window velocity convention, NOT
     leave-adjusted; the leave-adjusted view stays in the Developer KPIs workbook). "Unassigned"
     is filtered (v1.61 item 176 rule). Same styling pass as the existing sections.
+
+## Changelog v1.63 (2026-07-18 — atomic store writes + deployment hardening; ADR-075)
+
+No tool/route/env surface changes — a durability guarantee + docs. Store file FORMATS unchanged.
+
+181. **Every JSON store write is now crash-atomic.** All 11 mcp-jira store modules (leaves, team,
+    impediments, prs, post-scrum, meeting-goal, offset, meeting-notes, retro, journal, users)
+    write through one shared `writeJsonAtomic(filePath, data)` helper: serialize → write to a
+    same-directory `<file>.tmp` → `fs.renameSync` over the target (atomic on the same filesystem).
+    A crash or power loss mid-write can no longer truncate/corrupt a store — the old file survives
+    intact. Read paths, file names, and JSON shapes are byte-identical. `.gitignore` += `*.tmp`
+    (a crash may leave a stale temp file behind; readers ignore it).
+182. **DEPLOYMENT.md production-hardening checklist expanded** (the security-review findings):
+    TLS is mandatory (the one hop where a pasted token crosses in clear + session cookies);
+    `NODE_ENV=production` must be set or the session cookie's `secure` flag stays off; back up the
+    data volume on a schedule and NEVER into the same artifact as `.env` (`TOKEN_ENC_KEY` must not
+    travel with the ciphertext it unlocks); prefer fine-grained GitHub PATs and Atlassian scoped
+    API tokens with expiries (rotation = reconnect in Connections); exactly ONE bridge replica
+    (JSON stores cannot be shared across instances). Login brute-force protection status
+    verified and documented (report-only this release).

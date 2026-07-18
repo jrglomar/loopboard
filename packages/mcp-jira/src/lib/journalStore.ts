@@ -15,6 +15,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { USER_STORES_DIR } from "./config.js";
+import { writeJsonAtomic } from "./atomicFile.js";
 
 /** One note entry in the feed. */
 export interface JournalNote {
@@ -98,7 +99,7 @@ function read(userId: string): JournalFile {
 function write(userId: string, data: JournalFile): void {
   const p = filePath(userId);
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify(data, null, 2), "utf8");
+  writeJsonAtomic(p, data);
 }
 
 /** Notes (newest first) + to-dos (oldest first) for one sprint. */

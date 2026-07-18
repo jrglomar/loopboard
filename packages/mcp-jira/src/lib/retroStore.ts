@@ -11,6 +11,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { getRetroFilePath } from "./config.js";
+import { writeJsonAtomic } from "./atomicFile.js";
 
 export interface RetroFields {
   reasonForDelays: string;
@@ -46,5 +47,5 @@ export function readRetros(): RetroFile {
 export function writeRetros(data: RetroFile): void {
   const filePath = getRetroFilePath();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+  writeJsonAtomic(filePath, data);
 }

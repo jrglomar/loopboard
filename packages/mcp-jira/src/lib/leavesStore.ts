@@ -15,6 +15,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { getLeavesFilePath } from "./config.js";
+import { writeJsonAtomic } from "./atomicFile.js";
 
 export type LeaveType = "VL" | "EL" | "Holiday" | "Offset";
 export const LEAVE_TYPES: readonly LeaveType[] = ["VL", "EL", "Holiday", "Offset"];
@@ -70,5 +71,5 @@ export function readLeaves(): LeavesFile {
 export function writeLeaves(data: LeavesFile): void {
   const filePath = getLeavesFilePath();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf8");
+  writeJsonAtomic(filePath, data);
 }

@@ -103,6 +103,11 @@ docker run --rm -v loopboard_loopboard-data:/data -v "$PWD":/backup alpine \
   sh -c "cp /data/.loopboard-*.json /backup/ 2>/dev/null || true"
 ```
 
+Store writes are crash-atomic as of v1.63 (ADR-075): each write lands in a same-directory
+`*.tmp` file first and is renamed over the target, so a hard crash or `kill -9` mid-write
+can't corrupt a store — a stray `*.tmp` left behind by such a crash is harmless leftover
+(every store's read path only ever opens the real filename) and safe to delete.
+
 ---
 
 ## 4. Operations
@@ -122,32 +127,94 @@ compose ps` shows `healthy`/`unhealthy`.
 
 ## 5. Production hardening
 
-This repo is a POC. Before exposing it beyond a trusted host:
+This repo is a POC. Before exposing it beyond a trusted host, work through this
+checklist (TLS, `NODE_ENV`, token scope, backups, and the one-replica rule below
+were added/expanded per a v1.63 security review — ADR-075):
 
-1. **TLS / HTTPS.** Terminate TLS in front of `web` (a reverse proxy such as
-   Traefik/Caddy/an LB, or cloud ingress). Don't serve creds-bearing traffic over
+1. **TLS / HTTPS — mandatory, not optional.** Two things cross this hop in clear
+   if you skip it: a Jira/GitHub/AI token pasted into the Connections tab
+   (`CONTRACTS.md` §8.4), and the Task Helper session cookie itself (whose
+   `secure` flag only means anything once there's HTTPS to be secure over — see
+   the next item). Terminate TLS in front of `web`; the two lowest-ceremony
+   options are **Caddy** (point it at the `web` container and it gets you
+   auto-renewing Let's Encrypt HTTPS in a ~5-line Caddyfile, no cert management)
+   or **nginx + certbot** (run certbot against `docker/nginx.conf`'s server block
+   and cron its renewal). Either way: don't serve creds-bearing traffic over
    plain HTTP.
-2. **Secrets.** Never commit `.env`. Use your platform's secret store (Docker/
+2. **`NODE_ENV=production` — required for the session cookie's `secure` flag.**
+   `sessionCookieOptions()` in `packages/mcp-jira/src/routes/taskHelper.ts` sets
+   `secure: process.env.NODE_ENV === "production"` on the Task Helper session
+   cookie; anything else ships that cookie over HTTP too, even behind TLS.
+   **Verified for this repo's own images:** `docker/jira.Dockerfile` and
+   `docker/github.Dockerfile` both bake `ENV NODE_ENV=production` in at build
+   time, and neither `docker-compose.yml`'s `environment:` block nor
+   `.env.docker.example` overrides it — so `docker compose up --build` already
+   ships this correctly out of the box. If you run `mcp-jira` outside these
+   images (bare `node`/`tsx`, your own compose file, PM2, a serverless wrapper),
+   set `NODE_ENV=production` yourself in that environment.
+3. **Secrets.** Never commit `.env`. Use your platform's secret store (Docker/
    Swarm secrets, Kubernetes Secrets, cloud secret managers) and inject at
-   runtime. Rotate the Jira/GitHub tokens; prefer least-privilege scopes.
-3. **Auth.** There is no user auth in front of the dashboard — anyone who can
-   reach `:8080` can drive the tools with the service account's credentials. Put
-   it behind SSO/an authenticating proxy, or restrict network access.
-4. **CORS.** Not needed in the default proxy topology (same-origin). If you split
+   runtime.
+4. **Token scope.** Prefer **fine-grained GitHub PATs** over classic
+   account-wide `repo`-scope tokens — `docs/SETUP.md` already documents the
+   exact permissions to grant (Pull requests + Issues: Read and Write, plus the
+   Models: Read account permission if you're using GitHub Models for AI).
+   Prefer **Atlassian API tokens with scopes** over classic account-wide ones
+   where your Atlassian plan offers them. Set expiries on every token. Rotation
+   is just a reconnect: paste the new token into the Connections tab and it
+   seals + replaces the stored one — no restart needed.
+5. **Back up the data volume — and never bundle it with `.env`.** Schedule a
+   periodic backup of the `loopboard-data` volume (the per-sprint JSON stores —
+   see §3.3), e.g. a nightly cron on the Docker host:
+   ```bash
+   # crontab -e
+   0 2 * * * docker run --rm -v loopboard_loopboard-data:/data \
+     -v /backups/loopboard:/backup alpine \
+     tar czf /backup/loopboard-data-$(date +\%Y\%m\%d).tar.gz -C /data .
+   ```
+   **Hard rule: `.env` must NEVER travel in the same backup artifact as the data
+   volume.** `.env` holds `TOKEN_ENC_KEY`, the AES-256-GCM key that decrypts
+   every sealed Jira/GitHub/AI token sitting in `.loopboard-users.json` inside
+   that same volume — ship them together and whoever gets the backup gets the
+   plaintext tokens too, no different from committing `.env` outright. Keep
+   `TOKEN_ENC_KEY` (and `SESSION_SECRET`) in your platform's secret manager, or
+   at minimum in a separately-encrypted location the data backups never touch.
+6. **Auth.** There is no user auth in front of the dashboard itself — anyone who
+   can reach `:8080` can drive the tools with the service account's credentials.
+   Put it behind SSO/an authenticating proxy, or restrict network access. (The
+   Task Helper's own `/api/auth/*` login — `CONTRACTS.md` §8, ADR-054 — is
+   separate and only guards the dormant Task Helper backend, not the main
+   dashboard.)
+7. **CORS.** Not needed in the default proxy topology (same-origin). If you split
    the SPA and bridges across origins (see §6), set `CORS_ORIGINS` to the exact
    SPA origin(s) — avoid `*` in production.
-5. **Image slimming (optional).** The bridge images currently run via `tsx` and
+8. **Statefulness — exactly ONE replica per bridge.** The JSON stores (leaves,
+   team, impediments, PRs, post-scrum, meeting-goal, offset, meeting-notes,
+   retro, journal, users — all of `packages/mcp-jira/src/lib/*Store.ts`) are
+   per-instance local files, not a shared DB. Two `jira` replicas (or two
+   `github` replicas) behind a load balancer will each see only their own half
+   of the writes and silently diverge — there is no locking or replication
+   between them. Scale `web` (nginx, stateless) freely; keep `jira` and `github`
+   at a single replica each until the stores move to a shared DB.
+9. **Image slimming (optional).** The bridge images currently run via `tsx` and
    include devDependencies. To slim: add a JS emit (`tsc` with `outDir`), run
    `node dist/http.js`, and `npm prune --omit=dev` (or a multi-stage copy of just
    `dist` + prod deps).
-6. **Statefulness.** The JSON stores are single-node. If you run more than one
-   `jira` replica, move leaves/team to a shared DB (they're isolated behind
-   `leavesStore.ts` / `teamStore.ts`).
-7. **Rate limits / retries.** No backoff today; transient upstream failures
-   surface as `502 UPSTREAM`. Add retry/backoff in the REST clients for
-   higher-traffic use.
-8. **Observability.** Ship `docker compose logs` to your log stack; consider
-   adding structured logging + request tracing.
+10. **Rate limits / retries.** No backoff today; transient upstream failures
+    surface as `502 UPSTREAM`. Add retry/backoff in the REST clients for
+    higher-traffic use.
+11. **Observability.** Ship `docker compose logs` to your log stack; consider
+    adding structured logging + request tracing.
+12. **Login throttling — know what you have.** `POST /api/auth/login` is
+    rate-limited per email (10 failed attempts per 15 minutes → `429`, cleared on
+    success — `routes/taskHelper.ts`), which blunts online guessing against a
+    known account. Know the limits of it: **signup has no limiter**, the key is
+    the email (not the caller's IP, so spraying many emails isn't throttled), and
+    the counter is in-process memory — it resets on restart and is per-instance
+    (one more reason for the one-replica rule above). If the app ever faces the
+    open internet rather than a team, add an IP-based limiter at the reverse
+    proxy (both Caddy and nginx can do this in a few lines) rather than in the
+    app.
 
 ---
 
