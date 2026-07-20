@@ -8,14 +8,12 @@
 # Build context = repo ROOT:
 #   docker build -f docker/github.Dockerfile -t invokeboard/mcp-github .
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:20-alpine
+# v1.65 (ADR-077, revised): Debian/glibc base, not alpine — see docker/jira.Dockerfile for the
+# full reasoning. This image's root `npm ci` also resolves mcp-jira's better-sqlite3 (even
+# though mcp-github never touches storage), and better-sqlite3 has no musl prebuild; on slim it
+# downloads the glibc prebuilt binary instead of compiling, so no apk/compiler is needed.
+FROM node:20-slim
 WORKDIR /app
-
-# v1.65 follow-up (ADR-077): this image copies mcp-jira's package.json below too (needed
-# for a lockfile-exact root `npm ci` across the whole workspace), so it installs mcp-jira's
-# better-sqlite3 dependency as well even though mcp-github never touches storage. Same
-# musl-has-no-prebuild issue as docker/jira.Dockerfile — required for `npm ci` to succeed.
-RUN apk add --no-cache python3 make g++
 
 # 1) Install workspace deps (lockfile-exact). Manifests first for layer caching.
 COPY package.json package-lock.json tsconfig.base.json ./
@@ -30,7 +28,8 @@ COPY packages/mcp-github packages/mcp-github
 ENV NODE_ENV=production
 EXPOSE 4002
 
+# node-based liveness (Debian slim ships no wget, unlike alpine's busybox).
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:4002/api/health >/dev/null 2>&1 || exit 1
+  CMD node -e "require('http').get('http://localhost:4002/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
 
 CMD ["npm", "run", "start:http", "-w", "packages/mcp-github"]
