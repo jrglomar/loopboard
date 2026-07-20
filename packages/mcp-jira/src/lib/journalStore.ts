@@ -9,13 +9,13 @@
  * ⚠ Keyed by the user's REAL id, never the credential-source id (ADR-056). Unlike the team
  * stores (leaves/retro/notes), a journal is PERSONAL: a shared-credential viewer keeps their own
  * notes rather than writing into the token owner's.
+ *
+ * v1.65 (ADR-077): reads/writes go through the storage port, scoped by `userId` directly (the
+ * real user id IS the scope — a journal is always per-user, never SHARED_SCOPE).
  */
 
-import * as fs from "fs";
-import * as path from "path";
 import * as crypto from "crypto";
-import { USER_STORES_DIR } from "./config.js";
-import { writeJsonAtomic } from "./atomicFile.js";
+import { readDoc, writeDoc } from "./storage/index.js";
 
 /** One note entry in the feed. */
 export interface JournalNote {
@@ -47,10 +47,6 @@ interface JournalFile {
   todos: JournalTodo[];
 }
 
-function filePath(userId: string): string {
-  return path.join(USER_STORES_DIR, userId, "journal.json");
-}
-
 /**
  * v1.47 stored notes as `{ [sprintId]: { [YYYY-MM-DD]: text } }`. Convert each day's note into a
  * feed entry (dated midday UTC so the ordering is stable). Migrated once, then persisted, so ids
@@ -77,12 +73,7 @@ function migrateLegacyNotes(raw: unknown): { notes: JournalNote[]; migrated: boo
 }
 
 function read(userId: string): JournalFile {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(fs.readFileSync(filePath(userId), "utf8"));
-  } catch {
-    return { notes: [], todos: [] };
-  }
+  const parsed = readDoc(userId, "journal");
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return { notes: [], todos: [] };
   }
@@ -97,9 +88,7 @@ function read(userId: string): JournalFile {
 }
 
 function write(userId: string, data: JournalFile): void {
-  const p = filePath(userId);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  writeJsonAtomic(p, data);
+  writeDoc(userId, "journal", data);
 }
 
 /** Notes (newest first) + to-dos (oldest first) for one sprint. */

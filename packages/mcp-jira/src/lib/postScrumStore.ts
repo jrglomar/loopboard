@@ -4,15 +4,12 @@
  * Shape: { [sprintId: string]: PostScrumNote[] }
  *
  * v1.20 (ADR-031): a manual store for tracking post-standup "parking-lot" follow-ups
- * (mirrors impedimentsStore). Path is read from config at call time so tests can override
- * JIRA_POST_SCRUM_FILE before any call. Reads tolerate a missing/corrupt file (returns {}).
- * Writes create the file + parent dirs; may throw on FS errors.
+ * (mirrors impedimentsStore). v1.65 (ADR-077): reads/writes go through the storage port
+ * (json driver by default; still honors JIRA_POST_SCRUM_FILE). Reads tolerate a
+ * missing/corrupt doc (returns {}).
  */
 
-import * as fs from "fs";
-import * as path from "path";
-import { getPostScrumFilePath } from "./config.js";
-import { writeJsonAtomic } from "./atomicFile.js";
+import { readDoc, writeDoc, currentScope } from "./storage/index.js";
 
 export interface PostScrumNote {
   id: string;
@@ -27,22 +24,14 @@ export type PostScrumFile = Record<string, PostScrumNote[]>;
 
 /** Read the post-scrum file. Returns {} on ENOENT or any JSON parse error. */
 export function readPostScrum(): PostScrumFile {
-  const filePath = getPostScrumFilePath();
-  try {
-    const raw = fs.readFileSync(filePath, "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      return {};
-    }
-    return parsed as PostScrumFile;
-  } catch {
+  const parsed = readDoc(currentScope(), "post-scrum");
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return {};
   }
+  return parsed as PostScrumFile;
 }
 
-/** Write the post-scrum file, creating parent directories as needed. */
+/** Write the post-scrum doc via the storage port. */
 export function writePostScrum(data: PostScrumFile): void {
-  const filePath = getPostScrumFilePath();
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  writeJsonAtomic(filePath, data);
+  writeDoc(currentScope(), "post-scrum", data);
 }

@@ -13,6 +13,13 @@
 FROM node:20-alpine
 WORKDIR /app
 
+# v1.65 (ADR-077): better-sqlite3 (used when STORAGE_DRIVER=sqlite) ships prebuilt binaries
+# only for glibc Linux/macOS/Windows — it has NO musl/Alpine prebuild as of this writing
+# (WiseLibs/better-sqlite3 issues #619 and #1382, open since 2021), so on this alpine base
+# `npm ci` falls back to compiling the native addon from source via node-gyp, which needs a
+# C/C++ toolchain. Required for `npm ci` to succeed at all below, not just for sqlite mode.
+RUN apk add --no-cache python3 make g++
+
 # 1) Install workspace deps (lockfile-exact). Copy manifests first so this layer
 #    is cached until a package.json / lockfile actually changes.
 COPY package.json package-lock.json tsconfig.base.json ./

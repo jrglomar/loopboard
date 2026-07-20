@@ -2910,3 +2910,25 @@ No tool names, routes, ports, or error codes change. The rename touches identity
     Jira's `/rest/agile/1.0/` API paths are Atlassian's, not brand strings — untouched.
 186. **Repo + folder**: GitHub repo renamed `jrglomar/invokeboard` (old URLs redirect; open PRs
     survive); working folder `C:\Projects\invokeboard`; `origin` remote URL updated.
+
+## Changelog v1.65 (2026-07-18 — working-day timeline + pluggable storage (json | sqlite); ADR-077)
+
+187. **Huddle timeline counts WORKING days** (UI-only): "Day N of M · X days left" is now Mon–Fri
+    only, built on the SAME `sprintWorkingDays` list burndown and capacity already use (one
+    convention, no third copy). On a weekend, the day number clamps to Friday's (no phantom
+    progress), and days-left counts remaining workdays. The pace heuristic (%time vs %points)
+    consumes the timeline fraction and follows automatically.
+188. **§3 — pluggable storage.** New env: `STORAGE_DRIVER` = `"json"` (default — dev behavior,
+    byte-identical to v1.63/64: per-store files, `*_FILE` overrides honored, crash-atomic writes)
+    | `"sqlite"` (production: one better-sqlite3 database file, default
+    `.invokeboard-stores.sqlite`, override `STORAGE_SQLITE_FILE`; Docker compose points it at the
+    `/data` volume). Every store's IO now routes through one storage port —
+    `readDoc(scope, name)` / `writeDoc(scope, name, data)` where scope = shared or a user id —
+    so all 11 stores (and the per-user store dirs) keep their exact logic and JSON shapes on both
+    drivers. better-sqlite3 is SYNCHRONOUS — the store/tool/route call graph stays sync. In
+    sqlite mode the per-store `*_FILE` env overrides are not applicable (documented).
+189. **Auto-import on first sqlite boot**: when `STORAGE_DRIVER=sqlite`, the docs table is EMPTY,
+    and JSON store files exist at their (json-driver) paths, the bridge imports them once at
+    startup — loudly logged, JSON files left untouched as a natural backup. DEPLOYMENT.md:
+    production may set `STORAGE_DRIVER=sqlite`; backup guidance covers the single sqlite file;
+    the one-replica rule is unchanged (sqlite is still per-instance).

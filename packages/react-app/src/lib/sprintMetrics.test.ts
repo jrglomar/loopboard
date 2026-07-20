@@ -140,7 +140,7 @@ describe("computeProgress", () => {
   });
 });
 
-// ── computeTimeline ───────────────────────────────────────────────────────────
+// ── computeTimeline (v1.65, ADR-077: working days, not calendar days) ──────────
 
 describe("computeTimeline", () => {
   it("returns null when startDate is null", () => {
@@ -155,42 +155,112 @@ describe("computeTimeline", () => {
     expect(computeTimeline(null, null)).toBeNull();
   });
 
-  it("returns correct timeline at sprint start", () => {
-    // Sprint: Jun 1–14 (14 days); now = Jun 1 (day 1)
-    const start = "2026-06-01T00:00:00.000Z";
-    const end   = "2026-06-15T00:00:00.000Z";
-    const now   = new Date("2026-06-01T12:00:00.000Z");
-    const result = computeTimeline(start, end, now);
-    expect(result).not.toBeNull();
-    expect(result!.dayOfN).toBe(1);
-    expect(result!.totalDays).toBe(14);
-    expect(result!.elapsedPct).toBeGreaterThanOrEqual(0);
-  });
-
-  it("returns correct timeline mid-sprint", () => {
-    // Sprint: Jun 1–15 (14 days total); now = Jun 8 = day 7
-    const start = "2026-06-01T00:00:00.000Z";
-    const end   = "2026-06-15T00:00:00.000Z";
-    const now   = new Date("2026-06-08T00:00:00.000Z");
-    const result = computeTimeline(start, end, now);
-    expect(result).not.toBeNull();
-    expect(result!.elapsedPct).toBe(50);
-    expect(result!.daysLeft).toBeGreaterThan(0);
-  });
-
-  it("caps elapsedPct at 100 when sprint has passed", () => {
-    const start = "2026-06-01T00:00:00.000Z";
-    const end   = "2026-06-14T00:00:00.000Z";
-    const now   = new Date("2026-07-01T00:00:00.000Z"); // past end
-    const result = computeTimeline(start, end, now);
-    expect(result).not.toBeNull();
-    expect(result!.elapsedPct).toBe(100);
-    expect(result!.daysLeft).toBe(0);
-  });
-
   it("returns null when end <= start", () => {
     // Invalid sprint dates
     expect(computeTimeline("2026-06-14", "2026-06-01")).toBeNull();
+  });
+
+  it("returns null when the sprint spans zero working days (weekend-only)", () => {
+    // 2026-06-06 = Sat, 2026-06-07 = Sun — end > start but no Mon–Fri day in range
+    expect(computeTimeline("2026-06-06", "2026-06-07")).toBeNull();
+  });
+
+  // Standard fixture: Mon 2026-06-01 -> Fri 2026-06-12, a typical 2-week / 10-working-day
+  // sprint. Same start/end already proven Mon–Fri-correct by capacity.test.ts's "counts
+  // correct working days for a typical 2-week sprint (10 days)". endDate is INCLUSIVE —
+  // the sprint's actual last day, same convention `sprintWorkingDays` and every other
+  // consumer (burndown, capacity, reports) already use for report.sprint.startDate/endDate.
+  const SPRINT_START = "2026-06-01"; // Mon
+  const SPRINT_END = "2026-06-12"; // Fri (inclusive)
+
+  it("dayOfN=1 / totalDays=10 on the start Monday (time-of-day within the day doesn't matter)", () => {
+    // now = same calendar day as start, at noon — proves the comparison is date-only
+    const result = computeTimeline(SPRINT_START, SPRINT_END, new Date("2026-06-01T12:00:00.000Z"));
+    expect(result).not.toBeNull();
+    expect(result!.dayOfN).toBe(1);
+    expect(result!.totalDays).toBe(10);
+    expect(result!.elapsedPct).toBe(10);
+  });
+
+  it("dayOfN=5 / elapsedPct=50 at the Friday ending the first working week", () => {
+    const result = computeTimeline(SPRINT_START, SPRINT_END, new Date("2026-06-05T00:00:00.000Z"));
+    expect(result).not.toBeNull();
+    expect(result!.dayOfN).toBe(5);
+    expect(result!.totalDays).toBe(10);
+    expect(result!.elapsedPct).toBe(50);
+    expect(result!.daysLeft).toBe(5);
+  });
+
+  it("Monday-start 2-week sprint: Day 10 on the final Friday, daysLeft 0 there", () => {
+    const result = computeTimeline(SPRINT_START, SPRINT_END, new Date("2026-06-12T00:00:00.000Z"));
+    expect(result).not.toBeNull();
+    expect(result!.dayOfN).toBe(10);
+    expect(result!.totalDays).toBe(10);
+    expect(result!.daysLeft).toBe(0);
+    expect(result!.elapsedPct).toBe(100);
+  });
+
+  it("stays capped at totalDays / 0 left once the sprint has fully passed", () => {
+    const result = computeTimeline(SPRINT_START, SPRINT_END, new Date("2026-07-01T00:00:00.000Z"));
+    expect(result).not.toBeNull();
+    expect(result!.dayOfN).toBe(10);
+    expect(result!.daysLeft).toBe(0);
+    expect(result!.elapsedPct).toBe(100);
+  });
+
+  it("returns dayOfN=0 when now is before the sprint starts", () => {
+    const result = computeTimeline(SPRINT_START, SPRINT_END, new Date("2026-05-25T00:00:00.000Z"));
+    expect(result).not.toBeNull();
+    expect(result!.dayOfN).toBe(0);
+    expect(result!.totalDays).toBe(10);
+    expect(result!.daysLeft).toBe(10);
+    expect(result!.elapsedPct).toBe(0);
+  });
+
+  it("returns dayOfN=totalDays / daysLeft=0 when now is after the sprint ends", () => {
+    const result = computeTimeline(SPRINT_START, SPRINT_END, new Date("2026-06-20T00:00:00.000Z"));
+    expect(result).not.toBeNull();
+    expect(result!.dayOfN).toBe(10);
+    expect(result!.daysLeft).toBe(0);
+  });
+
+  it("mid-sprint weekday sanity: the second Wednesday is working Day 8 of 10", () => {
+    // 2026-06-10 is the second Wed of the sprint (WD1-5 = Jun1-5, WD6-8 = Jun8-10)
+    const result = computeTimeline(SPRINT_START, SPRINT_END, new Date("2026-06-10T00:00:00.000Z"));
+    expect(result).not.toBeNull();
+    expect(result!.dayOfN).toBe(8);
+    expect(result!.totalDays).toBe(10);
+  });
+
+  it("weekend clamp: Saturday and Sunday give the same dayOfN (and elapsedPct) as the preceding Friday", () => {
+    const friday   = computeTimeline(SPRINT_START, SPRINT_END, new Date("2026-06-05T00:00:00.000Z"));
+    const saturday = computeTimeline(SPRINT_START, SPRINT_END, new Date("2026-06-06T00:00:00.000Z"));
+    const sunday   = computeTimeline(SPRINT_START, SPRINT_END, new Date("2026-06-07T00:00:00.000Z"));
+    expect(friday!.dayOfN).toBe(5);
+    expect(saturday!.dayOfN).toBe(5); // no phantom weekend progress
+    expect(sunday!.dayOfN).toBe(5);
+    expect(saturday!.elapsedPct).toBe(friday!.elapsedPct);
+    expect(sunday!.elapsedPct).toBe(friday!.elapsedPct);
+  });
+
+  // The user's live-reported bug (v1.65, ADR-077): the Huddle showed "Day 4 of 13 · 10
+  // days left" for a sprint whose calendar day-4 fell on a Saturday. Fixture: Wed
+  // 2026-07-01 -> Tue 2026-07-14 (10 working days: Jul 1-3, 6-10, 13-14), now = Sat
+  // 2026-07-04 (the sprint's first Saturday — its 4th CALENDAR day). Under the OLD
+  // calendar-day formula this exact start/end/now reproduces the reported numbers
+  // exactly: totalDays = round((Jul14-Jul1)/day) = 13, elapsedDays = floor(3 days) = 3,
+  // dayOfN = elapsedDays+1 = 4, daysLeft = 13-3 = 10 -> "Day 4 of 13 · 10 days left".
+  // The fix must show working Day 3 of 10.
+  it("the user's live case: calendar day-4 on a Saturday now reads as working Day 3 of 10", () => {
+    const result = computeTimeline(
+      "2026-07-01", // Wed
+      "2026-07-14", // Tue (inclusive last working day)
+      new Date("2026-07-04T00:00:00.000Z") // Sat — the sprint's 4th calendar day
+    );
+    expect(result).not.toBeNull();
+    expect(result!.dayOfN).toBe(3);
+    expect(result!.totalDays).toBe(10);
+    expect(result!.daysLeft).toBe(7);
   });
 });
 
@@ -253,5 +323,34 @@ describe("computePace", () => {
   it("returns ahead when all points done early", () => {
     // 30% into sprint, 100% done — delta = +70
     expect(computePace(30, 100)).toBe("ahead");
+  });
+});
+
+// ── computeTimeline -> computePace integration (v1.65, ADR-077) ────────────────
+
+describe("computePace fed by the working-day timeline (v1.65, ADR-077)", () => {
+  it("flips the pace bucket vs. the old calendar-day fraction on a weekend now", () => {
+    // Same live-case fixture as the computeTimeline suite above: Wed 2026-07-01 ->
+    // Tue 2026-07-14, now = Sat 2026-07-04. New working-day elapsedPct = 30% (3 of 10
+    // working days elapsed). The OLD calendar-day formula would have given elapsedPct
+    // = round(3/13*100) = 23% (3 calendar days into a 13-calendar-day span) — hand
+    // -derived here since the buggy calendar formula no longer exists in the codebase
+    // to call directly.
+    const timeline = computeTimeline(
+      "2026-07-01",
+      "2026-07-14",
+      new Date("2026-07-04T00:00:00.000Z")
+    );
+    expect(timeline).not.toBeNull();
+    expect(timeline!.elapsedPct).toBe(30); // working-day fraction
+
+    const oldCalendarElapsedPct = 23; // round(3/13*100), derivation documented above
+
+    // At 15% points done: delta vs the new working-day fraction (30) = -15 -> "behind"
+    // (computePace's real threshold: delta < -10). Delta vs the old calendar fraction
+    // (23) = -8 -> "on_track" (real threshold: -10 <= delta <= 10). The old calendar
+    // -based pace would have hidden a team that is genuinely behind.
+    expect(computePace(timeline!.elapsedPct, 15)).toBe("behind");
+    expect(computePace(oldCalendarElapsedPct, 15)).toBe("on_track");
   });
 });

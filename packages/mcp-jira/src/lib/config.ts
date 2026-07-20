@@ -112,6 +112,11 @@ const configSchema = z.object({
   TASK_HELPER_FILE: z.string().default(""), // user store path; default resolved from package dir
   // v1.45 (ADR-055): comma-separated emails that get the "admin" role on signup (super-admin).
   ADMIN_EMAILS: z.string().default(""),
+  // v1.65 (ADR-077): pluggable storage — "json" (dev default, byte-identical per-file stores)
+  // or "sqlite" (production, one better-sqlite3 database file). See src/lib/storage/.
+  STORAGE_DRIVER: z.enum(["json", "sqlite"]).default("json"),
+  // Resolved relative to the package dir (same base as the other store defaults) unless absolute.
+  STORAGE_SQLITE_FILE: z.string().default(".invokeboard-stores.sqlite"),
   // v1.22: dev-status applicationType for linked-PR reads (GitHub | GitHubEnterprise | bitbucket).
   JIRA_DEV_STATUS_APP_TYPE: z.string().default("GitHub"),
   MCP_JIRA_HTTP_PORT: z.coerce.number().default(4001),
@@ -238,6 +243,16 @@ export function getOffsetFilePath(): string {
 export function getTaskHelperFilePath(): string {
   const cfg = getConfig();
   return cfg.TASK_HELPER_FILE || DEFAULT_TASK_HELPER_FILE;
+}
+
+/**
+ * Resolved sqlite database file path (v1.65, ADR-077) — used only when STORAGE_DRIVER=sqlite.
+ * STORAGE_SQLITE_FILE resolves relative to the package dir (same base as every other store
+ * default) unless it is already absolute (e.g. Docker's `/data/...`).
+ */
+export function getStorageSqliteFilePath(): string {
+  const cfg = getConfig();
+  return path.resolve(_packageDir, cfg.STORAGE_SQLITE_FILE);
 }
 
 /**

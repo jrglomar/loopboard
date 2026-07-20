@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { getConfig, resetConfigCache, parseProjects } from "../src/lib/config.js";
+import * as path from "path";
+import { getConfig, resetConfigCache, parseProjects, getStorageSqliteFilePath } from "../src/lib/config.js";
 import { ConfigError } from "../src/lib/errors.js";
 
 describe("parseProjects (v1.25, ADR-037)", () => {
@@ -141,5 +142,45 @@ describe("getConfig", () => {
     process.env["JIRA_BASE_URL"] = "https://new.atlassian.net";
     const cfg = getConfig();
     expect(cfg.JIRA_BASE_URL).toBe("https://new.atlassian.net");
+  });
+});
+
+describe("STORAGE_DRIVER / STORAGE_SQLITE_FILE (v1.65, ADR-077)", () => {
+  it("STORAGE_DRIVER defaults to json", () => {
+    setRequiredVars();
+    expect(getConfig().STORAGE_DRIVER).toBe("json");
+  });
+
+  it("accepts sqlite", () => {
+    setRequiredVars();
+    process.env["STORAGE_DRIVER"] = "sqlite";
+    expect(getConfig().STORAGE_DRIVER).toBe("sqlite");
+  });
+
+  it("rejects an unrecognized STORAGE_DRIVER value", () => {
+    setRequiredVars();
+    process.env["STORAGE_DRIVER"] = "postgres";
+    expect(() => getConfig()).toThrow(ConfigError);
+  });
+
+  it("getStorageSqliteFilePath() resolves the default filename relative to the package dir", () => {
+    setRequiredVars();
+    const p = getStorageSqliteFilePath();
+    expect(path.isAbsolute(p)).toBe(true);
+    expect(p.endsWith(path.join("mcp-jira", ".invokeboard-stores.sqlite"))).toBe(true);
+  });
+
+  it("getStorageSqliteFilePath() uses an absolute STORAGE_SQLITE_FILE as-is", () => {
+    setRequiredVars();
+    const absolute = path.join(path.sep, "data", "stores.sqlite");
+    process.env["STORAGE_SQLITE_FILE"] = absolute;
+    expect(getStorageSqliteFilePath()).toBe(path.resolve(absolute));
+  });
+
+  it("getStorageSqliteFilePath() resolves a relative STORAGE_SQLITE_FILE against the package dir", () => {
+    setRequiredVars();
+    process.env["STORAGE_SQLITE_FILE"] = "custom.sqlite";
+    const p = getStorageSqliteFilePath();
+    expect(p.endsWith(path.join("mcp-jira", "custom.sqlite"))).toBe(true);
   });
 });

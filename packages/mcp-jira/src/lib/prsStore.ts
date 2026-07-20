@@ -4,14 +4,11 @@
  * Shape: { [sprintId: string]: PullRequest[] }
  *
  * v1.16 (ADR-027): a manual store for daily Huddle code-review visibility (mirrors
- * leavesStore). Path read from config at call time (getPrsFilePath()) so tests can
- * override JIRA_PRS_FILE. Reads tolerate a missing/corrupt file (returns {}).
+ * leavesStore). v1.65 (ADR-077): reads/writes go through the storage port (json driver
+ * by default; still honors JIRA_PRS_FILE). Reads tolerate a missing/corrupt doc (returns {}).
  */
 
-import * as fs from "fs";
-import * as path from "path";
-import { getPrsFilePath } from "./config.js";
-import { writeJsonAtomic } from "./atomicFile.js";
+import { readDoc, writeDoc, currentScope } from "./storage/index.js";
 
 export interface PullRequest {
   id: string;
@@ -27,22 +24,14 @@ export type PrsFile = Record<string, PullRequest[]>;
 
 /** Read the PRs file. Returns {} on ENOENT or any JSON parse error. */
 export function readPrs(): PrsFile {
-  const filePath = getPrsFilePath();
-  try {
-    const raw = fs.readFileSync(filePath, "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      return {};
-    }
-    return parsed as PrsFile;
-  } catch {
+  const parsed = readDoc(currentScope(), "prs");
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return {};
   }
+  return parsed as PrsFile;
 }
 
-/** Write the PRs file, creating parent directories as needed. */
+/** Write the PRs doc via the storage port. */
 export function writePrs(data: PrsFile): void {
-  const filePath = getPrsFilePath();
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  writeJsonAtomic(filePath, data);
+  writeDoc(currentScope(), "prs", data);
 }

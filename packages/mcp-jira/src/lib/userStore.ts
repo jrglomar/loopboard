@@ -1,17 +1,19 @@
 /**
  * User store (v1.44, ADR-054) — host-local JSON file for Task Helper accounts + their
- * encrypted Jira/GitHub connections. Mirrors the §4 store pattern (tolerant read → {},
- * mkdir + write). Raw tokens are stored ONLY sealed (AES-256-GCM); this module never
- * returns plaintext — decryption happens in the caller via secretBox.open().
+ * encrypted Jira/GitHub connections. Mirrors the §4 store pattern (tolerant read → {}).
+ * Raw tokens are stored ONLY sealed (AES-256-GCM); this module never returns plaintext —
+ * decryption happens in the caller via secretBox.open().
+ *
+ * v1.65 (ADR-077): reads/writes go through the storage port, always at SHARED_SCOPE — this
+ * store is the ONE global account list, never per-user-scoped, even when called from inside
+ * a per-user request context (an admin managing users while signed in still reads/writes the
+ * same shared "users" doc). Still honors TASK_HELPER_FILE under the json driver.
  */
 
-import * as fs from "fs";
-import * as path from "path";
 import * as crypto from "crypto";
-import { getTaskHelperFilePath } from "./config.js";
+import { readDoc, writeDoc, SHARED_SCOPE } from "./storage/index.js";
 import type { SealedSecret } from "./crypto/secretBox.js";
 import type { AdminConfig } from "./adminConfig.js";
-import { writeJsonAtomic } from "./atomicFile.js";
 
 export type ConnectionProvider = "jira" | "github" | "ai";
 
@@ -86,27 +88,20 @@ function backfillRoles(users: Record<string, StoredUser>): Record<string, Stored
 }
 
 function read(): UserStoreFile {
-  try {
-    const raw = fs.readFileSync(getTaskHelperFilePath(), "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return emptyStore();
-    const obj = parsed as Partial<UserStoreFile>;
-    return {
-      users: backfillRoles(obj.users ?? {}),
-      connections: obj.connections ?? {},
-      globalConfig: obj.globalConfig ?? {},
-      userConfigs: obj.userConfigs ?? {},
-      configTemplates: obj.configTemplates ?? {},
-    };
-  } catch {
-    return emptyStore();
-  }
+  const parsed = readDoc(SHARED_SCOPE, "users");
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return emptyStore();
+  const obj = parsed as Partial<UserStoreFile>;
+  return {
+    users: backfillRoles(obj.users ?? {}),
+    connections: obj.connections ?? {},
+    globalConfig: obj.globalConfig ?? {},
+    userConfigs: obj.userConfigs ?? {},
+    configTemplates: obj.configTemplates ?? {},
+  };
 }
 
 function write(data: UserStoreFile): void {
-  const filePath = getTaskHelperFilePath();
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  writeJsonAtomic(filePath, data);
+  writeDoc(SHARED_SCOPE, "users", data);
 }
 
 function normalizeEmail(email: string): string {

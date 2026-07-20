@@ -8,14 +8,12 @@
  * `readLeaves` NORMALIZES on read — a legacy `string[]` becomes `{ [date]: "VL" }` — so the
  * existing `.invokeboard-leaves.json` keeps working without a migration step.
  *
- * v1.5 (ADR-016): first stateful store. Path read from config at call time (getLeavesFilePath()).
- * Reads tolerate a missing/corrupt file (returns {}). Writes create the file + parent dirs.
+ * v1.5 (ADR-016): first stateful store. v1.65 (ADR-077): reads/writes go through the storage
+ * port (json driver by default — same file paths as before; sqlite when STORAGE_DRIVER=sqlite).
+ * Reads tolerate a missing/corrupt doc (returns {}).
  */
 
-import * as fs from "fs";
-import * as path from "path";
-import { getLeavesFilePath } from "./config.js";
-import { writeJsonAtomic } from "./atomicFile.js";
+import { readDoc, writeDoc, currentScope } from "./storage/index.js";
 
 export type LeaveType = "VL" | "EL" | "Holiday" | "Offset";
 export const LEAVE_TYPES: readonly LeaveType[] = ["VL", "EL", "Holiday", "Offset"];
@@ -47,29 +45,21 @@ export function normalizeAssigneeLeaves(value: unknown): AssigneeLeaves {
 
 /** Read the leaves file, normalizing every assignee entry to the typed shape. Returns {} on error. */
 export function readLeaves(): LeavesFile {
-  const filePath = getLeavesFilePath();
-  try {
-    const raw = fs.readFileSync(filePath, "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
-    const out: LeavesFile = {};
-    for (const [sprintId, byAssignee] of Object.entries(parsed as Record<string, unknown>)) {
-      if (!byAssignee || typeof byAssignee !== "object") continue;
-      const norm: Record<string, AssigneeLeaves> = {};
-      for (const [assignee, value] of Object.entries(byAssignee as Record<string, unknown>)) {
-        norm[assignee] = normalizeAssigneeLeaves(value);
-      }
-      out[sprintId] = norm;
+  const parsed = readDoc(currentScope(), "leaves");
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+  const out: LeavesFile = {};
+  for (const [sprintId, byAssignee] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!byAssignee || typeof byAssignee !== "object") continue;
+    const norm: Record<string, AssigneeLeaves> = {};
+    for (const [assignee, value] of Object.entries(byAssignee as Record<string, unknown>)) {
+      norm[assignee] = normalizeAssigneeLeaves(value);
     }
-    return out;
-  } catch {
-    return {};
+    out[sprintId] = norm;
   }
+  return out;
 }
 
-/** Write the leaves file, creating parent directories as needed. */
+/** Write the leaves file (storage port — json driver mkdirs + writes atomically; see storage/). */
 export function writeLeaves(data: LeavesFile): void {
-  const filePath = getLeavesFilePath();
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  writeJsonAtomic(filePath, data);
+  writeDoc(currentScope(), "leaves", data);
 }
