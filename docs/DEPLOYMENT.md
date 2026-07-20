@@ -112,7 +112,16 @@ can't corrupt a store — a stray `*.tmp` left behind by such a crash is harmles
 
 **Storage driver option — `sqlite` (v1.65, ADR-077).** Every store's IO now goes through one
 storage port with two drivers. `STORAGE_DRIVER=json` (the default) is exactly the behavior
-above — per-file JSON, `*_FILE` overrides honored. Setting `STORAGE_DRIVER=sqlite` moves ALL
+above — per-file JSON, `*_FILE` overrides honored, and it has **no native dependency**, so the
+image builds and runs in any environment. `sqlite` mode uses the **optional** `better-sqlite3`
+native module: it installs from a prebuilt binary on common platforms, but if your build host
+can't fetch that binary and lacks a C/Python toolchain, `better-sqlite3` simply doesn't install
+(it's an `optionalDependency`, so `npm ci` still succeeds and the app runs fine on `json`). To
+actually use `STORAGE_DRIVER=sqlite`, build in an environment where `better-sqlite3` can install
+— either one that can download its prebuilt binary, or one with `python3` + a C compiler
+(`make`, `g++`) available for the source build. Requesting `sqlite` without the module installed
+fails at startup with a clear message pointing back to `STORAGE_DRIVER=json`. Setting
+`STORAGE_DRIVER=sqlite` moves ALL
 11 stores (not just leaves/team — impediments, PRs, post-scrum, meeting-goal, meeting-notes,
 retro, offset, users, and every per-user journal too) into ONE `better-sqlite3` database file,
 `STORAGE_SQLITE_FILE` (default `.invokeboard-stores.sqlite`, resolved the same way the JSON
