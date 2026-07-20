@@ -27,7 +27,11 @@ COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/mcp-jira/package.json   packages/mcp-jira/package.json
 COPY packages/mcp-github/package.json packages/mcp-github/package.json
 COPY packages/react-app/package.json  packages/react-app/package.json
-RUN npm ci --include=dev
+# Force devDependencies (typescript, vite) even if NODE_ENV=production leaks in from the build
+# environment — `--include=dev` alone can be overridden by an inherited production setting, and
+# an omitted devDep is why `tsc`/`vite` went "not found" here. The inline NODE_ENV scopes to
+# this command only; the later `vite build` still emits a production bundle.
+RUN NODE_ENV=development npm ci --include=dev
 
 COPY packages/react-app packages/react-app
 
@@ -36,7 +40,10 @@ ARG VITE_MCP_JIRA_URL=/jira
 ARG VITE_MCP_GITHUB_URL=/github
 ENV VITE_MCP_JIRA_URL=$VITE_MCP_JIRA_URL
 ENV VITE_MCP_GITHUB_URL=$VITE_MCP_GITHUB_URL
-RUN npm run build -w packages/react-app
+# `build:image` = `vite build` only (no `tsc --noEmit`). The type-check is a code-quality gate
+# that already runs in `npm run typecheck` / `npm run build` before shipping; the image just
+# needs the bundle, so it doesn't re-typecheck (faster, and tsc isn't on the deploy critical path).
+RUN npm run build:image -w packages/react-app
 
 # ── Serve stage ──────────────────────────────────────────────────────────────
 FROM nginx:alpine AS serve

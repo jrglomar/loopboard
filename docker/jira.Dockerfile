@@ -25,7 +25,10 @@ COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/mcp-jira/package.json   packages/mcp-jira/package.json
 COPY packages/mcp-github/package.json packages/mcp-github/package.json
 COPY packages/react-app/package.json  packages/react-app/package.json
-RUN npm ci --include=dev
+# Force devDependencies — this image RUNS TypeScript via tsx (a devDep), so an omitted dev
+# tree (NODE_ENV=production leaking into the build) would crash the bridge at runtime with
+# "tsx: not found". Inline NODE_ENV scopes to this command only; the ENV below stays production.
+RUN NODE_ENV=development npm ci --include=dev
 
 # 2) Copy ONLY this service's source (the other workspaces keep just their
 #    package.json, which is all npm needed for resolution).
