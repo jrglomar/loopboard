@@ -10,15 +10,14 @@
 # Build context = repo ROOT (npm workspaces need the root manifest + lockfile).
 #   docker build -f docker/jira.Dockerfile -t invokeboard/mcp-jira .
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:20-alpine
+# v1.65 (ADR-077, revised): Debian/glibc base — NOT alpine/musl. better-sqlite3 (pulled in by
+# the root `npm ci` when STORAGE_DRIVER=sqlite) publishes prebuilt binaries for glibc but NONE
+# for musl (WiseLibs/better-sqlite3 #619/#1382), so on alpine `npm ci` had to COMPILE it from
+# source — which needed apk python3/make/g++ and broke on any host that can't reach Alpine's
+# package CDN. On slim, prebuild-install downloads the prebuilt binary: no compiler, no apk, no
+# Python. Larger base image, zero native compilation — the documented, reliable path.
+FROM node:20-slim
 WORKDIR /app
-
-# v1.65 (ADR-077): better-sqlite3 (used when STORAGE_DRIVER=sqlite) ships prebuilt binaries
-# only for glibc Linux/macOS/Windows — it has NO musl/Alpine prebuild as of this writing
-# (WiseLibs/better-sqlite3 issues #619 and #1382, open since 2021), so on this alpine base
-# `npm ci` falls back to compiling the native addon from source via node-gyp, which needs a
-# C/C++ toolchain. Required for `npm ci` to succeed at all below, not just for sqlite mode.
-RUN apk add --no-cache python3 make g++
 
 # 1) Install workspace deps (lockfile-exact). Copy manifests first so this layer
 #    is cached until a package.json / lockfile actually changes.
@@ -35,8 +34,9 @@ COPY packages/mcp-jira packages/mcp-jira
 ENV NODE_ENV=production
 EXPOSE 4001
 
-# Liveness — the bridge's own health endpoint (busybox wget ships with alpine).
+# Liveness — the bridge's own health endpoint. Uses node (always present) rather than wget,
+# which the Debian slim base does not ship (unlike alpine's busybox).
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD wget -qO- http://localhost:4001/api/health >/dev/null 2>&1 || exit 1
+  CMD node -e "require('http').get('http://localhost:4001/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
 
 CMD ["npm", "run", "start:http", "-w", "packages/mcp-jira"]
