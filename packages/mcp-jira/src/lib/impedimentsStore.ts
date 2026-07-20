@@ -4,15 +4,11 @@
  * Shape: { [sprintId: string]: Impediment[] }
  *
  * v1.16 (ADR-027): a manual store for daily Huddle visibility (mirrors leavesStore).
- * Path is read from config at call time (getImpedimentsFilePath()) so tests can
- * override JIRA_IMPEDIMENTS_FILE before any call. Reads tolerate a missing/corrupt
- * file (returns {}). Writes create the file + parent dirs; may throw on FS errors.
+ * v1.65 (ADR-077): reads/writes go through the storage port (json driver by default;
+ * still honors JIRA_IMPEDIMENTS_FILE). Reads tolerate a missing/corrupt doc (returns {}).
  */
 
-import * as fs from "fs";
-import * as path from "path";
-import { getImpedimentsFilePath } from "./config.js";
-import { writeJsonAtomic } from "./atomicFile.js";
+import { readDoc, writeDoc, currentScope } from "./storage/index.js";
 
 export interface Impediment {
   id: string;
@@ -27,22 +23,14 @@ export type ImpedimentsFile = Record<string, Impediment[]>;
 
 /** Read the impediments file. Returns {} on ENOENT or any JSON parse error. */
 export function readImpediments(): ImpedimentsFile {
-  const filePath = getImpedimentsFilePath();
-  try {
-    const raw = fs.readFileSync(filePath, "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      return {};
-    }
-    return parsed as ImpedimentsFile;
-  } catch {
+  const parsed = readDoc(currentScope(), "impediments");
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return {};
   }
+  return parsed as ImpedimentsFile;
 }
 
-/** Write the impediments file, creating parent directories as needed. */
+/** Write the impediments doc via the storage port. */
 export function writeImpediments(data: ImpedimentsFile): void {
-  const filePath = getImpedimentsFilePath();
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  writeJsonAtomic(filePath, data);
+  writeDoc(currentScope(), "impediments", data);
 }

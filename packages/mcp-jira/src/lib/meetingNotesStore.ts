@@ -6,14 +6,11 @@
  *
  * The value is an HTML string produced by the app's editor; this store is content-agnostic —
  * the React app sanitizes with DOMPurify on save AND on render (the server never parses HTML).
- * Path is read from config at call time so tests can override JIRA_MEETING_NOTES_FILE first.
- * Reads tolerate a missing/corrupt file (returns {}). Writes create the file + parent dirs.
+ * v1.65 (ADR-077): reads/writes go through the storage port (json driver by default; still
+ * honors JIRA_MEETING_NOTES_FILE). Reads tolerate a missing/corrupt doc (returns {}).
  */
 
-import * as fs from "fs";
-import * as path from "path";
-import { getMeetingNotesFilePath } from "./config.js";
-import { writeJsonAtomic } from "./atomicFile.js";
+import { readDoc, writeDoc, currentScope } from "./storage/index.js";
 
 export interface MeetingNotes {
   html: string;
@@ -25,22 +22,14 @@ export type MeetingNotesFile = Record<string, MeetingNotes>;
 
 /** Read the meeting-notes file. Returns {} on ENOENT or any JSON parse error. */
 export function readMeetingNotes(): MeetingNotesFile {
-  const filePath = getMeetingNotesFilePath();
-  try {
-    const raw = fs.readFileSync(filePath, "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      return {};
-    }
-    return parsed as MeetingNotesFile;
-  } catch {
+  const parsed = readDoc(currentScope(), "meeting-notes");
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return {};
   }
+  return parsed as MeetingNotesFile;
 }
 
-/** Write the meeting-notes file, creating parent directories as needed. */
+/** Write the meeting-notes doc via the storage port. */
 export function writeMeetingNotes(data: MeetingNotesFile): void {
-  const filePath = getMeetingNotesFilePath();
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  writeJsonAtomic(filePath, data);
+  writeDoc(currentScope(), "meeting-notes", data);
 }

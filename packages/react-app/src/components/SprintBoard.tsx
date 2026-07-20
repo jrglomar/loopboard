@@ -563,7 +563,10 @@ function SprintProgress({ data }: SprintProgressProps) {
       {timeline && (
         <div>
           <div className="flex items-center justify-between mb-1 gap-2">
-            <span className="text-xs text-muted-foreground">
+            <span
+              className="text-xs text-muted-foreground"
+              title="Counted in working days (Mon–Fri)"
+            >
               Day {timeline.dayOfN} of {timeline.totalDays} · {timeline.daysLeft} day{timeline.daysLeft !== 1 ? "s" : ""} left
             </span>
           </div>

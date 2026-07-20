@@ -78,6 +78,8 @@ the keys it needs; extras are ignored. Full annotated list: `.env.docker.example
 | `AI_PROVIDER` (+ `GITHUB_MODELS_TOKEN` / `ANTHROPIC_API_KEY`) | jira | optional | enables AI drafting; unset = deterministic templates |
 | `CORS_ORIGINS` | jira, github | optional | allowlist when the browser hits the bridges cross-origin (not needed with the proxy) |
 | `JIRA_LEAVES_FILE` / `JIRA_TEAM_FILE` | jira | set by compose | JSON store paths (→ `/data` volume) |
+| `STORAGE_DRIVER` | jira | optional, default `json` | `json` (per-file, today's behavior) or `sqlite` (one db file — §3.3) |
+| `STORAGE_SQLITE_FILE` | jira | optional, default `.invokeboard-stores.sqlite` | sqlite db path; only used when `STORAGE_DRIVER=sqlite` |
 | `MCP_JIRA_HTTP_PORT` / `MCP_GITHUB_HTTP_PORT` | jira / github | default 4001 / 4002 | bridge ports |
 
 ### 3.2 The SPA's bridge URLs are baked at BUILD time
@@ -107,6 +109,32 @@ Store writes are crash-atomic as of v1.63 (ADR-075): each write lands in a same-
 `*.tmp` file first and is renamed over the target, so a hard crash or `kill -9` mid-write
 can't corrupt a store — a stray `*.tmp` left behind by such a crash is harmless leftover
 (every store's read path only ever opens the real filename) and safe to delete.
+
+**Storage driver option — `sqlite` (v1.65, ADR-077).** Every store's IO now goes through one
+storage port with two drivers. `STORAGE_DRIVER=json` (the default) is exactly the behavior
+above — per-file JSON, `*_FILE` overrides honored. Setting `STORAGE_DRIVER=sqlite` moves ALL
+11 stores (not just leaves/team — impediments, PRs, post-scrum, meeting-goal, meeting-notes,
+retro, offset, users, and every per-user journal too) into ONE `better-sqlite3` database file,
+`STORAGE_SQLITE_FILE` (default `.invokeboard-stores.sqlite`, resolved the same way the JSON
+defaults are). `docker-compose.yml`'s jira service has both lines ready, commented out —
+uncomment `STORAGE_DRIVER: sqlite` and `STORAGE_SQLITE_FILE: /data/.invokeboard-stores.sqlite`
+to put the db file on the same persisted volume as the JSON stores. Per-store `*_FILE`
+overrides don't apply in sqlite mode (there's one file, not eleven).
+
+**Switching to sqlite on an existing deployment auto-imports once.** The first time the
+bridge opens a sqlite file whose `docs` table is empty, it scans the JSON stores at their
+current (json-driver) paths and imports every doc it finds in one transaction, logging a
+loud multi-line summary of what was imported to the container's stdout/stderr (`docker
+compose logs jira`). The original JSON files are left untouched — they become a natural,
+human-readable backup of the pre-switch state. This import runs exactly once: any later
+restart sees a non-empty `docs` table and skips it, even if you leave the old JSON files in
+place.
+
+**Backup.** With `STORAGE_DRIVER=sqlite`, back up `STORAGE_SQLITE_FILE` — one file instead of
+eleven-plus-per-user; it lives on the same `invokeboard-data` volume, so the existing backup
+command above (and the nightly-cron example in §5, item 5) already covers it once `docker
+cp`/tar picks up the whole volume. The same `.env`-never-travels-with-the-data-volume rule
+applies — `.invokeboard-stores.sqlite` holds the same sealed tokens `.invokeboard-users.json` did.
 
 ---
 
@@ -188,14 +216,18 @@ were added/expanded per a v1.63 security review — ADR-075):
 7. **CORS.** Not needed in the default proxy topology (same-origin). If you split
    the SPA and bridges across origins (see §6), set `CORS_ORIGINS` to the exact
    SPA origin(s) — avoid `*` in production.
-8. **Statefulness — exactly ONE replica per bridge.** The JSON stores (leaves,
+8. **Statefulness — exactly ONE replica per bridge.** The stores (leaves,
    team, impediments, PRs, post-scrum, meeting-goal, offset, meeting-notes,
    retro, journal, users — all of `packages/mcp-jira/src/lib/*Store.ts`) are
-   per-instance local files, not a shared DB. Two `jira` replicas (or two
+   per-instance local state, not a shared DB. Two `jira` replicas (or two
    `github` replicas) behind a load balancer will each see only their own half
    of the writes and silently diverge — there is no locking or replication
    between them. Scale `web` (nginx, stateless) freely; keep `jira` and `github`
-   at a single replica each until the stores move to a shared DB.
+   at a single replica each until the stores move to a shared DB. **This is
+   unchanged by `STORAGE_DRIVER=sqlite` (v1.65)** — a local `better-sqlite3` file
+   is still one file on one instance's disk, not a network database; it collapses
+   eleven-plus-per-user files into one for backup/porting convenience, it does
+   not add multi-replica sharing. The one-replica rule stands either way.
 9. **Image slimming (optional).** The bridge images currently run via `tsx` and
    include devDependencies. To slim: add a JS emit (`tsc` with `outDir`), run
    `node dist/http.js`, and `npm prune --omit=dev` (or a multi-stage copy of just

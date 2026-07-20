@@ -12,14 +12,12 @@
  *    opening balance.
  *  - balance(assignee) = Σ earned − Σ spent + manualAdjust + Σ adjustments.amount.
  *
- * Path read from config at call time (getOffsetFilePath()). Reads tolerate a missing/corrupt file.
+ * v1.65 (ADR-077): reads/writes go through the storage port (json driver by default; still
+ * honors JIRA_OFFSET_FILE). Reads tolerate a missing/corrupt doc.
  */
 
-import * as fs from "fs";
-import * as path from "path";
 import * as crypto from "crypto";
-import { getOffsetFilePath } from "./config.js";
-import { writeJsonAtomic } from "./atomicFile.js";
+import { readDoc, writeDoc, currentScope } from "./storage/index.js";
 
 export interface OffsetSprintEntry {
   earned: number; // 0 or 1 (capped per sprint)
@@ -54,21 +52,13 @@ export interface OffsetSummary {
 }
 
 export function readOffset(): OffsetFile {
-  const filePath = getOffsetFilePath();
-  try {
-    const raw = fs.readFileSync(filePath, "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
-    return parsed as OffsetFile;
-  } catch {
-    return {};
-  }
+  const parsed = readDoc(currentScope(), "offset");
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+  return parsed as OffsetFile;
 }
 
 export function writeOffset(data: OffsetFile): void {
-  const filePath = getOffsetFilePath();
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  writeJsonAtomic(filePath, data);
+  writeDoc(currentScope(), "offset", data);
 }
 
 /** Pure: reduce a ledger to per-assignee computed summaries (earned/spent/manualAdjust/adjustments/balance). */
