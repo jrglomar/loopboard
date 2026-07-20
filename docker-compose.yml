@@ -31,9 +31,10 @@ services:
       JIRA_TEAM_FILE: /data/.invokeboard-team.json
       MCP_JIRA_HTTP_PORT: "4001"
       # v1.65 (ADR-077): production storage option — ALL 11 stores in one sqlite file on the
-      # volume (fixes every store, not just leaves/team, surviving rebuilds); uncomment both.
-      # STORAGE_DRIVER: sqlite
-      # STORAGE_SQLITE_FILE: /data/.invokeboard-stores.sqlite
+      # volume (fixes every store, not just leaves/team, surviving rebuilds). Needs the
+      # node-gyp toolchain in docker/jira.Dockerfile to compile better-sqlite3 (v1.65 hotfix).
+      STORAGE_DRIVER: sqlite
+      STORAGE_SQLITE_FILE: /data/.invokeboard-stores.sqlite
     volumes:
       - invokeboard-data:/data
     ports:
