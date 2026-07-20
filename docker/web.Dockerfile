@@ -23,27 +23,33 @@
 FROM node:20-slim AS build
 WORKDIR /app
 
-COPY package.json package-lock.json tsconfig.base.json ./
-COPY packages/mcp-jira/package.json   packages/mcp-jira/package.json
-COPY packages/mcp-github/package.json packages/mcp-github/package.json
-COPY packages/react-app/package.json  packages/react-app/package.json
+# Copy the WHOLE repo (`.dockerignore` drops node_modules / dist / .env). We deliberately DON'T
+# use the "copy manifests, install, then copy source" caching dance any more: `npm ci` does a
+# CLEAN install (it removes any pre-existing node_modules first), so with the full workspace
+# source present at install time this exactly mirrors a working local build — and a stray host
+# `node_modules` that slipped past .dockerignore can't shadow the hoisted `vite`/`tsc`, because
+# `npm ci` wipes it. (Trades layer-cache granularity for reliability; that's the right call here.)
+COPY . .
 # Force devDependencies (typescript, vite) even if NODE_ENV=production leaks in from the build
-# environment — `--include=dev` alone can be overridden by an inherited production setting, and
-# an omitted devDep is why `tsc`/`vite` went "not found" here. The inline NODE_ENV scopes to
-# this command only; the later `vite build` still emits a production bundle.
+# environment — `--include=dev` alone can lose to an inherited production setting. Inline NODE_ENV
+# scopes to this command only; `vite build` below still emits a production bundle.
 RUN NODE_ENV=development npm ci --include=dev
-
-COPY packages/react-app packages/react-app
+# Assert the SPA build toolchain actually installed — fail LOUD here with the resolved path (or a
+# clear "Cannot find module 'vite'") instead of a downstream, confusing "vite: not found".
+RUN node -e "console.log('vite ->', require.resolve('vite/package.json')); console.log('typescript ->', require.resolve('typescript/package.json'))"
 
 # Baked into the bundle (see packages/react-app/src/lib/mcpClient.ts).
 ARG VITE_MCP_JIRA_URL=/jira
 ARG VITE_MCP_GITHUB_URL=/github
 ENV VITE_MCP_JIRA_URL=$VITE_MCP_JIRA_URL
 ENV VITE_MCP_GITHUB_URL=$VITE_MCP_GITHUB_URL
-# `build:image` = `vite build` only (no `tsc --noEmit`). The type-check is a code-quality gate
-# that already runs in `npm run typecheck` / `npm run build` before shipping; the image just
-# needs the bundle, so it doesn't re-typecheck (faster, and tsc isn't on the deploy critical path).
-RUN npm run build:image -w packages/react-app
+# `build:image` = `vite build` only (no `tsc --noEmit` — the type-check is a gate concern, already
+# run in `npm run typecheck` / `npm run build`; the image just needs the bundle). Build from
+# WITHIN the workspace dir so the `vite` binary resolves by walking node_modules up to the hoisted
+# root — independent of `npm -w` PATH quirks across npm versions (the other likely cause here).
+WORKDIR /app/packages/react-app
+RUN npm run build:image
+WORKDIR /app
 
 # ── Serve stage ──────────────────────────────────────────────────────────────
 FROM nginx:alpine AS serve
