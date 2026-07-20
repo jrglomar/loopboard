@@ -20,7 +20,8 @@ COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/mcp-jira/package.json   packages/mcp-jira/package.json
 COPY packages/mcp-github/package.json packages/mcp-github/package.json
 COPY packages/react-app/package.json  packages/react-app/package.json
-RUN npm ci --include=dev
+# Force devDependencies — this image RUNS TypeScript via tsx (a devDep); see jira.Dockerfile.
+RUN NODE_ENV=development npm ci --include=dev
 
 # 2) Copy ONLY this service's source.
 COPY packages/mcp-github packages/mcp-github
