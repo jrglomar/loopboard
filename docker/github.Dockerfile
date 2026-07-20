@@ -11,6 +11,12 @@
 FROM node:20-alpine
 WORKDIR /app
 
+# v1.65 follow-up (ADR-077): this image copies mcp-jira's package.json below too (needed
+# for a lockfile-exact root `npm ci` across the whole workspace), so it installs mcp-jira's
+# better-sqlite3 dependency as well even though mcp-github never touches storage. Same
+# musl-has-no-prebuild issue as docker/jira.Dockerfile — required for `npm ci` to succeed.
+RUN apk add --no-cache python3 make g++
+
 # 1) Install workspace deps (lockfile-exact). Manifests first for layer caching.
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/mcp-jira/package.json   packages/mcp-jira/package.json
