@@ -39,13 +39,12 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-/** Format YYYY-MM-DD → e.g. "Mo 3" (short day + date number) */
-function formatDayHeader(iso: string): string {
-  // Parse as local date to match the display expectation
-  const [, , dd] = iso.split("-");
+/** Format YYYY-MM-DD → { weekday: "TH", monthDay: "Jul 30" } for a stacked header. */
+function formatDayHeader(iso: string): { weekday: string; monthDay: string } {
   const date = new Date(`${iso}T12:00:00Z`);
-  const dayName = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"][date.getUTCDay()];
-  return `${dayName} ${parseInt(dd, 10)}`;
+  const weekday = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"][date.getUTCDay()];
+  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][date.getUTCMonth()];
+  return { weekday, monthDay: `${month} ${parseInt(iso.slice(8, 10), 10)}` };
 }
 
 /** Format date for short display in aria labels: "Mon Jun 3" */
@@ -304,16 +303,20 @@ export function LeavesCalendarCard({
                 >
                   Assignee
                 </th>
-                {workingDays.map((day) => (
-                  <th
-                    key={day}
-                    scope="col"
-                    className="pb-2 px-1 font-medium text-center text-muted-foreground uppercase tracking-wide min-w-[36px]"
-                    title={day}
-                  >
-                    {formatDayHeader(day)}
-                  </th>
-                ))}
+                {workingDays.map((day) => {
+                  const h = formatDayHeader(day);
+                  return (
+                    <th
+                      key={day}
+                      scope="col"
+                      className="pb-2 px-1 font-medium text-center text-muted-foreground tracking-wide min-w-[46px]"
+                      title={day}
+                    >
+                      <span className="block text-[0.625rem] font-semibold uppercase text-foreground/70 leading-tight">{h.weekday}</span>
+                      <span className="block text-[0.6875rem] leading-tight">{h.monthDay}</span>
+                    </th>
+                  );
+                })}
                 <th
                   scope="col"
                   className="pb-2 pl-3 font-medium text-right text-muted-foreground uppercase tracking-wide min-w-[48px]"
@@ -333,13 +336,13 @@ export function LeavesCalendarCard({
                 return (
                   <tr
                     key={name}
-                    className="border-t border-border/40 hover:bg-muted/20 transition-colors"
+                    className="group border-t border-border/40 hover:bg-primary/5 transition-colors"
                   >
                     {/* Assignee name with initials avatar */}
                     {/* a11y: th scope="row" for the assignee label */}
                     <th
                       scope="row"
-                      className="py-1.5 pr-3 text-left font-medium text-foreground"
+                      className="py-1.5 pr-3 text-left font-medium text-foreground rounded-l group-hover:bg-primary/10 transition-colors"
                     >
                       <div className="flex items-center gap-1.5">
                         <span
