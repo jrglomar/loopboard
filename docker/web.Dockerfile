@@ -18,6 +18,14 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 
+# v1.65 follow-up (ADR-077): same reason as docker/jira.Dockerfile — this build stage's
+# root `npm ci` resolves the WHOLE workspace lockfile (all 3 package.json manifests below),
+# which includes mcp-jira's better-sqlite3 dependency even though this image only builds
+# the SPA. Alpine/musl has no better-sqlite3 prebuild, so `npm ci` needs a C/C++ toolchain
+# to compile it here too (the compiled output itself is discarded — never copied into the
+# `serve` stage below, which has no Node runtime at all).
+RUN apk add --no-cache python3 make g++
+
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/mcp-jira/package.json   packages/mcp-jira/package.json
 COPY packages/mcp-github/package.json packages/mcp-github/package.json
