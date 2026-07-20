@@ -326,13 +326,13 @@ export function Dashboard({
           <section aria-label="Meeting goal">
             <MeetingGoalCard sprintId={effectiveSprintId} />
           </section>
-          {/* v1.41 (ADR-051): rich meeting notes — deployment notes, links (WYSIWYG) */}
-          <section aria-label="Meeting notes">
-            <MeetingNotesCard sprintId={effectiveSprintId} />
-          </section>
           {/* v1.31 (ADR-043): who's on leave today + in the coming days */}
           <section aria-label="On leave">
             <LeaveStatusCard />
+          </section>
+          {/* v1.41 (ADR-051): rich meeting notes — deployment notes, links (WYSIWYG) */}
+          <section aria-label="Meeting notes">
+            <MeetingNotesCard sprintId={effectiveSprintId} />
           </section>
           {/* v1.58 (ADR-070): Work Item Age — how long in-flight tickets have sat, vs a
               points-scaled expectation. Rides the already-fetched sprint data; no extra call.
