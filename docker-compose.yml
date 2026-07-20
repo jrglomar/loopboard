@@ -68,5 +68,12 @@ services:
       - "8080:80"
     restart: unless-stopped
 
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
+    depends_on:
+      - web
+    restart: unless-stopped
+
 volumes:
   invokeboard-data:
