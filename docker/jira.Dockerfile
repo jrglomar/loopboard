@@ -19,20 +19,16 @@
 FROM node:20-slim
 WORKDIR /app
 
-# 1) Install workspace deps (lockfile-exact). Copy manifests first so this layer
-#    is cached until a package.json / lockfile actually changes.
-COPY package.json package-lock.json tsconfig.base.json ./
-COPY packages/mcp-jira/package.json   packages/mcp-jira/package.json
-COPY packages/mcp-github/package.json packages/mcp-github/package.json
-COPY packages/react-app/package.json  packages/react-app/package.json
-# Force devDependencies — this image RUNS TypeScript via tsx (a devDep), so an omitted dev
-# tree (NODE_ENV=production leaking into the build) would crash the bridge at runtime with
-# "tsx: not found". Inline NODE_ENV scopes to this command only; the ENV below stays production.
+# Copy the WHOLE repo (`.dockerignore` drops node_modules / dist / .env), then clean-install.
+# `npm ci` removes any pre-existing node_modules first, so a stray host `node_modules` that
+# slipped past .dockerignore can't shadow the hoisted `tsx` binary this bridge runs at runtime.
+# Force devDependencies — the bridge RUNS TypeScript via tsx (a devDep); an omitted dev tree
+# (NODE_ENV=production leaking into the build) would crash it at startup with "tsx: not found".
+# Inline NODE_ENV scopes to this command only; the ENV below keeps the RUNTIME production.
+COPY . .
 RUN NODE_ENV=development npm ci --include=dev
-
-# 2) Copy ONLY this service's source (the other workspaces keep just their
-#    package.json, which is all npm needed for resolution).
-COPY packages/mcp-jira packages/mcp-jira
+# Assert tsx installed — fail loud here, not with a confusing runtime "tsx: not found".
+RUN node -e "console.log('tsx ->', require.resolve('tsx/package.json'))"
 
 ENV NODE_ENV=production
 EXPOSE 4001

@@ -15,16 +15,12 @@
 FROM node:20-slim
 WORKDIR /app
 
-# 1) Install workspace deps (lockfile-exact). Manifests first for layer caching.
-COPY package.json package-lock.json tsconfig.base.json ./
-COPY packages/mcp-jira/package.json   packages/mcp-jira/package.json
-COPY packages/mcp-github/package.json packages/mcp-github/package.json
-COPY packages/react-app/package.json  packages/react-app/package.json
-# Force devDependencies — this image RUNS TypeScript via tsx (a devDep); see jira.Dockerfile.
+# Copy the WHOLE repo then clean-install — same reasoning as docker/jira.Dockerfile: `npm ci`
+# wipes node_modules first (no host-node_modules shadowing of the hoisted `tsx` binary), and
+# NODE_ENV=development forces the devDependency tree (tsx) the bridge runs at runtime.
+COPY . .
 RUN NODE_ENV=development npm ci --include=dev
-
-# 2) Copy ONLY this service's source.
-COPY packages/mcp-github packages/mcp-github
+RUN node -e "console.log('tsx ->', require.resolve('tsx/package.json'))"
 
 ENV NODE_ENV=production
 EXPOSE 4002
