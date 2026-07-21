@@ -94,6 +94,16 @@ allowed. Methods `GET,POST`, header `Content-Type`. In the Docker reverse-proxy
 topology the browser is same-origin, so CORS is not exercised (see
 `docs/DEPLOYMENT.md`, `docs/ARCHITECTURE.md` §8).
 
+**Credentials + wildcard (security, v1.66):** the mcp-jira bridge sends the Task
+Helper session cookie (`credentials: true`). To prevent any site from making
+*authenticated* cross-origin requests when an operator sets `CORS_ORIGINS=*`, the
+Jira bridge only sets `Access-Control-Allow-Credentials: true` for an origin that is
+**explicitly listed** (or a no-`Origin` same-origin request). A `*` wildcard still
+reflects the requesting origin for cross-origin **reads**, but with credentials
+**disabled** — so the cookie is never honored against a wildcard. Explicitly listing
+the SPA origin (the normal deployment) keeps credentials working. The mcp-github
+bridge sends no credentials, so its `*` behavior is unchanged.
+
 ## 3. Environment
 
 Loading (dotenv, which never overrides already-set process env values), in order:

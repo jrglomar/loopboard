@@ -314,7 +314,6 @@ export function Dashboard({
               assigneeFilter={assigneeFilter}
               onAssigneeFilterChange={setAssigneeFilter}
               prsByKey={issuePrs.data}
-              agingPolicy={agingPolicy}
             />
           )}
         </section>

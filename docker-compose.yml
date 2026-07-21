@@ -38,7 +38,11 @@ services:
     volumes:
       - invokeboard-data:/data
     ports:
-      - "4001:4001"   # optional — direct API access for curl / debugging
+      # Bound to LOOPBACK only (v1.66, security) — the bridge falls back to the global
+      # .env Jira credentials for unauthenticated calls, so it must never be reachable off-host.
+      # nginx (web) reaches it over the compose network as `jira:4001`, not via this mapping.
+      # Drop this line entirely in production if you don't need host-side curl/debug.
+      - "127.0.0.1:4001:4001"
     restart: unless-stopped
 
   github:
@@ -50,7 +54,9 @@ services:
     environment:
       MCP_GITHUB_HTTP_PORT: "4002"
     ports:
-      - "4002:4002"   # optional — direct API access for curl / debugging
+      # Bound to LOOPBACK only (v1.66, security) — same reasoning as the jira bridge above.
+      # nginx reaches it as `github:4002`; drop this line in production to close host access.
+      - "127.0.0.1:4002:4002"
     restart: unless-stopped
 
   web:
