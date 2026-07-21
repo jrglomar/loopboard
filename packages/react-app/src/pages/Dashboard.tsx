@@ -314,7 +314,6 @@ export function Dashboard({
               assigneeFilter={assigneeFilter}
               onAssigneeFilterChange={setAssigneeFilter}
               prsByKey={issuePrs.data}
-              agingPolicy={agingPolicy}
             />
           )}
         </section>
@@ -322,6 +321,18 @@ export function Dashboard({
         {/* Sidebar: compact daily-standup widgets + Huddle Digest.
           The AI assistant is now a global floating widget (AssistantWidget). */}
         <div className="flex flex-col gap-3 min-w-0">
+          {/* v1.20 (ADR-031): today's meeting focus, above the daily widgets */}
+          <section aria-label="Meeting goal">
+            <MeetingGoalCard sprintId={effectiveSprintId} />
+          </section>
+          {/* v1.31 (ADR-043): who's on leave today + in the coming days */}
+          <section aria-label="On leave">
+            <LeaveStatusCard />
+          </section>
+          {/* v1.41 (ADR-051): rich meeting notes — deployment notes, links (WYSIWYG) */}
+          <section aria-label="Meeting notes">
+            <MeetingNotesCard sprintId={effectiveSprintId} />
+          </section>
           {/* v1.58 (ADR-070): Work Item Age — how long in-flight tickets have sat, vs a
               points-scaled expectation. Rides the already-fetched sprint data; no extra call.
               v1.61 (ADR-073, items 173-174): scoped to the inprogress bucket only, clamped to
@@ -333,26 +344,6 @@ export function Dashboard({
               sprintStartDate={sprint.data?.sprint.startDate}
             />
           </section>
-
-          {/* v1.20 (ADR-031): today's meeting focus, above the daily widgets */}
-          <section aria-label="Meeting goal">
-            <MeetingGoalCard sprintId={effectiveSprintId} />
-          </section>
-
-          {/* v1.41 (ADR-051): rich meeting notes — deployment notes, links (WYSIWYG) */}
-          <section aria-label="Meeting notes">
-            <MeetingNotesCard sprintId={effectiveSprintId} />
-          </section>
-
-          {/* v1.16 (ADR-027): impediments log + pending-PR list for daily visibility.
-            v1.20: code review auto-lists PRs linked to the current sprint. */}
-          <section aria-label="Impediments">
-            <ImpedimentsCard sprintId={effectiveSprintId} />
-          </section>
-          {/* v1.31 (ADR-043): who's on leave today + in the coming days */}
-          <section aria-label="On leave">
-            <LeaveStatusCard />
-          </section>
           <section aria-label="Code review pull requests">
             <PullRequestsCard
               sprintId={effectiveSprintId}
@@ -360,7 +351,11 @@ export function Dashboard({
               issuePrs={issuePrs.data}
             />
           </section>
-
+          {/* v1.16 (ADR-027): impediments log + pending-PR list for daily visibility.
+            v1.20: code review auto-lists PRs linked to the current sprint. */}
+          <section aria-label="Impediments">
+            <ImpedimentsCard sprintId={effectiveSprintId} />
+          </section>
           {/* v1.20 (ADR-031): per-person post-scrum tracking */}
           {/* <section aria-label="Post-scrum notes">
           <PostScrumCard sprintId={effectiveSprintId} boardId={selectedBoardId} />

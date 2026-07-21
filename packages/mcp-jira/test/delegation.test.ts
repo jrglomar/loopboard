@@ -10,7 +10,7 @@ import { resetConfigCache, getLeavesFilePath, getProjects, USER_STORES_DIR } fro
 import { runWithUser } from "../src/lib/requestContext.js";
 import { resolveUser } from "../src/lib/userConfig.js";
 import { getEffectiveConnection, canUserWriteJira, isDelegated } from "../src/lib/delegation.js";
-import { createUser, updateUser, upsertConnection, setUserConfig, findUserById } from "../src/lib/userStore.js";
+import { createUser, updateUser, upsertConnection, setUserConfig, findUserById, getConnection } from "../src/lib/userStore.js";
 import { seal } from "../src/lib/crypto/secretBox.js";
 import { getAiStatus } from "../src/lib/ai/provider.js";
 
@@ -120,6 +120,67 @@ describe("shared credentials (ADR-056)", () => {
   it("resolveUser returns null when there is nothing to borrow", () => {
     const orphan = createUser("orphan@team.com", "hash");
     expect(resolveUser(orphan.id)).toBeNull();
+  });
+});
+
+// v1.67 (ADR-078) — granular per-provider sharing. `sharedProviders` restricts WHICH providers a
+// borrower may fall back to; undefined (the legacy default) shares everything, unchanged.
+describe("granular per-provider sharing (v1.67, ADR-078)", () => {
+  beforeEach(() => {
+    // The owner also has GitHub + AI connections to share, on top of the Jira set up in the outer
+    // beforeEach — so restriction tests can prove a listed provider still resolves and an unlisted
+    // one does not, for the SAME owner/viewer pair.
+    upsertConnection(ownerId, "github", {
+      enc: seal("owner-gh-token"),
+      meta: { login: "owner", hint: "…gh" },
+      updatedAt: new Date().toISOString(),
+    });
+    upsertConnection(ownerId, "ai", {
+      enc: seal("owner-ai-token"),
+      meta: { provider: "github", model: "openai/gpt-4o-mini", hint: "…ai" },
+      updatedAt: new Date().toISOString(),
+    });
+  });
+
+  it("undefined sharedProviders (the default/legacy) shares ALL providers the viewer doesn't own", () => {
+    expect(getEffectiveConnection(viewerId, "jira")!.viaUserId).toBe(ownerId);
+    expect(getEffectiveConnection(viewerId, "github")!.viaUserId).toBe(ownerId);
+    expect(getEffectiveConnection(viewerId, "ai")!.viaUserId).toBe(ownerId);
+  });
+
+  it("an explicit sharedProviders list restricts fallback to only the listed providers", () => {
+    updateUser(viewerId, { sharedProviders: ["github"] });
+    expect(getEffectiveConnection(viewerId, "github")!.viaUserId).toBe(ownerId); // shared
+    expect(getEffectiveConnection(viewerId, "jira")).toBeNull(); // NOT shared — shows disconnected
+    expect(getEffectiveConnection(viewerId, "ai")).toBeNull(); // NOT shared
+  });
+
+  it("a provider absent from the list returns null even though the source HAS that connection", () => {
+    updateUser(viewerId, { sharedProviders: ["jira"] });
+    // The owner genuinely has an AI connection — but it's not on the list, so no fallback.
+    expect(getConnection(ownerId, "ai")).not.toBeNull();
+    expect(getEffectiveConnection(viewerId, "ai")).toBeNull();
+    expect(getEffectiveConnection(viewerId, "jira")!.viaUserId).toBe(ownerId); // listed → still shared
+  });
+
+  it("setting sharedProviders to null clears the restriction back to share-all", () => {
+    updateUser(viewerId, { sharedProviders: ["jira"] });
+    expect(getEffectiveConnection(viewerId, "github")).toBeNull();
+
+    updateUser(viewerId, { sharedProviders: null });
+    expect(getEffectiveConnection(viewerId, "github")!.viaUserId).toBe(ownerId); // restored
+  });
+
+  it("a restricted provider still resolves to the viewer's OWN connection if they have one", () => {
+    updateUser(viewerId, { sharedProviders: ["jira"] }); // github excluded from sharing
+    connectJira(viewerId, "irrelevant", "https://x", "x@y.com"); // not used by this assertion
+    upsertConnection(viewerId, "github", {
+      enc: seal("viewer-own-gh"),
+      meta: { login: "viewer", hint: "…v" },
+      updatedAt: new Date().toISOString(),
+    });
+    const eff = getEffectiveConnection(viewerId, "github")!;
+    expect(eff.viaUserId).toBeNull(); // own connection wins regardless of sharedProviders
   });
 });
 

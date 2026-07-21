@@ -111,6 +111,14 @@ describe("askService v1.40 (ADR-050) — allowlist growth + conversation memory"
   });
 });
 
+describe("askService v1.68 (ADR-079) — PO draft capacity plan joins the read-allowlist", () => {
+  it("READ_TOOLS gains get_draft_plan; set_draft_plan is never offered (draft only, no Jira write)", () => {
+    expect(READ_TOOLS.has("get_draft_plan")).toBe(true);
+    expect(READ_TOOLS.has("set_draft_plan")).toBe(false);
+    expect(WRITE_TOOLS.has("set_draft_plan")).toBe(false);
+  });
+});
+
 describe("askService write-actions (v1.19, ADR-030)", () => {
   it("proposes a write action for confirmation instead of executing it", async () => {
     const provider = fakeProvider([

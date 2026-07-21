@@ -31,13 +31,18 @@ services:
       JIRA_TEAM_FILE: /data/.invokeboard-team.json
       MCP_JIRA_HTTP_PORT: "4001"
       # v1.65 (ADR-077): production storage option — ALL 11 stores in one sqlite file on the
-      # volume (fixes every store, not just leaves/team, surviving rebuilds); uncomment both.
-      # STORAGE_DRIVER: sqlite
-      # STORAGE_SQLITE_FILE: /data/.invokeboard-stores.sqlite
+      # volume (fixes every store, not just leaves/team, surviving rebuilds). Needs the
+      # node-gyp toolchain in docker/jira.Dockerfile to compile better-sqlite3 (v1.65 hotfix).
+      STORAGE_DRIVER: sqlite
+      STORAGE_SQLITE_FILE: /data/.invokeboard-stores.sqlite
     volumes:
       - invokeboard-data:/data
     ports:
-      - "4001:4001"   # optional — direct API access for curl / debugging
+      # Bound to LOOPBACK only (v1.66, security) — the bridge falls back to the global
+      # .env Jira credentials for unauthenticated calls, so it must never be reachable off-host.
+      # nginx (web) reaches it over the compose network as `jira:4001`, not via this mapping.
+      # Drop this line entirely in production if you don't need host-side curl/debug.
+      - "127.0.0.1:4001:4001"
     restart: unless-stopped
 
   github:
@@ -49,7 +54,9 @@ services:
     environment:
       MCP_GITHUB_HTTP_PORT: "4002"
     ports:
-      - "4002:4002"   # optional — direct API access for curl / debugging
+      # Bound to LOOPBACK only (v1.66, security) — same reasoning as the jira bridge above.
+      # nginx reaches it as `github:4002`; drop this line in production to close host access.
+      - "127.0.0.1:4002:4002"
     restart: unless-stopped
 
   web:
@@ -66,6 +73,13 @@ services:
       - github
     ports:
       - "8080:80"
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
+    depends_on:
+      - web
     restart: unless-stopped
 
 volumes:

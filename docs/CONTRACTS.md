@@ -94,6 +94,16 @@ allowed. Methods `GET,POST`, header `Content-Type`. In the Docker reverse-proxy
 topology the browser is same-origin, so CORS is not exercised (see
 `docs/DEPLOYMENT.md`, `docs/ARCHITECTURE.md` §8).
 
+**Credentials + wildcard (security, v1.66):** the mcp-jira bridge sends the Task
+Helper session cookie (`credentials: true`). To prevent any site from making
+*authenticated* cross-origin requests when an operator sets `CORS_ORIGINS=*`, the
+Jira bridge only sets `Access-Control-Allow-Credentials: true` for an origin that is
+**explicitly listed** (or a no-`Origin` same-origin request). A `*` wildcard still
+reflects the requesting origin for cross-origin **reads**, but with credentials
+**disabled** — so the cookie is never honored against a wildcard. Explicitly listing
+the SPA origin (the normal deployment) keeps credentials working. The mcp-github
+bridge sends no credentials, so its `*` behavior is unchanged.
+
 ## 3. Environment
 
 Loading (dotenv, which never overrides already-set process env values), in order:
@@ -129,6 +139,7 @@ so tests run with no `.env`.
 | `JIRA_AGING_DAYS_PER_POINT` | mcp-jira | optional | `1` — aging policy: extra expected days per story point; expected = base + perPoint×points, unpointed = base only (v1.58) |
 | `JIRA_OFFSET_FILE` | mcp-jira | optional | `<mcp-jira pkg>/.invokeboard-offset.json` — JSON store for the offset ledger (v1.26) |
 | `JIRA_TEAM_FILE` | mcp-jira | optional | `<mcp-jira pkg>/.invokeboard-team.json` — JSON store for the per-board team roster (v1.8) |
+| `JIRA_DRAFT_PLAN_FILE` | mcp-jira | optional | `<mcp-jira pkg>/.invokeboard-draft-plan.json` — JSON store for per-PO-sprint draft capacity plans (v1.68) |
 | `GITHUB_TOKEN` | mcp-github | yes (no default) | — |
 | `GITHUB_REPO` | mcp-github | optional (used as default repo) | — |
 | `MCP_JIRA_HTTP_PORT` | mcp-jira | optional | `4001` |
@@ -1088,6 +1099,52 @@ reusing `reportMath.ts` (`makeDodPredicate`/`computeSprintPoints`/`computeByAssi
   jira tools **42 → 43** (smoke expected-tools list +1; NOT in the empty-input-validation smoke
   loop — all fields optional, `{}` is valid, same class as `get_velocity`). Keyless/offline tests.
 
+### 4.30 `get_draft_plan` / `set_draft_plan` (v1.68, ADR-079 — PO draft capacity plan)
+
+A PO-side DRAFT plan splitting a PO sprint's tickets across Dev-board team members, used by the
+Planning page's "Draft Capacity Plan" card to sanity-check ticket load against per-developer
+capacity. Same bridge-side store pattern as §4.21 (json | sqlite via the storage port, ADR-077) —
+NOT a Jira object. **Draft only: these tools NEVER write to Jira** — not the assignments, not the
+per-share points. Real assignment remains `assign_issue` (§4.15) and real ticket/points/status
+edits remain `update_ticket`/`transition_issue`/`move_issue_to_sprint` from the **Assign Tickets**
+surface (Dev-board Planning/Linking).
+
+**v1.70 (ADR-081): a ticket may be split across MULTIPLE developers**, each carrying a DRAFT slice
+of the points ("breakdown points" — a big story is usually shared work). So an issue key now maps
+to an ARRAY of shares, not one member. The `points` on a share is a draft figure only (defaults to
+the ticket's real Jira points when drafted whole; over/under-allocation vs the real points is
+allowed and never enforced — capacity is advisory, ADR-079).
+
+```ts
+export interface DraftShare { accountId: string; displayName: string; points: number }
+```
+
+- **`get_draft_plan`** — **Input:** `{ sprintId: number }` (the PO sprint). **Output:**
+  `{ sprintId: number; devSprintId: number | null; assignments: Record<string /*issueKey*/, DraftShare[]> }`
+  (no draft saved → `{ sprintId, devSprintId: null, assignments: {} }`).
+- **`set_draft_plan`** (full-replace per sprint) — **Input:**
+  `{ sprintId: number; devSprintId?: number | null; assignments: Record<string, Array<{ accountId: string (1+); displayName: string (1+); points: number (≥ 0) }>> }`.
+  Constraints (→ else `400 VALIDATION`): ≤ 300 issue keys; every key matches the §4.4 ticketKey
+  regex; each key's share array has 1–50 entries and is **de-duped by `accountId`** (a developer
+  appears at most once per ticket — last write wins); an **empty share array for a key is invalid**
+  (omit the key to leave a ticket undrafted). Replaces the sprint's whole draft; `devSprintId`
+  omitted → stored `null`. Empty `assignments` with `devSprintId` null/omitted **deletes** the
+  sprint's entry. **Output:** the updated `{ sprintId, devSprintId, assignments }`.
+- Store name `draft-plan` — env `JIRA_DRAFT_PLAN_FILE` (§3), default
+  `<mcp-jira>/.invokeboard-draft-plan.json`, git-ignored. Registered in `storage/registry.ts`
+  (`SHARED_STORE_NAMES` + override map) so the json `*_FILE` override and the sqlite auto-import
+  both apply (ADR-077). Store shape:
+  `{ "<sprintId>": { "devSprintId": number | null, "assignments": { "<issueKey>": DraftShare[] } } }`.
+  **Legacy read migration (v1.68→v1.70):** `readDraftPlans()` normalizes any pre-v1.70 single-object
+  value (`{ accountId, displayName }`) to a one-element array `[{ accountId, displayName, points: 0 }]`
+  — no crash, no data loss beyond the (previously nonexistent) point split. Helpers in
+  `src/lib/draftPlanStore.ts` (`readDraftPlans()`/`writeDraftPlans()`, missing/corrupt → `{}`).
+- Both registered MCP tools (unchanged count: jira tools **45**); `get_draft_plan` remains on the
+  AI Q&A read-allowlist (§4.9, **20** read tools). Tests point `JIRA_DRAFT_PLAN_FILE` at a temp path;
+  keyless/offline; cover multi-share round-trip, per-ticket accountId de-dupe, points validation,
+  empty-array-key → VALIDATION, the legacy single-object → array migration, full-replace,
+  clear-deletes-entry, bad issue key → VALIDATION, missing/corrupt-file tolerance.
+
 ## 5. mcp-github tools (Phase 2) — exact IO
 
 ```ts
@@ -1644,6 +1701,11 @@ timing-safe verify). No native deps (Node `crypto` + JSON store, mirroring §4 s
   `409 EMAIL_TAKEN` if the email exists.
 - `POST /api/auth/login` `{ email, password }` → sets cookie; `{ email }`. `401 BAD_CREDENTIALS` on mismatch.
 - `POST /api/auth/logout` → clears cookie. `GET /api/auth/me` → `{ email }` or `401 UNAUTHENTICATED`.
+- `PUT /api/auth/password` `{ currentPassword, newPassword(≥8) }` (v1.67, ADR-078; requires auth,
+  any role) → verifies `currentPassword` against the stored hash, then updates it;
+  `{ ok, data: { changed: true } }`. `401 INVALID_PASSWORD` on mismatch; `400 VALIDATION` if
+  `newPassword` is under 8 chars. Self-service — distinct from the admin's password RESET
+  (`PUT /api/admin/users/:id { password }`, §9.8.4), which doesn't require the current password.
 
 ### 8.4 Connections (all require auth; tokens NEVER returned)
 
@@ -1840,6 +1902,54 @@ source; config inheritance (source ← own); `canWriteJira` false→true on `all
 resolve/no login; admin CRUD happy paths + every guard; `403 READ_ONLY_USER` on a Jira-write tool and
 **no** 403 on a local-store tool. Frontend: create-with-sharing, source list filtered to `canBeSource`,
 read-only badge, grant-writes, disable, two-step delete, password reset.
+
+---
+
+### 9.8.6 Granular per-provider sharing (v1.67, ADR-078)
+
+Closes the one gap §9.8's per-provider `getEffectiveConnection` resolution left open: today, if
+`credentialSourceUserId` is set, EVERY provider the user hasn't connected themselves silently
+borrows from the source. There was no way to say "only share GitHub."
+
+- `StoredUser` gains `sharedProviders?: ConnectionProvider[]`. **Undefined/absent = share ALL
+  providers the user doesn't own** (the exact §9.8 behavior — every existing shared account is
+  unaffected, no migration). An explicit array restricts fallback-sharing to only the listed
+  providers; a provider left off the list resolves to `null` (shows disconnected) even when the
+  source genuinely has that connection. A user's OWN connection for a provider still always wins,
+  regardless of `sharedProviders` — this only narrows the fallback, never the override.
+- `getEffectiveConnection(userId, provider)`: after resolving `sourceId`, checks
+  `user.sharedProviders` BEFORE falling back — `undefined` or an array that includes `provider`
+  proceeds to borrow; otherwise returns `null`.
+- **Admin CRUD**: `createUserSchema`/`updateUserSchema` (§9.8.4) gain
+  `sharedProviders?: ("jira"|"github"|"ai")[]` (update: `.nullable()` — `null` clears the
+  restriction back to share-all, same convention as `credentialSourceUserId: null`).
+- **Admin view additions**: `userView()` keeps `connections` (own-only booleans, unchanged shape)
+  and adds:
+  - `effective: { jira, github, ai }`, each a `ProviderStatus` = `{ status: "own" } |
+    { status: "inherited"; via: string } | { status: "none" }`, computed via
+    `getEffectiveConnection` — lets the admin see at a glance whether a provider is the user's own,
+    borrowed (and from whom), or genuinely absent, which the own-only `connections` flags can't
+    distinguish (borrowed and absent both read `false` there).
+  - `sharedProviders: ("jira"|"github"|"ai")[] | null` — the restriction as stored (`null` =
+    share-all).
+- **Admin UI**: wherever a credential source is picked (`AddUserCard`, `UserSetupForm`), three
+  checkboxes — "Share Jira" / "Share GitHub" / "Share AI" — default to CHECKED (preserves the
+  legacy all-shared default). `AddUserCard` omits `sharedProviders` from the create payload
+  entirely when all three stay checked; `UserSetupForm` always sends it (`null` when all three are
+  checked) as part of the existing combined "Save changes" access payload (§9.6's v1.52 pattern),
+  alongside a new `email` field (see below). The per-user connection badges in the users list
+  become the 3-state indicator described above instead of a plain on/off badge.
+- **Admin UI — email edit**: `UserSetupForm` gains an `Email` input pre-filled from the user's
+  current email, folded into the same access-dirty tracking and the same single "Save changes"
+  action. No new endpoint — `PUT /api/admin/users/:id` has accepted `email` since §9.8.4 (v1.46);
+  the admin console simply never exposed a field for it until now.
+
+Keyless/offline: `getEffectiveConnection` restriction cases (share-all default; restricted list;
+provider absent from the list → null even when the source has it; own connection still wins);
+admin CRUD create/update with `sharedProviders` + the `effective`/`sharedProviders` view fields
+(own / inherited-via / none). Frontend: the three checkboxes on create and on the combined save
+(checked-by-default, omit-when-all-checked on create, always-send on update), the 3-state badge,
+and the new email field.
 
 ---
 
@@ -2932,3 +3042,144 @@ No tool names, routes, ports, or error codes change. The rename touches identity
     startup — loudly logged, JSON files left untouched as a natural backup. DEPLOYMENT.md:
     production may set `STORAGE_DRIVER=sqlite`; backup guidance covers the single sqlite file;
     the one-replica rule is unchanged (sqlite is still per-instance).
+
+## Changelog v1.67 (2026-07-21 — granular per-provider credential sharing + admin email edit + self-service password change; ADR-078)
+
+190. **§9.8.6 — granular per-provider sharing.** `StoredUser.sharedProviders?: ConnectionProvider[]`
+    (undefined = share ALL providers the user doesn't own, the exact legacy §9.8 behavior — zero
+    migration for existing shared accounts). An explicit array restricts fallback-sharing to only
+    the listed providers; `getEffectiveConnection` returns `null` for a provider left off the list
+    even when the credential source genuinely has that connection. A user's own connection for a
+    provider still always wins. Admin CRUD (`POST`/`PUT /api/admin/users*`) accepts it; `PUT`
+    treats `null` as clearing the restriction back to share-all (same convention as
+    `credentialSourceUserId: null`).
+191. **Admin view: own vs inherited vs none.** `userView()` adds `effective: { jira, github, ai }`
+    (each `{status:"own"} | {status:"inherited", via} | {status:"none"}`, via `getEffectiveConnection`)
+    and `sharedProviders`, alongside the unchanged own-only `connections` flags. The admin console's
+    per-user connection badges become a 3-state indicator ("Jira" own / "Jira via admin@co.com"
+    inherited / "Jira" none) instead of a plain on/off badge, so an admin can tell a borrowed token
+    apart from a genuinely absent one at a glance — previously both read `false`.
+192. **Admin UI: three sharing checkboxes + email edit.** "Share Jira" / "Share GitHub" / "Share AI"
+    checkboxes (default CHECKED) appear next to the existing "allow Jira writes" checkbox wherever a
+    credential source is picked (`AddUserCard`, `UserSetupForm`); create omits `sharedProviders` when
+    all three stay checked (byte-identical legacy payload), the combined "Save changes" (v1.52,
+    ADR-063) always sends it (`null` = all-checked). `UserSetupForm` also gains an `Email` input
+    (the server has accepted `email` on `PUT /api/admin/users/:id` since ADR-056/v1.46 — the admin
+    console just never exposed a field for it), folded into the same access-dirty tracking and save.
+193. **§8.3 — self-service password change.** `PUT /api/auth/password` `{ currentPassword,
+    newPassword(≥8) }` (any signed-in role; `requireAuth`) verifies the current password
+    (`verifyPassword`) before updating the hash — `401 INVALID_PASSWORD` on mismatch, `400
+    VALIDATION` on a too-short new password. Distinct from the admin's password RESET
+    (`PUT /api/admin/users/:id { password }`, §9.8.4), which is an admin acting on someone else's
+    account and doesn't require the old password. Surfaced as an "Account" card on the app-wide
+    (not role-gated) Connections page, reachable by both "user" and "admin" roles.
+194. **Tests**: mcp-jira 613 → **626** (+13: 5 delegation `sharedProviders` restriction cases, 4
+    admin-view own/inherited/none + `sharedProviders` CRUD, 4 self-service password-change route);
+    react-app 950 → **958** (+8: 5 Admin console sharing-checkbox/email-edit/inherited-badge
+    cases, 3 Connections "Account" card password-change cases); mcp-github unchanged at 57. Total
+    **1,641**; smoke 55/55.
+
+## Changelog v1.68 (2026-07-21 — PO draft capacity plan: dev roster + capacity on the PO Planning page; ADR-079)
+
+195. **§4.30 — `get_draft_plan` / `set_draft_plan`.** New per-PO-sprint store tools (same §4.21
+    bridge-side store pattern, storage port json|sqlite, ADR-077): a DRAFT mapping of the PO
+    sprint's tickets onto Dev-board team members (`assignments: Record<issueKey, { accountId,
+    displayName }>` + the paired `devSprintId`). Full-replace per sprint; empty assignments deletes
+    the entry. **Never writes to Jira** — real assignment remains `assign_issue` (§4.15) on the Dev
+    board. jira tools 43 → **45**; `get_draft_plan` joins the AI Q&A read-allowlist (19 → **20**).
+196. **§3 — `JIRA_DRAFT_PLAN_FILE`** (optional, default `<mcp-jira>/.invokeboard-draft-plan.json`);
+    storage `registry.ts` gains the `draft-plan` name (json override + sqlite auto-import, ADR-077).
+197. **react-app — Draft Capacity Plan card (PO board Planning only).** Dev-board roster tiles with
+    per-developer capacity in points (ADR-047 model: `requiredPoints − working leave days`, leaves
+    read from a PAIRED Dev sprint — default picked by date overlap with the PO sprint, overridable
+    via a native select). PO ticket chips drag-and-drop onto developer tiles PLUS a per-ticket
+    native "Draft to…" select fallback (ADR-009 — no dnd dependency); per-tile drafted-points total
+    with an over/under delta chip (advisory only, never blocking); persisted via §4.30 with
+    optimistic save + rollback; in-card "Manage dev team" = the existing `TeamManager` bound to the
+    Dev board id (why devs "didn't show" before: rosters are per-board by design, ADR-019). The
+    card is draft-only and never calls `assign_issue`.
+198. **Tests**: mcp-jira 626 → **644** (+18: 17 draft-plan store/tool cases + 1 AI read-allowlist
+    growth); react-app 958 → **1031** (+73: pairing 13, draft rollups 15, client 7, useDraftPlan
+    hook 10, DraftPlanCard 25, Planning wiring 3); mcp-github unchanged at 57. Total **1,732**;
+    smoke 55/55 → **60/60** (tool count 43 → 45 verified). react-app package version (the UI
+    version pill, v1.13.1) bumped 1.65.0 → **1.68.0** — v1.66/v1.67 had skipped the bump.
+
+## Changelog v1.69 (2026-07-21 — Draft Capacity Plan chips gain the usual ticket actions + rename; ADR-080, react-app only)
+
+199. **react-app only — no tool/route/env changes.** The v1.68 Draft Capacity Plan chips dropped
+    the per-ticket actions the Assign Tickets table has; the PO had to scroll to the table for
+    points/status/sprint edits. The card's ticket chips (unplanned AND drafted-in-tile) now carry:
+    inline story-points input; and a per-chip "Edit" expander with **rename** (new `SummaryCell` →
+    `update_ticket { summary }` — §4.5 accepted `summary` all along, so NO backend change), status
+    change (lazy `get_transitions` → `transition_issue`), and move-to-sprint
+    (`move_issue_to_sprint`). Field edits refetch the PO sprint so tile totals/capacity deltas stay
+    truthful; a move initiated FROM the card also removes the ticket's draft entry in the same
+    action (a deliberate move must not leave a "Needs attention" stale row). The expanded editor
+    carries the note "These edits change the real Jira ticket." — the card's "Draft only" badge
+    keeps meaning ASSIGNMENTS (`assign_issue` is still never called).
+200. **Shared cells extracted** — `PointsCell`/`StatusCell`/`MoveSprintCell` move verbatim from
+    `AssignmentList.tsx` to `components/ticketCells.tsx` (+ new `SummaryCell`); both cards import
+    them. `PointsCell` gains an optional `onSaved` callback, wired in BOTH cards — in the Assign
+    Tickets table this fixes the pre-existing stale filtered-points summary after an inline points
+    edit. The table's Summary column becomes the same rename-capable `SummaryCell`. New
+    `updateTicketSummary(ticketKey, summary)` client next to `updateTicketPoints` (useJira.ts).
+201. **Ticket breakdown.** The per-chip editor gains "Break down": a dialog that splits a too-big
+    PO story into N new PO stories (2–6 rows, summary + points each), created in the SAME PO
+    sprint via the existing `create_po_ticket` (§4.1 — `storyPoints` + `sprintId` supported
+    already; NO backend change). Sequential per-row creation with per-row success/error (the
+    Linking page's resilient-bulk pattern); succeeded rows lock so a retry never duplicates;
+    optional "set the original's points to 0 after creating" (one `update_ticket` call); on
+    success the sprint refetches — the new stories appear as unplanned chips ready to draft. No
+    PO↔PO Jira link is created (the configured `JIRA_LINK_TYPE` carries PO→Dev dependency
+    semantics, §4.2); each new story's description records "Broken down from <KEY>".
+202. **Capacity-source transparency (fixes the live "every dev shows 8" report).** All-8s means
+    the leaves read for the paired Dev sprint came back empty — a wrong paired sprint, leaves
+    plotted under a different sprint (the Offset Tracker defaults to the ACTIVE sprint while
+    pairing prefers FUTURE on ties), or a per-user store-scope mismatch (ADR-056) all look
+    identical and silent. Three changes: (1) under the Dev-sprint select the card now shows
+    either "N leave/offset day(s) found across M member(s)" or a warning-toned "No leaves or
+    offsets recorded under this Dev sprint — pick the sprint where the team plotted them
+    (Dev-board Planning or the Offset Tracker)"; (2) the AUTO pairing is no longer persisted as
+    a side effect of drafting — only an explicit pick in the select stores `devSprintId` (draft
+    mutations pass through the STORED value, staying `null` until chosen), with an
+    "Auto-paired" label when the default is in use and a "Reset to auto" button when a stored
+    choice exists; (3) tiles show a loading state while the Dev sprint's leaves load instead of
+    flashing full capacity. The unplanned chip's drag affordance is disabled while its editor is
+    expanded (dragging a draggable ancestor hijacks text selection in the rename/points inputs).
+203. **Tests**: react-app 1031 → **1066** (+35: ticketCells 13, DraftPlanCard +18,
+    AssignmentList +4 rename cases; Planning assertions extended in place); mcp-jira/mcp-github
+    unchanged (644/57) — total **1,767**; smoke unchanged **60/60** (no backend surface touched).
+    react-app package version (the UI version pill) bumped 1.68.0 → **1.69.0**.
+
+## Changelog v1.70 (2026-07-21 — Draft Capacity Plan: pure-draft multi-developer point split + full-width redesign; Assign Tickets owns Jira writes; ADR-081)
+
+204. **§4.30 shape change — a ticket splits across MULTIPLE developers.** `DraftShare[]` per issue
+    key (`{ accountId, displayName, points }`) replaces the single `DraftAssignment`. One PO story
+    can now be drafted to several developers, each carrying a DRAFT slice of the points ("breakdown
+    points"). Points are draft-only — defaulting to the ticket's real Jira points when drafted
+    whole, over/under-allocation allowed, **never written to Jira**. `readDraftPlans()` migrates any
+    pre-v1.70 single-object value to a one-element array (`points: 0`); tool count unchanged (45).
+205. **The Draft Capacity Plan card is now strictly Jira-write-free** (fixes the reported concern
+    that draft-card edits hit Jira). Removed from the card: inline points WRITE, rename, status
+    change, move-to-sprint, and the real (ticket-creating) breakdown. Real Jira points show
+    **read-only**. What stays: draft ticket→developer splits (server-side draft store), per-share
+    DRAFT point manipulation, per-developer capacity vs drafted load with over/under, the v1.69
+    leaves/offset capacity-source transparency + non-sticky pairing, and the embedded dev
+    `TeamManager`.
+206. **Assign Tickets is the single real-edit surface** (per the user's note "Assign Tickets should
+    handle those actual changes in JIRA"). It keeps points/status/move/rename (v1.15/v1.37/v1.69)
+    and **gains the real breakdown** — the `BreakdownDialog` (creates new PO stories via
+    `create_po_ticket`, §4.1) relocates here from the draft card. No new tools/routes.
+207. **Full-width two-tier redesign of the Draft Capacity Plan card** (UI/UX pass, `frontend-design`).
+    Developers on TOP as a full-width responsive grid of capacity cards (drop targets: capacity pts,
+    drafted load = Σ share points, over/under chip, their share chips with an inline DRAFT points
+    input + remove); PO tickets on the BOTTOM at full width (real points read-only, an "N of M pts
+    drafted" allocation indicator, the developers a ticket is split across, drag + a native
+    "Draft to…/Add developer" select — ADR-009 a11y path). Replaces the cramped left/right split so
+    both tiers get full width.
+208. **Tests**: mcp-jira 644 → **654** (+10: draft-plan multi-share round-trip, per-ticket de-dupe,
+    points + empty-array validation, legacy single-object migration); react-app 1066 → **1099**
+    (+33: draftPlan rollup over shares, DraftPlanCard multi-share/split/point-edit/read-only/
+    full-width, AssignmentList breakdown relocation, ticketCells unchanged); mcp-github 57 — total
+    **1,810**; smoke 60/60 (shape checks updated, no count change). react-app version pill
+    1.69.0 → **1.70.0**.

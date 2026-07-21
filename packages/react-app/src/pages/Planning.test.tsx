@@ -153,18 +153,50 @@ vi.mock("../components/AssignmentList", () => ({
     boardId,
     sprintId,
     projectKey,
+    enableBreakdown,
   }: {
     boardId?: number;
     sprintId?: number | null;
     projectKey?: string;
+    // v1.70 (ADR-081): PO-board-only real breakdown gate.
+    enableBreakdown?: boolean;
   }) => (
     <div
       data-testid="assignment-list"
       data-board-id={boardId ?? ""}
       data-sprint-id={sprintId ?? ""}
       data-project-key={projectKey ?? ""}
+      data-enable-breakdown={enableBreakdown ? "true" : "false"}
     >
       Assignment List
+    </div>
+  ),
+}));
+
+// Mock DraftPlanCard (v1.68, ADR-079; v1.70 redesign, ADR-081) — verify it
+// receives the right props and that Planning only mounts it on the PO board.
+// v1.70: the card no longer takes a `sprints` prop (move/breakdown-from-the-card
+// are gone — it's strictly draft-only now).
+vi.mock("../components/DraftPlanCard", () => ({
+  DraftPlanCard: ({
+    poBoardId,
+    sprintId,
+    devBoardId,
+  }: {
+    poBoardId?: number;
+    sprintId?: number | null;
+    sprint?: unknown;
+    devBoardId?: number;
+    teamRevision?: number;
+    onTeamChange?: () => void;
+  }) => (
+    <div
+      data-testid="draft-plan-card"
+      data-po-board-id={poBoardId ?? ""}
+      data-sprint-id={sprintId ?? ""}
+      data-dev-board-id={devBoardId ?? ""}
+    >
+      Draft Plan Card
     </div>
   ),
 }));
@@ -497,6 +529,38 @@ describe("Planning — AssignmentList slot (v1.7, ADR-018)", () => {
   });
 });
 
+describe("Planning — AssignmentList enableBreakdown gating (v1.70, ADR-081)", () => {
+  it("does NOT enable breakdown on the Dev board (default)", async () => {
+    render(<Planning />);
+    await waitFor(() => screen.getByTestId("assignment-list"));
+    expect(screen.getByTestId("assignment-list").getAttribute("data-enable-breakdown")).toBe("false");
+  });
+
+  it("enables breakdown once the PO board is selected", async () => {
+    render(<Planning />);
+    await waitFor(() => screen.getByRole("button", { name: "PO" }));
+    fireEvent.click(screen.getByRole("button", { name: "PO" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("assignment-list").getAttribute("data-enable-breakdown")).toBe("true");
+    });
+  });
+
+  it("disables breakdown again when switching back to the Dev board", async () => {
+    render(<Planning />);
+    await waitFor(() => screen.getByRole("button", { name: "PO" }));
+    fireEvent.click(screen.getByRole("button", { name: "PO" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("assignment-list").getAttribute("data-enable-breakdown")).toBe("true")
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Dev" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("assignment-list").getAttribute("data-enable-breakdown")).toBe("false")
+    );
+  });
+});
+
 describe("Planning — board change re-defaults sprint target (v1.7, ADR-018)", () => {
   it("switching to PO board re-defaults the sprint picker to the PO future sprint", async () => {
     const poSprintId = 201;
@@ -530,6 +594,68 @@ describe("Planning — board change re-defaults sprint target (v1.7, ADR-018)", 
     await waitFor(() => {
       const select = screen.getByRole("combobox", { name: /planning target/i });
       expect((select as HTMLSelectElement).value).toBe(String(poSprintId));
+    });
+  });
+});
+
+describe("Planning — DraftPlanCard slot (v1.68, ADR-079) — PO board only", () => {
+  it("does NOT render DraftPlanCard on the Dev board (default)", async () => {
+    render(<Planning />);
+    await waitFor(() => screen.getByTestId("leaves-plotter-card"));
+    expect(screen.queryByTestId("draft-plan-card")).toBeNull();
+  });
+
+  it("renders DraftPlanCard on the PO board with poBoardId, sprintId, and devBoardId", async () => {
+    const poSprintId = 201;
+    vi.mocked(useJiraModule.useSprintList).mockReturnValue({
+      data: {
+        boardId: 20,
+        active: [],
+        future: [
+          {
+            id: poSprintId,
+            name: "PO Sprint Future",
+            state: "future" as const,
+            startDate: "2026-06-28T00:00:00.000Z",
+            endDate: "2026-07-11T00:00:00.000Z",
+            completeDate: null,
+            goal: null,
+            boardId: 20,
+          },
+        ],
+        closed: [],
+      },
+      loading: false,
+      error: null,
+      run: vi.fn(),
+    });
+
+    render(<Planning />);
+    await waitFor(() => screen.getByRole("button", { name: "PO" }));
+    fireEvent.click(screen.getByRole("button", { name: "PO" }));
+
+    await waitFor(() => {
+      const card = screen.getByTestId("draft-plan-card");
+      // PO board id = 20 (selected board); Dev board id = 10 (always the Dev roster source)
+      expect(card.getAttribute("data-po-board-id")).toBe("20");
+      expect(card.getAttribute("data-sprint-id")).toBe(String(poSprintId));
+      expect(card.getAttribute("data-dev-board-id")).toBe("10");
+    });
+  });
+
+  // v1.70 (ADR-081): DraftPlanCard no longer moves tickets or hosts the real
+  // breakdown dialog, so it no longer receives (or needs) the PO board's
+  // `sprints` list — confirmed by the mock above not even destructuring it.
+
+  it("removes DraftPlanCard again when switching back to the Dev board", async () => {
+    render(<Planning />);
+    await waitFor(() => screen.getByRole("button", { name: "PO" }));
+    fireEvent.click(screen.getByRole("button", { name: "PO" }));
+    await waitFor(() => screen.getByTestId("draft-plan-card"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Dev" }));
+    await waitFor(() => {
+      expect(screen.queryByTestId("draft-plan-card")).toBeNull();
     });
   });
 });

@@ -29,6 +29,10 @@ export interface AdminConfig {
   JIRA_AGING_DAYS_PER_POINT?: number;
 }
 
+/** v1.67 (ADR-078) — per-provider status: the user's OWN connection, one INHERITED via a source
+ * user's email, or NONE (absent, or explicitly not shared to this user via `sharedProviders`). */
+export type ProviderStatus = { status: "own" } | { status: "inherited"; via: string } | { status: "none" };
+
 export interface AdminUser {
   id: string;
   email: string;
@@ -38,6 +42,8 @@ export interface AdminUser {
   createdAt: string;
   /** The user's OWN connections (false for a user running purely on shared credentials). */
   connections: { jira: boolean; github: boolean; ai: boolean };
+  /** v1.67 (ADR-078) — own / inherited-via / none per provider (distinguishes borrowed from absent). */
+  effective: { jira: ProviderStatus; github: ProviderStatus; ai: ProviderStatus };
   config: AdminConfig; // this user's per-user overrides
   // ── v1.46 (ADR-056) shared credentials ──
   /** The user whose Jira/GitHub/AI this account borrows, or null when it uses its own. */
@@ -47,6 +53,9 @@ export interface AdminUser {
   /** Admin opt-in: may a borrower mutate Jira (writes land under the owner's name)? */
   allowWrites: boolean;
   disabled: boolean;
+  /** v1.67 (ADR-078) — null/absent = share ALL providers the user doesn't own (legacy default);
+   * an explicit array restricts fallback-sharing to only the listed providers. */
+  sharedProviders: ("jira" | "github" | "ai")[] | null;
   /** Effective: borrowing Jira without write access. */
   readOnly: boolean;
   /** May lend credentials to others (owns a Jira connection, borrows from nobody). */
@@ -65,6 +74,8 @@ export interface CreateUserInput {
   role?: UserRole;
   credentialSourceUserId?: string;
   allowWrites?: boolean;
+  /** v1.67 (ADR-078) — restrict fallback-sharing to only these providers. Omitted = share all. */
+  sharedProviders?: ("jira" | "github" | "ai")[];
 }
 
 /** Fields accepted when an admin updates a user. `credentialSourceUserId: null` clears sharing. */
@@ -74,6 +85,8 @@ export interface UpdateUserInput {
   credentialSourceUserId?: string | null;
   allowWrites?: boolean;
   disabled?: boolean;
+  /** v1.67 (ADR-078) — null clears the restriction back to share-all. */
+  sharedProviders?: ("jira" | "github" | "ai")[] | null;
 }
 
 export function getAdminUsers(): Promise<AdminUsersResponse> {

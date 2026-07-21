@@ -25,8 +25,53 @@ import {
   getAdminUsers, putGlobalConfig, putUserConfig, putUserRole,
   createUser, updateUser, deleteUser,
   getTemplates, createTemplate, deleteTemplate, applyTemplateToUser, applyTemplateToGlobal,
-  type AdminConfig, type AdminUser, type AdminUsersResponse, type ConfigTemplate,
+  type AdminConfig, type AdminUser, type AdminUsersResponse, type ConfigTemplate, type ProviderStatus,
 } from "../lib/adminClient";
+
+// v1.67 (ADR-078) — the three providers eligible for granular sharing, in the fixed order used to
+// build/compare `sharedProviders` payloads (so a round-tripped array compares equal via JSON.stringify).
+const SHAREABLE_PROVIDERS = ["jira", "github", "ai"] as const;
+type ShareableProvider = (typeof SHAREABLE_PROVIDERS)[number];
+
+/** Checked-box state → the payload value: `null` when all three are shared (legacy share-all). */
+function collectSharedProviders(checked: Record<ShareableProvider, boolean>): ShareableProvider[] | null {
+  const list = SHAREABLE_PROVIDERS.filter((p) => checked[p]);
+  return list.length === SHAREABLE_PROVIDERS.length ? null : list;
+}
+
+/** `sharedProviders` (null = share-all) → the three checkboxes' initial checked state. */
+function sharedProvidersToChecked(shared: ShareableProvider[] | null): Record<ShareableProvider, boolean> {
+  if (shared === null) return { jira: true, github: true, ai: true };
+  return { jira: shared.includes("jira"), github: shared.includes("github"), ai: shared.includes("ai") };
+}
+
+const SHARE_LABELS: { key: ShareableProvider; label: string }[] = [
+  { key: "jira", label: "Share Jira" },
+  { key: "github", label: "Share GitHub" },
+  { key: "ai", label: "Share AI" },
+];
+
+/**
+ * v1.67 (ADR-078) — three checkboxes, each defaulting to CHECKED (preserves the legacy all-or-nothing
+ * default). Shown alongside the "allow writes" checkbox wherever a credential source is picked.
+ */
+function ShareCheckboxes({
+  checked, onChange,
+}: {
+  checked: Record<ShareableProvider, boolean>;
+  onChange: (next: Record<ShareableProvider, boolean>) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      {SHARE_LABELS.map(({ key, label }) => (
+        <label key={key} className="flex items-center gap-1.5 text-xs text-foreground">
+          <input type="checkbox" checked={checked[key]} onChange={(e) => onChange({ ...checked, [key]: e.target.checked })} />
+          {label}
+        </label>
+      ))}
+    </div>
+  );
+}
 
 function errMsg(err: unknown): string {
   return isAuthApiError(err) ? err.message : "Something went wrong";
@@ -324,16 +369,27 @@ function TemplatesCard({
   );
 }
 
-function ConnBadge({ label, on }: { label: string; on: boolean }) {
+/**
+ * v1.67 (ADR-078) — a 3-state connection indicator: OWN (green, as before), INHERITED (amber, "via
+ * <email>" — a borrowed token, distinct from a genuinely absent one), or NONE (muted, as before).
+ * Same visual language as the old on/off badge — just one more state, driven by `effective`.
+ */
+function ConnBadge({ label, status }: { label: string; status: ProviderStatus }) {
+  const tone =
+    status.status === "own"
+      ? "bg-success/15 text-success"
+      : status.status === "inherited"
+        ? "bg-amber-500/15 text-amber-800 dark:text-amber-300"
+        : "bg-muted text-muted-foreground";
+  const title =
+    status.status === "own"
+      ? `${label} connected`
+      : status.status === "inherited"
+        ? `${label} via ${status.via}`
+        : `${label} not connected`;
   return (
-    <span
-      className={cn(
-        "text-[0.625rem] font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap",
-        on ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"
-      )}
-      title={on ? `${label} connected` : `${label} not connected`}
-    >
-      {label}
+    <span className={cn("text-[0.625rem] font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap", tone)} title={title}>
+      {label}{status.status === "inherited" ? ` via ${status.via}` : ""}
     </span>
   );
 }
@@ -359,23 +415,32 @@ function AddUserCard({
 }: {
   sources: AdminUser[];
   busy: boolean;
-  onCreate: (input: { email: string; password: string; role?: "admin" | "user"; credentialSourceUserId?: string; allowWrites?: boolean }) => void;
+  onCreate: (input: {
+    email: string; password: string; role?: "admin" | "user";
+    credentialSourceUserId?: string; allowWrites?: boolean; sharedProviders?: ShareableProvider[];
+  }) => void;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<"admin" | "user">("user");
   const [sourceId, setSourceId] = useState("");
   const [allowWrites, setAllowWrites] = useState(false);
+  // v1.67 (ADR-078) — all three default CHECKED, preserving today's share-everything default.
+  const [shared, setShared] = useState<Record<ShareableProvider, boolean>>({ jira: true, github: true, ai: true });
 
   function submit(e: FormEvent) {
     e.preventDefault();
+    const sharedProviders = collectSharedProviders(shared); // null when all three are checked
     onCreate({
       email: email.trim(),
       password,
       role,
       ...(sourceId ? { credentialSourceUserId: sourceId, allowWrites } : {}),
+      // Omit entirely when share-all (null) — that's exactly the legacy default, unchanged.
+      ...(sourceId && sharedProviders !== null ? { sharedProviders } : {}),
     });
     setEmail(""); setPassword(""); setSourceId(""); setAllowWrites(false); setRole("user");
+    setShared({ jira: true, github: true, ai: true });
   }
 
   return (
@@ -419,10 +484,13 @@ function AddUserCard({
             </select>
           </div>
           {sourceId && (
-            <label className="flex items-center gap-2 text-xs text-foreground sm:col-span-2 lg:col-span-3">
-              <input type="checkbox" checked={allowWrites} onChange={(e) => setAllowWrites(e.target.checked)} />
-              Allow this user to change Jira (edits will appear under the token owner's name)
-            </label>
+            <div className="sm:col-span-2 lg:col-span-3 space-y-1.5">
+              <label className="flex items-center gap-2 text-xs text-foreground">
+                <input type="checkbox" checked={allowWrites} onChange={(e) => setAllowWrites(e.target.checked)} />
+                Allow this user to change Jira (edits will appear under the token owner's name)
+              </label>
+              <ShareCheckboxes checked={shared} onChange={setShared} />
+            </div>
           )}
           <Button type="submit" size="sm" disabled={busy} className="lg:col-start-4">
             {busy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" aria-hidden="true" /> : null}
@@ -440,7 +508,13 @@ function AddUserCard({
 interface UserSetupInput {
   accessChanged: boolean;
   configChanged: boolean;
-  access: { credentialSourceUserId: string | null; allowWrites: boolean };
+  access: {
+    email: string;
+    credentialSourceUserId: string | null;
+    allowWrites: boolean;
+    /** v1.67 (ADR-078) — null = share-all (legacy default); an array restricts to those providers. */
+    sharedProviders: ShareableProvider[] | null;
+  };
   config: AdminConfig;
 }
 
@@ -459,15 +533,25 @@ function UserSetupForm({
   onSave: (input: UserSetupInput) => void;
   onDirtyChange: (dirty: boolean) => void;
 }) {
+  const [email, setEmail] = useState(user.email);
   const [sourceId, setSourceId] = useState(user.credentialSourceUserId ?? "");
   const [allowWrites, setAllowWrites] = useState(!!user.allowWrites);
+  // v1.67 (ADR-078) — initialized from the saved restriction (null → all three checked).
+  const [shared, setShared] = useState<Record<ShareableProvider, boolean>>(() =>
+    sharedProvidersToChecked(user.sharedProviders)
+  );
   const [values, setValues] = useState<Record<string, string>>(() => toStringMap(user.config));
   const set = (k: string, v: string) => setValues((prev) => ({ ...prev, [k]: v }));
   const options = sources.filter((s) => s.id !== user.id);
 
+  const sharedProviders = collectSharedProviders(shared);
+
   // Dirty = differs from what's currently saved on the user (props update after a save → auto-clears).
   const accessDirty =
-    (sourceId || null) !== (user.credentialSourceUserId ?? null) || allowWrites !== !!user.allowWrites;
+    email.trim() !== user.email ||
+    (sourceId || null) !== (user.credentialSourceUserId ?? null) ||
+    allowWrites !== !!user.allowWrites ||
+    JSON.stringify(sharedProviders) !== JSON.stringify(user.sharedProviders ?? null);
   const configDirty = useMemo(() => configDiffers(values, user.config), [values, user.config]);
   const dirty = accessDirty || configDirty;
 
@@ -479,7 +563,7 @@ function UserSetupForm({
     onSave({
       accessChanged: accessDirty,
       configChanged: configDirty,
-      access: { credentialSourceUserId: sourceId || null, allowWrites },
+      access: { email: email.trim(), credentialSourceUserId: sourceId || null, allowWrites, sharedProviders },
       config: collectConfig(values),
     });
   }
@@ -489,6 +573,10 @@ function UserSetupForm({
       {/* Access & credentials */}
       <div className="space-y-2">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div>
+            <Label htmlFor={`email-${user.id}`} className="text-xs font-medium">Email</Label>
+            <Input id={`email-${user.id}`} type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+          </div>
           <div>
             <Label htmlFor={`src-${user.id}`} className="text-xs font-medium">Credentials</Label>
             <select id={`src-${user.id}`} value={sourceId} onChange={(e) => setSourceId(e.target.value)}
@@ -501,10 +589,13 @@ function UserSetupForm({
           </div>
         </div>
         {sourceId && (
-          <label className="flex items-center gap-2 text-xs text-foreground">
-            <input type="checkbox" checked={allowWrites} onChange={(e) => setAllowWrites(e.target.checked)} />
-            Allow Jira changes (writes are attributed to the token owner)
-          </label>
+          <div className="space-y-1.5">
+            <label className="flex items-center gap-2 text-xs text-foreground">
+              <input type="checkbox" checked={allowWrites} onChange={(e) => setAllowWrites(e.target.checked)} />
+              Allow Jira changes (writes are attributed to the token owner)
+            </label>
+            <ShareCheckboxes checked={shared} onChange={setShared} />
+          </div>
         )}
       </div>
 
@@ -580,9 +671,9 @@ function UserRow({
           {expanded && dirty && <Pill tone="warn">unsaved</Pill>}
         </div>
         <div className="flex items-center gap-1">
-          <ConnBadge label="Jira" on={user.connections.jira} />
-          <ConnBadge label="GitHub" on={user.connections.github} />
-          <ConnBadge label="AI" on={user.connections.ai} />
+          <ConnBadge label="Jira" status={user.effective.jira} />
+          <ConnBadge label="GitHub" status={user.effective.github} />
+          <ConnBadge label="AI" status={user.effective.ai} />
         </div>
         <div className="flex items-center gap-1.5">
           <Button type="button" variant="outline" size="sm" onClick={handleToggle}>

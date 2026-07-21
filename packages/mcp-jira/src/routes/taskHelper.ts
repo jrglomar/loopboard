@@ -15,7 +15,7 @@ import { issueSession, SESSION_COOKIE } from "../lib/auth/session.js";
 import { requireAuth } from "../lib/auth/middleware.js";
 import { isAdmin } from "../lib/auth/adminMiddleware.js";
 import {
-  createUser, findUserByEmail, findUserById,
+  createUser, findUserByEmail, findUserById, updateUser,
   upsertConnection, deleteConnection,
 } from "../lib/userStore.js";
 import { seal, open, maskHint } from "../lib/crypto/secretBox.js";
@@ -168,6 +168,35 @@ taskHelperRouter.get("/api/auth/me", requireAuth, (_req: Request, res: Response)
     return;
   }
   res.json({ ok: true, data: { email: user.email, role: isAdmin(user) ? "admin" : "user" } });
+});
+
+// v1.67 (ADR-078) — self-service password change, any signed-in role (user or admin). Distinct
+// from the admin's "reset a user's password" (PUT /api/admin/users/:id) — this one requires proving
+// the CURRENT password first, since it's the account holder acting on themselves.
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8).max(200),
+});
+
+taskHelperRouter.put("/api/auth/password", requireAuth, (req: Request, res: Response) => {
+  let body;
+  try {
+    body = changePasswordSchema.parse(req.body);
+  } catch (err) {
+    fail(res, 400, "VALIDATION", "currentPassword and an 8+ char newPassword are required", (err as ZodError).issues);
+    return;
+  }
+  const user = findUserById(res.locals["userId"] as string);
+  if (!user) {
+    fail(res, 401, "UNAUTHENTICATED", "Sign in to use the Task Helper");
+    return;
+  }
+  if (!verifyPassword(body.currentPassword, user.passwordHash)) {
+    fail(res, 401, "INVALID_PASSWORD", "Current password is incorrect");
+    return;
+  }
+  updateUser(user.id, { passwordHash: hashPassword(body.newPassword) });
+  res.json({ ok: true, data: { changed: true } });
 });
 
 // ── Connections (§8.4) — tokens are validated, encrypted, and NEVER returned raw ────

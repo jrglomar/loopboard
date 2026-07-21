@@ -207,7 +207,7 @@ describe("auto-import on first sqlite boot (v1.65, ADR-077 item 189)", () => {
   let usersDir: string;
   let testUserId: string;
 
-  // All 10 shared-store *_FILE overrides pointed at a temp dir (v15.test.ts pattern) so this
+  // All 11 shared-store *_FILE overrides pointed at a temp dir (v15.test.ts pattern) so this
   // test never depends on — or touches — a real developer's local `.invokeboard-*.json` files.
   function pointSharedOverridesAtTemp(): void {
     process.env["JIRA_LEAVES_FILE"] = path.join(dir, "leaves.json");
@@ -220,6 +220,7 @@ describe("auto-import on first sqlite boot (v1.65, ADR-077 item 189)", () => {
     process.env["JIRA_RETRO_FILE"] = path.join(dir, "retro.json");
     process.env["JIRA_OFFSET_FILE"] = path.join(dir, "offset.json");
     process.env["TASK_HELPER_FILE"] = path.join(dir, "users.json");
+    process.env["JIRA_DRAFT_PLAN_FILE"] = path.join(dir, "draft-plan.json");
   }
 
   beforeEach(() => {
@@ -235,7 +236,7 @@ describe("auto-import on first sqlite boot (v1.65, ADR-077 item 189)", () => {
     pointSharedOverridesAtTemp();
     resetConfigCache();
 
-    // Seed 2-3 shared docs (only leaves + team; the rest of the 10 overrides point at
+    // Seed 2-3 shared docs (only leaves + team; the rest of the 11 overrides point at
     // non-existent temp files, so readDoc → null → excluded from the candidate list).
     fs.writeFileSync(
       process.env["JIRA_LEAVES_FILE"]!,
@@ -291,9 +292,10 @@ describe("auto-import on first sqlite boot (v1.65, ADR-077 item 189)", () => {
     expect(byKey["shared/team"]).toEqual({ "10002": [{ accountId: "acc-1", displayName: "Alice" }] });
     expect(byKey[`${testUserId}/journal`]).toBeDefined();
     expect(byKey[`${testUserId}/journal`].notes[0].text).toBe("hi");
-    // The 8 unseeded shared overrides point at nonexistent files → not imported.
+    // The 9 unseeded shared overrides point at nonexistent files → not imported.
     expect(byKey["shared/impediments"]).toBeUndefined();
     expect(byKey["shared/users"]).toBeUndefined();
+    expect(byKey["shared/draft-plan"]).toBeUndefined();
 
     expect(logSpy).toHaveBeenCalledTimes(1);
     const message = logSpy.mock.calls[0]![0] as string;

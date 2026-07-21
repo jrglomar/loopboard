@@ -14,6 +14,7 @@ import {
 import { getLeaves, getAllLeaves, setLeaves, type LeavesMap, type LeaveEntry, type AllLeavesMap } from "../lib/leavesClient";
 import { getAssignableUsers } from "../lib/assignClient";
 import { getTeamMembers, setTeamMembers, getRecentAssignees } from "../lib/teamClient";
+import { getDraftPlan, setDraftPlan } from "../lib/draftPlanClient";
 import { getImpediments, setImpediments, type ImpedimentInput } from "../lib/impedimentsClient";
 import { getPullRequests, setPullRequests, type PullRequestInput } from "../lib/prsClient";
 import { getPostScrum, setPostScrum, type PostScrumInput } from "../lib/postScrumClient";
@@ -43,6 +44,8 @@ import {
   type LinkedPr,
   type LinkedIssue,
   type MultiSprintReport,
+  type DraftPlan,
+  type DraftShare,
 } from "../lib/types";
 import { useMCP, type UseMCPState } from "./useMCP";
 
@@ -257,6 +260,20 @@ export async function updateTicketPoints(
   storyPoints: number
 ): Promise<UpdateTicketOutput> {
   return callTool<UpdateTicketOutput>("jira", "update_ticket", { ticketKey, storyPoints });
+}
+
+// ── updateTicketSummary (v1.69, ADR-080) ─────────────────────────────────────
+
+/**
+ * Rename a ticket via update_ticket (a real Jira write). §4.5 has accepted `summary`
+ * since v1.0 — used by the shared SummaryCell (Assign Tickets table's Summary column
+ * and the Draft Capacity Plan card's chip editor) for inline rename.
+ */
+export async function updateTicketSummary(
+  ticketKey: string,
+  summary: string
+): Promise<UpdateTicketOutput> {
+  return callTool<UpdateTicketOutput>("jira", "update_ticket", { ticketKey, summary });
 }
 
 // ── createSprint ──────────────────────────────────────────────────────────────
@@ -1202,4 +1219,72 @@ export function useMultiSprintReport(
   }, [key]);
 
   return hookState;
+}
+
+// ── useDraftPlan (v1.68, ADR-079; v1.70 share-array shape, ADR-081) ──────────
+
+export interface UseDraftPlanState {
+  /** The PO sprint's draft capacity plan, or null before the first load. */
+  data: DraftPlan | null;
+  loading: boolean;
+  error: McpError | null;
+  run: () => void;
+  /**
+   * Full-replace the sprint's draft (devSprintId + the whole assignments map
+   * of issueKey -> DraftShare[]), optimistic with rollback on error. DRAFT
+   * ONLY — never writes to Jira.
+   */
+  save: (devSprintId: number | null, assignments: Record<string, DraftShare[]>) => Promise<void>;
+}
+
+/**
+ * Fetch and manage a PO sprint's draft capacity plan (the Draft Capacity Plan
+ * card, PO board only). Loads automatically on mount and when sprintId changes.
+ * Pass null to skip loading (no PO sprint selected yet).
+ *
+ * CONTRACTS.md §4.30 v1.70, ADR-081
+ */
+export function useDraftPlan(sprintId: number | null): UseDraftPlanState {
+  const [data, setData] = useState<DraftPlan | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<McpError | null>(null);
+
+  const run = useCallback(() => {
+    if (sprintId === null) return;
+    setLoading(true);
+    setError(null);
+    getDraftPlan(sprintId)
+      .then((plan) => { setData(plan); setLoading(false); })
+      .catch((err: unknown) => { setError(toMcpError(err)); setLoading(false); });
+  }, [sprintId]);
+
+  useEffect(() => {
+    if (sprintId !== null) {
+      run();
+    } else {
+      setData(null);
+      setError(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sprintId]);
+
+  const save = useCallback(
+    async (devSprintId: number | null, assignments: Record<string, DraftShare[]>) => {
+      if (sprintId === null) return;
+      // Optimistic update: apply immediately, rollback on error
+      const prev = data;
+      setData({ sprintId, devSprintId, assignments });
+      try {
+        const updated = await setDraftPlan(sprintId, devSprintId, assignments);
+        setData(updated);
+      } catch (err: unknown) {
+        // Rollback
+        setData(prev);
+        throw err;
+      }
+    },
+    [sprintId, data]
+  );
+
+  return { data, loading, error, run, save };
 }

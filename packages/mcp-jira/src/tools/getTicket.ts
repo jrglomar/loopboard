@@ -2,11 +2,14 @@ import { z } from "zod";
 import type { ToolDef } from "../lib/toolDef.js";
 import { getIssue } from "../lib/jiraClient.js";
 
+/** Shared ticketKey format (PROJECT-NUMBER) — reused wherever a Jira issue key is validated. */
+export const TICKET_KEY_REGEX = /^[A-Z][A-Z0-9]{1,9}-\d+$/;
+
 const schema = z.object({
   ticketKey: z
     .string()
     .regex(
-      /^[A-Z][A-Z0-9]{1,9}-\d+$/,
+      TICKET_KEY_REGEX,
       "ticketKey must match PROJECT-NUMBER format"
     ),
 });

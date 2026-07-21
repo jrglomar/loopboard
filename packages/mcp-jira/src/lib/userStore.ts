@@ -36,6 +36,13 @@ export interface StoredUser {
   allowWrites?: boolean;
   /** v1.46 — a disabled account cannot sign in and its sessions are rejected. */
   disabled?: boolean;
+  /**
+   * v1.67 (ADR-078) — GRANULAR sharing. undefined/absent = legacy "share ALL providers this user
+   * doesn't own" (unchanged default behavior for every existing shared account). An explicit array
+   * restricts fallback-sharing to only the listed providers — a provider left out never borrows the
+   * source's connection, even if the source has one; it shows as disconnected instead.
+   */
+  sharedProviders?: ConnectionProvider[];
 }
 
 /** Fields an admin may set when creating/updating a user (never the password hash directly). */
@@ -46,6 +53,8 @@ export interface UserPatch {
   credentialSourceUserId?: string | null;
   allowWrites?: boolean;
   disabled?: boolean;
+  /** v1.67 (ADR-078) — null clears the restriction back to share-all, same convention as above. */
+  sharedProviders?: ConnectionProvider[] | null;
 }
 
 /** A stored connection: the sealed token + non-secret masked metadata (safe to surface). */
@@ -125,7 +134,9 @@ export function createUser(
   email: string,
   passwordHash: string,
   role: UserRole = "user",
-  extras: Pick<UserPatch, "credentialSourceUserId" | "allowWrites" | "disabled"> = {}
+  extras: Pick<UserPatch, "credentialSourceUserId" | "allowWrites" | "disabled"> & {
+    sharedProviders?: ConnectionProvider[];
+  } = {}
 ): StoredUser {
   const data = read();
   const user: StoredUser = {
@@ -137,6 +148,7 @@ export function createUser(
     ...(extras.credentialSourceUserId ? { credentialSourceUserId: extras.credentialSourceUserId } : {}),
     ...(extras.allowWrites !== undefined ? { allowWrites: extras.allowWrites } : {}),
     ...(extras.disabled !== undefined ? { disabled: extras.disabled } : {}),
+    ...(extras.sharedProviders !== undefined ? { sharedProviders: extras.sharedProviders } : {}),
   };
   data.users[user.id] = user;
   write(data);
@@ -166,6 +178,10 @@ export function updateUser(id: string, patch: UserPatch): StoredUser | null {
   if (patch.credentialSourceUserId !== undefined) {
     if (patch.credentialSourceUserId === null) delete user.credentialSourceUserId;
     else user.credentialSourceUserId = patch.credentialSourceUserId;
+  }
+  if (patch.sharedProviders !== undefined) {
+    if (patch.sharedProviders === null) delete user.sharedProviders;
+    else user.sharedProviders = patch.sharedProviders;
   }
   data.users[id] = user;
   write(data);

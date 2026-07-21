@@ -13,8 +13,12 @@ coverage
 .env
 .env.*
 **/.env
-**/.invokeboard-leaves.json
-**/.invokeboard-team.json
+# ALL persistent store files + per-user store dirs + the sqlite db (v1.65 hotfix). Runtime data
+# must live on the /data volume (sqlite driver) — baking it in leaked a developer's local data
+# into the image and made every non-leaves/team store revert on each rebuild. See ADR-077.
+**/.invokeboard-*.json
+**/.invokeboard-user-stores
+**/.invokeboard-stores.sqlite*
 
 # VCS / tooling / editor
 .git

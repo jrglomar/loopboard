@@ -3,7 +3,7 @@
 // NOTE: v1.8 swaps useAssignableUsers → useTeamMembers; tests updated accordingly.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, within, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { AssignmentList } from "./AssignmentList";
 
 // ── Mock hooks ────────────────────────────────────────────────────────────────
@@ -15,6 +15,8 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
     useActiveSprint: vi.fn(),
     useTeamMembers: vi.fn(),
     updateTicketPoints: vi.fn(),   // v1.37 (ADR-047): inline points edit
+    updateTicketSummary: vi.fn(),  // v1.69 (ADR-080): inline rename
+    createPoTicket: vi.fn(),       // v1.70 (ADR-081): the relocated real BreakdownDialog
     // v1.59 (ADR-071): idle/empty shape (anti-drift parity — see Reports.test.tsx's comment).
     useMultiSprintReport: vi.fn().mockReturnValue({ data: null, loading: false, error: null, run: vi.fn() }),
   };
@@ -126,6 +128,16 @@ function setDefaultMocks() {
   // v1.37 (ADR-047): inline points edit → update_ticket
   vi.mocked(useJiraModule.updateTicketPoints).mockResolvedValue({
     ticketKey: "DEV-10", updatedFields: ["storyPoints"],
+  } as never);
+
+  // v1.69 (ADR-080): inline rename → update_ticket
+  vi.mocked(useJiraModule.updateTicketSummary).mockResolvedValue({
+    ticketKey: "DEV-10", updatedFields: ["summary"],
+  } as never);
+
+  // v1.70 (ADR-081): the relocated real BreakdownDialog's create_po_ticket calls.
+  vi.mocked(useJiraModule.createPoTicket).mockResolvedValue({
+    key: "PO-9", url: "https://jira.example.com/browse/PO-9", board: "PO",
   } as never);
 
   // v1.15 ticket-action defaults
@@ -661,5 +673,211 @@ describe("AssignmentList — v1.37 editable points", () => {
     fireEvent.blur(input);
 
     await waitFor(() => expect(input.value).toBe("5")); // reverted to the committed value
+  });
+});
+
+// ── Tests: v1.69 (ADR-080) — SummaryCell rename (extracted to ./ticketCells) ───
+
+describe("AssignmentList — v1.69 (ADR-080) rename", () => {
+  it("opens the rename editor, saves via updateTicketSummary, and refetches the sprint", async () => {
+    const runSpy = vi.fn();
+    vi.mocked(useJiraModule.useActiveSprint).mockReturnValue({
+      data: DEFAULT_SPRINT_DATA, loading: false, error: null, run: runSpy,
+    });
+
+    render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" />);
+    await waitFor(() => screen.getByText("Implement feature X"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename DEV-10" }));
+
+    const input = (await screen.findByRole("textbox", {
+      name: "New summary for DEV-10",
+    })) as HTMLInputElement;
+    expect(input.value).toBe("Implement feature X");
+
+    fireEvent.change(input, { target: { value: "Implement feature X v2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save summary for DEV-10" }));
+
+    await waitFor(() =>
+      expect(vi.mocked(useJiraModule.updateTicketSummary)).toHaveBeenCalledWith(
+        "DEV-10",
+        "Implement feature X v2"
+      )
+    );
+    // v1.69 (ADR-080): a successful rename refetches the sprint (onSaved -> sprintState.run)
+    await waitFor(() => expect(runSpy).toHaveBeenCalled());
+  });
+
+  it("Cancel reverts to the original summary without writing", async () => {
+    render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" />);
+    await waitFor(() => screen.getByText("Implement feature X"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename DEV-10" }));
+    const input = await screen.findByRole("textbox", { name: "New summary for DEV-10" });
+    fireEvent.change(input, { target: { value: "Something else entirely" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel rename for DEV-10" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: "New summary for DEV-10" })).toBeNull();
+      expect(screen.getByText("Implement feature X")).toBeTruthy();
+    });
+    expect(vi.mocked(useJiraModule.updateTicketSummary)).not.toHaveBeenCalled();
+  });
+
+  it("Escape also cancels the rename and reverts, same as the Cancel button", async () => {
+    render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" />);
+    await waitFor(() => screen.getByText("Implement feature X"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename DEV-10" }));
+    const input = await screen.findByRole("textbox", { name: "New summary for DEV-10" });
+    fireEvent.change(input, { target: { value: "Something else entirely" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: "New summary for DEV-10" })).toBeNull();
+      expect(screen.getByText("Implement feature X")).toBeTruthy();
+    });
+    expect(vi.mocked(useJiraModule.updateTicketSummary)).not.toHaveBeenCalled();
+  });
+
+  it("reverts the input and shows an inline error when the write fails", async () => {
+    vi.mocked(useJiraModule.updateTicketSummary).mockRejectedValueOnce({
+      code: "UPSTREAM",
+      message: "Jira rejected the rename",
+    });
+    render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" />);
+    await waitFor(() => screen.getByText("Implement feature X"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename DEV-10" }));
+    const input = await screen.findByRole("textbox", { name: "New summary for DEV-10" });
+    fireEvent.change(input, { target: { value: "New broken summary" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Jira rejected the rename/i)).toBeTruthy();
+    });
+    // Reverted to the committed value; the editor stays open so the error is visible.
+    const reverted = screen.getByRole("textbox", {
+      name: "New summary for DEV-10",
+    }) as HTMLInputElement;
+    expect(reverted.value).toBe("Implement feature X");
+  });
+});
+
+// ── Tests: v1.70 (ADR-081) — enableBreakdown gating + the relocated real breakdown ─
+//
+// The real (Jira-ticket-creating) BreakdownDialog relocated here from the Draft
+// Capacity Plan card, which is now strictly draft-only. PO-board-only in real
+// usage (Planning.tsx passes enableBreakdown={selectedBoardKey === "po"}); the
+// component itself just honors the prop, so these tests exercise it directly
+// regardless of the fixture tickets' key prefix.
+
+describe("AssignmentList — v1.70 (ADR-081) enableBreakdown gating", () => {
+  it("renders a 'Break down' action per row when enableBreakdown is true", async () => {
+    render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" enableBreakdown />);
+    await waitFor(() => screen.getByText("Implement feature X"));
+
+    expect(screen.getByRole("button", { name: "Break down DEV-10" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Break down DEV-11" })).toBeTruthy();
+  });
+
+  it("renders no 'Break down' control when enableBreakdown is omitted (false)", async () => {
+    render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" />);
+    await waitFor(() => screen.getByText("Implement feature X"));
+
+    expect(screen.queryByRole("button", { name: /Break down/ })).toBeNull();
+  });
+
+  it("clicking 'Break down' opens the BreakdownDialog for that ticket", async () => {
+    render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" enableBreakdown />);
+    await waitFor(() => screen.getByText("Implement feature X"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Break down DEV-10" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Break down DEV-10")).toBeTruthy();
+  });
+});
+
+/**
+ * v1.70 (ADR-081): renders AssignmentList with enableBreakdown, opens the given
+ * ticket's dialog, and waits for it. Shared by the breakdown-workflow tests below
+ * (ported from the pre-redesign DraftPlanCard.test.tsx, whose "breakdown FROM the
+ * card" cases were pruned along with the card's chip editor — BreakdownDialog's
+ * own sequential-create/retry/zero-original behavior still needs coverage
+ * somewhere, and this is its one remaining trigger point).
+ */
+async function openBreakdownFor(issueKey: string, summaryText: string) {
+  render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" enableBreakdown />);
+  await waitFor(() => screen.getByText(summaryText));
+  fireEvent.click(screen.getByRole("button", { name: `Break down ${issueKey}` }));
+  await screen.findByRole("dialog");
+}
+
+describe("AssignmentList — v1.70 (ADR-081) breakdown dialog workflow", () => {
+  it("creates N new PO stories sequentially with sprintId + description provenance, then refetches", async () => {
+    const runSpy = vi.fn();
+    vi.mocked(useJiraModule.useActiveSprint).mockReturnValue({
+      data: DEFAULT_SPRINT_DATA, loading: false, error: null, run: runSpy,
+    });
+    await openBreakdownFor("DEV-10", "Implement feature X");
+
+    fireEvent.click(screen.getByRole("button", { name: /Create \(2\)/ }));
+
+    await waitFor(() => expect(vi.mocked(useJiraModule.createPoTicket)).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(useJiraModule.createPoTicket)).toHaveBeenNthCalledWith(1, {
+      summary: "Implement feature X (part 1)",
+      description: "Broken down from DEV-10: Implement feature X",
+      storyPoints: 0,
+      sprintId: 100,
+    });
+    expect(vi.mocked(useJiraModule.createPoTicket)).toHaveBeenNthCalledWith(2, {
+      summary: "Implement feature X (part 2)",
+      description: "Broken down from DEV-10: Implement feature X",
+      storyPoints: 0,
+      sprintId: 100,
+    });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Close breakdown dialog" })).toBeTruthy());
+    await waitFor(() => expect(runSpy).toHaveBeenCalled());
+  });
+
+  it("locks succeeded rows on partial failure; only the failed row is retryable and never duplicated", async () => {
+    vi.mocked(useJiraModule.createPoTicket)
+      .mockResolvedValueOnce({ key: "PO-10", url: "https://jira.example.com/browse/PO-10", board: "PO" } as never)
+      .mockRejectedValueOnce({ code: "UPSTREAM", message: "Jira rejected the create" })
+      .mockResolvedValueOnce({ key: "PO-11", url: "https://jira.example.com/browse/PO-11", board: "PO" } as never);
+
+    await openBreakdownFor("DEV-10", "Implement feature X");
+    fireEvent.click(screen.getByRole("button", { name: /Create \(2\)/ }));
+
+    await waitFor(() => expect(vi.mocked(useJiraModule.createPoTicket)).toHaveBeenCalledTimes(2));
+    // Row 1 succeeded -> a Jira-key link; row 2 failed -> an error + Retry.
+    await waitFor(() => expect(screen.getByRole("link", { name: "Open PO-10 in Jira" })).toBeTruthy());
+    expect(screen.getByText("Jira rejected the create")).toBeTruthy();
+    const retryBtn = screen.getByRole("button", { name: "Retry row 2" });
+
+    fireEvent.click(retryBtn);
+
+    await waitFor(() => expect(vi.mocked(useJiraModule.createPoTicket)).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(screen.getByRole("link", { name: "Open PO-11 in Jira" })).toBeTruthy());
+    // Row 1 was never re-created — exactly one call ever referenced its row summary.
+    expect(
+      vi.mocked(useJiraModule.createPoTicket).mock.calls.filter(
+        ([arg]) => (arg as { summary: string }).summary === "Implement feature X (part 1)"
+      )
+    ).toHaveLength(1);
+  });
+
+  it("checking the zero-original option calls updateTicketPoints(key, 0) after all rows succeed", async () => {
+    await openBreakdownFor("DEV-10", "Implement feature X");
+
+    fireEvent.click(screen.getByLabelText("Set DEV-10's points to 0 after creating"));
+    fireEvent.click(screen.getByRole("button", { name: /Create \(2\)/ }));
+
+    await waitFor(() => expect(vi.mocked(useJiraModule.createPoTicket)).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(vi.mocked(useJiraModule.updateTicketPoints)).toHaveBeenCalledWith("DEV-10", 0)
+    );
   });
 });

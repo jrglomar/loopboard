@@ -33,11 +33,12 @@ function initials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-/** "Mo 3" — short weekday + date number, from a YYYY-MM-DD. */
-function dayHeader(iso: string): string {
+/** { weekday: "TH", monthDay: "Jul 30" } — stacked weekday + month/day, from YYYY-MM-DD. */
+function dayHeader(iso: string): { weekday: string; monthDay: string } {
   const date = new Date(`${iso}T12:00:00Z`);
-  const dow = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"][date.getUTCDay()];
-  return `${dow} ${parseInt(iso.slice(8, 10), 10)}`;
+  const weekday = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"][date.getUTCDay()];
+  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][date.getUTCMonth()];
+  return { weekday, monthDay: `${month} ${parseInt(iso.slice(8, 10), 10)}` };
 }
 
 function toEntries(map: AssigneeLeaves): LeaveEntry[] {
@@ -155,14 +156,16 @@ export function LeavesPlannerCard({
               </th>
               {calendar.days.map((d, i) => {
                 const firstOfSprint = i > 0 && calendar.days[i - 1]!.sprintId !== d.sprintId;
+                const h = dayHeader(d.date);
                 return (
                   <th
                     key={d.date}
                     scope="col"
-                    className={cn("pb-2 px-1 font-medium text-center min-w-[34px]", firstOfSprint && "border-l border-border")}
+                    className={cn("pb-2 px-1 font-medium text-center min-w-[46px]", firstOfSprint && "border-l border-border")}
                     title={d.date}
                   >
-                    {dayHeader(d.date)}
+                    <span className="block text-[0.625rem] font-semibold uppercase text-foreground/70 leading-tight">{h.weekday}</span>
+                    <span className="block text-[0.6875rem] leading-tight">{h.monthDay}</span>
                   </th>
                 );
               })}
@@ -170,8 +173,8 @@ export function LeavesPlannerCard({
           </thead>
           <tbody>
             {roster.map((name) => (
-              <tr key={name} className="border-t border-border/40 hover:bg-muted/20 transition-colors">
-                <th scope="row" className="sticky left-0 bg-card z-10 py-1.5 pr-3 border-r border-border text-left font-medium text-foreground">
+              <tr key={name} className="group border-t border-border/40 hover:bg-primary/5 transition-colors">
+                <th scope="row" className="sticky left-0 bg-card group-hover:bg-primary/10 z-10 py-1.5 pr-3 border-r border-border text-left font-medium text-foreground transition-colors">
                   <div className="flex items-center gap-1.5">
                     <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary/10 text-primary font-semibold text-[0.625rem] flex-shrink-0" aria-hidden="true">
                       {initials(name)}

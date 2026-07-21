@@ -14,25 +14,17 @@
 // perf: optimistic update — no spinner between select change and Jira confirm.
 
 import React, { useState, useCallback, useMemo } from "react";
-import { ClipboardList, AlertCircle, Loader2 } from "lucide-react";
+import { ClipboardList, AlertCircle } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { useActiveSprint, useTeamMembers, updateTicketPoints } from "../hooks/useJira";
+import { useActiveSprint, useTeamMembers } from "../hooks/useJira";
 import { assignIssue } from "../lib/assignClient";
-import {
-  getTransitions,
-  transitionIssue,
-  moveIssueToSprint,
-  type IssueTransition,
-} from "../lib/ticketActionsClient";
+import { PointsCell, StatusCell, MoveSprintCell, SummaryCell, cellSelectCls } from "./ticketCells";
+import { BreakdownDialog } from "./BreakdownDialog";
 import type { IssueSummary, TeamMember, SprintRef } from "../lib/types";
 import type { McpError } from "../lib/mcpClient";
 import { formatPoints } from "../lib/format";
-
-const cellSelectCls =
-  "h-8 text-xs px-2 border border-border rounded-md bg-background text-foreground font-[inherit] cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 transition-colors hover:border-ring disabled:opacity-50 disabled:cursor-wait";
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -47,6 +39,13 @@ export interface AssignmentListProps {
   teamRevision?: number;
   /** v1.15 (ADR-026): active+future sprints for the board, for the move-to-sprint control. */
   sprints?: SprintRef[];
+  /**
+   * v1.70 (ADR-081): PO-board-only — shows a per-row "Break down" action that opens
+   * the real (Jira-ticket-creating) BreakdownDialog, relocated here from the Draft
+   * Capacity Plan card because it writes to Jira (create_po_ticket) and Assign
+   * Tickets is the app's one real-edit surface. Omitted/false on the Dev board.
+   */
+  enableBreakdown?: boolean;
 }
 
 // ── Per-row state ─────────────────────────────────────────────────────────────
@@ -89,205 +88,9 @@ function initialRowState(
   };
 }
 
-// ── Status cell (v1.15, ADR-026) — lazy-loads transitions, applies one ─────────
-
-function StatusCell({ issue, onChanged }: { issue: IssueSummary; onChanged: () => void }) {
-  const [status, setStatus] = useState(issue.status);
-  const [expanded, setExpanded] = useState(false);
-  const [transitions, setTransitions] = useState<IssueTransition[] | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [applying, setApplying] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Keep the displayed status in sync if the sprint data refreshes.
-  React.useEffect(() => { setStatus(issue.status); }, [issue.status]);
-
-  async function openMenu() {
-    setExpanded(true);
-    if (transitions === null && !loading) {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await getTransitions(issue.key);
-        setTransitions(res.transitions);
-      } catch (err: unknown) {
-        setError((err as McpError)?.message ?? "Failed to load transitions");
-      } finally {
-        setLoading(false);
-      }
-    }
-  }
-
-  async function apply(transitionId: string) {
-    setApplying(true);
-    setError(null);
-    try {
-      const res = await transitionIssue(issue.key, transitionId);
-      setStatus(res.status);
-      setExpanded(false);
-      setTransitions(null); // invalidate — valid transitions change with the new status
-      onChanged();
-    } catch (err: unknown) {
-      setError((err as McpError)?.message ?? "Transition failed");
-    } finally {
-      setApplying(false);
-    }
-  }
-
-  if (!expanded) {
-    return (
-      <div className="flex items-center gap-1.5">
-        <Badge variant="outline" className="text-[0.625rem] font-medium whitespace-nowrap">{status}</Badge>
-        <button
-          type="button"
-          onClick={() => void openMenu()}
-          className="text-[0.625rem] text-primary hover:underline focus:outline-none focus:ring-1 focus:ring-ring rounded"
-          aria-label={`Change status for ${issue.key}`}
-        >
-          Change
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-1.5">
-        <select
-          aria-label={`New status for ${issue.key}`}
-          className={cellSelectCls + " max-w-[150px]"}
-          defaultValue=""
-          disabled={loading || applying}
-          onChange={(e) => { if (e.target.value) void apply(e.target.value); }}
-        >
-          <option value="">{loading ? "Loading…" : "Select status…"}</option>
-          {(transitions ?? []).map((t) => (
-            <option key={t.id} value={t.id}>{t.to.name}</option>
-          ))}
-        </select>
-        {applying && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground flex-shrink-0" aria-hidden="true" />}
-        {!applying && (
-          <button type="button" onClick={() => setExpanded(false)}
-            className="text-[0.625rem] text-muted-foreground hover:underline" aria-label="Cancel status change">
-            Cancel
-          </button>
-        )}
-      </div>
-      {error && <p className="text-[0.6875rem] text-destructive" aria-live="polite">{error}</p>}
-    </div>
-  );
-}
-
-// ── Move-to-sprint cell (v1.15, ADR-026) ───────────────────────────────────────
-
-function MoveSprintCell({ issue, sprints, onMoved }: { issue: IssueSummary; sprints: SprintRef[]; onMoved: () => void }) {
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function move(sprintId: number) {
-    setSaving(true);
-    setError(null);
-    try {
-      await moveIssueToSprint(issue.key, sprintId);
-      onMoved(); // refetch — the moved ticket leaves this sprint and drops off the list
-    } catch (err: unknown) {
-      setError((err as McpError)?.message ?? "Move failed");
-      setSaving(false);
-    }
-  }
-
-  if (sprints.length === 0) {
-    return <span className="text-[0.6875rem] text-muted-foreground">—</span>;
-  }
-
-  return (
-    <div className="flex flex-col gap-1">
-      <select
-        aria-label={`Move ${issue.key} to a sprint`}
-        className={cellSelectCls + " max-w-[150px]"}
-        value=""
-        disabled={saving}
-        onChange={(e) => { if (e.target.value) void move(parseInt(e.target.value, 10)); }}
-      >
-        <option value="">{saving ? "Moving…" : "Move to…"}</option>
-        {sprints.map((s) => (
-          <option key={s.id} value={s.id}>{s.name}</option>
-        ))}
-      </select>
-      {error && <p className="text-[0.6875rem] text-destructive" aria-live="polite">{error}</p>}
-    </div>
-  );
-}
-
-// ── Points cell (v1.37, ADR-047) — inline-editable story points ────────────────
-
-function PointsCell({ issue }: { issue: IssueSummary }) {
-  const initial = issue.storyPoints != null ? String(issue.storyPoints) : "";
-  const [value, setValue] = useState(initial);
-  const committed = React.useRef(initial);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Re-sync when the underlying issue's points change (e.g. a sprint refetch).
-  React.useEffect(() => {
-    const v = issue.storyPoints != null ? String(issue.storyPoints) : "";
-    setValue(v);
-    committed.current = v;
-  }, [issue.storyPoints]);
-
-  async function commit() {
-    const next = value.trim();
-    if (next === committed.current) return; // unchanged — no write
-    const num = Number(next);
-    if (next === "" || !Number.isFinite(num) || num < 0) {
-      setValue(committed.current); // invalid → revert, never write a bad value
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    setSaved(false);
-    try {
-      await updateTicketPoints(issue.key, num);
-      committed.current = next;
-      setSaving(false);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch (err: unknown) {
-      setError((err as McpError)?.message ?? "Update failed");
-      setValue(committed.current); // revert on failure
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="flex flex-col items-end gap-0.5">
-      <div className="flex items-center justify-end gap-1">
-        <input
-          type="number"
-          min={0}
-          step="any"
-          aria-label={`Story points for ${issue.key}`}
-          value={value}
-          disabled={saving}
-          onChange={(e) => setValue(e.target.value)}
-          onBlur={() => void commit()}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
-          }}
-          // guard: scrolling the page over a number input must not change its value
-          onWheel={(e) => (e.target as HTMLInputElement).blur()}
-          className="w-14 h-8 text-xs px-1.5 text-right border border-border rounded-md bg-background text-foreground font-[inherit] focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 transition-colors hover:border-ring disabled:opacity-50 disabled:cursor-wait"
-        />
-        {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground flex-shrink-0" aria-hidden="true" />}
-        {!saving && saved && <span className="text-[0.625rem] text-[hsl(var(--status-done-text))]" aria-hidden="true">✓</span>}
-      </div>
-      {error && <p className="text-[0.625rem] text-destructive max-w-[120px]" aria-live="polite">{error}</p>}
-    </div>
-  );
-}
-
 // ── Ticket row ────────────────────────────────────────────────────────────────
+// StatusCell / MoveSprintCell / PointsCell moved to ./ticketCells (v1.69, ADR-080)
+// — shared with the Draft Capacity Plan card's chip editor.
 
 interface TicketRowProps {
   issue: IssueSummary;
@@ -301,9 +104,23 @@ interface TicketRowProps {
   /** v1.37 (ADR-047): bulk-assign selection */
   selected: boolean;
   onToggleSelect: () => void;
+  /** v1.70 (ADR-081): PO-board-only trailing "Break down" action. */
+  enableBreakdown?: boolean;
+  onBreakdown?: (issue: IssueSummary) => void;
 }
 
-function TicketRow({ issue, team, rowState, onAssign, sprints, onChanged, selected, onToggleSelect }: TicketRowProps) {
+function TicketRow({
+  issue,
+  team,
+  rowState,
+  onAssign,
+  sprints,
+  onChanged,
+  selected,
+  onToggleSelect,
+  enableBreakdown,
+  onBreakdown,
+}: TicketRowProps) {
   // v1.8 (ADR-019): team is keyed by accountId
   const currentInTeam =
     rowState.accountId !== null &&
@@ -368,16 +185,15 @@ function TicketRow({ issue, team, rowState, onAssign, sprints, onChanged, select
         </a>
       </td>
 
-      {/* Summary */}
+      {/* Summary — v1.69 (ADR-080): rename-capable SummaryCell */}
       <td className="py-2 pr-3 max-w-[240px]">
-        <p className="text-sm text-foreground truncate" title={issue.summary}>
-          {issue.summary}
-        </p>
+        <SummaryCell issue={issue} onSaved={onChanged} />
       </td>
 
-      {/* Points — v1.37 (ADR-047): inline-editable */}
+      {/* Points — v1.37 (ADR-047): inline-editable; v1.69 (ADR-080): onSaved refetches
+          the sprint, fixing the stale filtered-points summary after an inline edit. */}
       <td className="py-2 pr-4">
-        <PointsCell issue={issue} />
+        <PointsCell issue={issue} onSaved={onChanged} />
       </td>
 
       {/* Assignee select */}
@@ -436,6 +252,23 @@ function TicketRow({ issue, team, rowState, onAssign, sprints, onChanged, select
       <td className="py-2 min-w-[150px]">
         <MoveSprintCell issue={issue} sprints={sprints} onMoved={onChanged} />
       </td>
+
+      {/* Break down — v1.70 (ADR-081), PO-board only: relocated from the Draft
+          Capacity Plan card because it creates real Jira tickets. */}
+      {enableBreakdown && (
+        <td className="py-2 pl-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 text-[0.6875rem] whitespace-nowrap"
+            onClick={() => onBreakdown?.(issue)}
+            aria-label={`Break down ${issue.key}`}
+          >
+            Break down
+          </Button>
+        </td>
+      )}
     </tr>
   );
 }
@@ -449,6 +282,7 @@ export function AssignmentList({
   projectKey: _projectKey,
   teamRevision,
   sprints = [],
+  enableBreakdown = false,
 }: AssignmentListProps) {
   // Fetch the sprint's tickets (all buckets)
   const sprintState = useActiveSprint(boardId, sprintId ?? undefined);
@@ -460,6 +294,10 @@ export function AssignmentList({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkAccountId, setBulkAccountId] = useState<string>("");
   React.useEffect(() => { setAssigneeFilter(null); setSelected(new Set()); }, [boardId, sprintId]);
+
+  // v1.70 (ADR-081): the real breakdown dialog — relocated here from the Draft
+  // Capacity Plan card because it creates new PO stories (create_po_ticket).
+  const [breakdownIssue, setBreakdownIssue] = useState<IssueSummary | null>(null);
 
   // v1.8 (ADR-019): roster from curated team, NOT get_assignable_users
   const { data: team, loading: usersLoading, error: usersError, run: usersRun } =
@@ -806,6 +644,8 @@ export function AssignmentList({
                 <th className="text-left pb-2 pr-3">Assignee</th>
                 <th className="text-left pb-2 pr-3">Status</th>
                 <th className="text-left pb-2">Sprint</th>
+                {/* v1.70 (ADR-081): PO-board-only trailing action column */}
+                {enableBreakdown && <th className="text-left pb-2 pl-2">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -824,6 +664,8 @@ export function AssignmentList({
                   onChanged={sprintState.run}
                   selected={selected.has(issue.key)}
                   onToggleSelect={() => toggleSelect(issue.key)}
+                  enableBreakdown={enableBreakdown}
+                  onBreakdown={setBreakdownIssue}
                 />
               ))}
             </tbody>
@@ -831,6 +673,21 @@ export function AssignmentList({
         </div>
         )}
       </CardContent>
+
+      {/* Breakdown dialog (v1.70, ADR-081) — split an oversized story into new PO
+          stories. Keyed by issue key so switching rows remounts it with a fresh
+          row set. Guarded on sprintState.data because BreakdownDialog needs a
+          resolved numeric sprintId (the prop may be null/undefined even while a
+          sprint is resolved via the board's server-side default). */}
+      {enableBreakdown && breakdownIssue && sprintState.data && (
+        <BreakdownDialog
+          key={breakdownIssue.key}
+          issue={breakdownIssue}
+          sprintId={sprintState.data.sprint.id}
+          onClose={() => setBreakdownIssue(null)}
+          onCreated={sprintState.run}
+        />
+      )}
     </Card>
   );
 }

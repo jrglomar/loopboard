@@ -10,14 +10,21 @@
 # Build context = repo ROOT (npm workspaces need the root manifest + lockfile).
 #   docker build -f docker/jira.Dockerfile -t invokeboard/mcp-jira .
 # ─────────────────────────────────────────────────────────────────────────────
-# v1.65 (ADR-077, revised): Debian/glibc base — NOT alpine/musl. better-sqlite3 (pulled in by
-# the root `npm ci` when STORAGE_DRIVER=sqlite) publishes prebuilt binaries for glibc but NONE
-# for musl (WiseLibs/better-sqlite3 #619/#1382), so on alpine `npm ci` had to COMPILE it from
-# source — which needed apk python3/make/g++ and broke on any host that can't reach Alpine's
-# package CDN. On slim, prebuild-install downloads the prebuilt binary: no compiler, no apk, no
-# Python. Larger base image, zero native compilation — the documented, reliable path.
+# v1.65 (ADR-077, revised): Debian/glibc base — NOT alpine/musl. better-sqlite3 (the optional dep
+# behind STORAGE_DRIVER=sqlite) has no musl prebuild at all (WiseLibs/better-sqlite3 #619/#1382).
+# CORRECTION (v1.65 hotfix): it has no matching glibc prebuild for this version/target either —
+# prebuild-install reports "No prebuilt binaries found (... libc= platform=linux)" and falls back
+# to `node-gyp rebuild`, which needs Python + a C++ toolchain. So slim alone is NOT enough: we must
+# install python3/make/g++ for `npm ci` to COMPILE better-sqlite3 from source (~1 min). Without
+# them the optional dep is silently skipped and the sqlite driver throws at first store access.
 FROM node:20-slim
 WORKDIR /app
+
+# node-gyp build toolchain — required to compile better-sqlite3 (see the note above). Kept in the
+# image for simplicity (POC); a multi-stage build could drop it later to slim the runtime image.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 make g++ \
+ && rm -rf /var/lib/apt/lists/*
 
 # Copy the WHOLE repo (`.dockerignore` drops node_modules / dist / .env), then clean-install.
 # `npm ci` removes any pre-existing node_modules first, so a stray host `node_modules` that
@@ -27,6 +34,8 @@ WORKDIR /app
 # Inline NODE_ENV scopes to this command only; the ENV below keeps the RUNTIME production.
 COPY . .
 RUN NODE_ENV=development npm ci --include=dev
+# Assert better-sqlite3 compiled — fail the build loudly here rather than at first sqlite read.
+RUN node -e "const D=require('better-sqlite3'); new D(':memory:').exec('create table t(x)'); console.log('better-sqlite3 ->', require.resolve('better-sqlite3'))"
 # Assert tsx installed — fail loud here, not with a confusing runtime "tsx: not found".
 RUN node -e "console.log('tsx ->', require.resolve('tsx/package.json'))"
 

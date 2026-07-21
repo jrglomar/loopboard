@@ -62,24 +62,29 @@ export function parseCorsOrigins(raw: string | undefined): string[] {
     .filter((s) => s.length > 0);
 }
 
+// v1.66 (security): per-request CORS options so `credentials` can depend on HOW the origin
+// matched. The Task Helper session cookie makes this bridge credentialed, so honoring a
+// `CORS_ORIGINS=*` wildcard WITH credentials would let ANY site drive the API using a victim's
+// cookie. Fix: credentials are granted only for an EXPLICITLY listed origin (or a no-Origin
+// same-origin request). A `*` wildcard still reflects the origin for cross-origin reads, but with
+// credentials OFF — the cookie is never honored against a wildcard. See CONTRACTS.md §2.
 app.use(
-  cors({
-    origin: (origin, callback) => {
-      const allow = parseCorsOrigins(process.env["CORS_ORIGINS"]);
-      if (!origin || allow.includes("*") || allow.includes(origin)) {
-        callback(null, true);
-        return;
-      }
-      callback(null, false);
-    },
-    // v1.44 (ADR-054): the Task Helper session cookie needs credentialed CORS. The origin
-    // callback above reflects the SPECIFIC request origin (never "*"), which credentials require.
-    credentials: true,
-    // v1.47 (ADR-057): PATCH is required by the journal to-do toggle. Omitting a verb here makes
-    // the browser's preflight reject the call even though the route exists (same-process tests
-    // never preflight, so this only ever fails in a real browser).
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allowedHeaders: ["Content-Type"],
+  cors((req, callback) => {
+    const origin = req.headers.origin;
+    const allow = parseCorsOrigins(process.env["CORS_ORIGINS"]);
+    const explicit = origin !== undefined && allow.includes(origin);
+    const allowed = origin === undefined || explicit || allow.includes("*");
+    callback(null, {
+      origin: allowed,
+      // Credentials ONLY when the origin was explicitly listed (or same-origin/no-Origin).
+      // A `*` match reflects the origin but must NOT carry credentials.
+      credentials: origin === undefined || explicit,
+      // v1.47 (ADR-057): PATCH is required by the journal to-do toggle. Omitting a verb here makes
+      // the browser's preflight reject the call even though the route exists (same-process tests
+      // never preflight, so this only ever fails in a real browser).
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+      allowedHeaders: ["Content-Type"],
+    });
   })
 );
 

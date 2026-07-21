@@ -311,6 +311,44 @@ describe("CORS headers", () => {
       expect(res.headers.get("access-control-allow-credentials")).toBe("true");
     }
   );
+
+  // v1.66 (security): the session cookie makes this bridge credentialed, so a `CORS_ORIGINS=*`
+  // wildcard must NOT hand credentials to an arbitrary origin — it may reflect the origin for
+  // reads, but access-control-allow-credentials must be absent. See CONTRACTS.md §2.
+  it("with CORS_ORIGINS=* reflects the origin but WITHOUT credentials", async () => {
+    const prev = process.env["CORS_ORIGINS"];
+    process.env["CORS_ORIGINS"] = "*";
+    try {
+      const res = await fetch(`${baseUrl}/api/health`, {
+        headers: { Origin: "https://evil.example.com" },
+      });
+      expect(res.headers.get("access-control-allow-origin")).toBe(
+        "https://evil.example.com"
+      );
+      expect(res.headers.get("access-control-allow-credentials")).toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env["CORS_ORIGINS"];
+      else process.env["CORS_ORIGINS"] = prev;
+    }
+  });
+
+  // Contrast: an EXPLICITLY listed origin keeps credentials even alongside the check above.
+  it("with an explicitly listed origin still grants credentials", async () => {
+    const prev = process.env["CORS_ORIGINS"];
+    process.env["CORS_ORIGINS"] = "https://app.example.com";
+    try {
+      const res = await fetch(`${baseUrl}/api/health`, {
+        headers: { Origin: "https://app.example.com" },
+      });
+      expect(res.headers.get("access-control-allow-origin")).toBe(
+        "https://app.example.com"
+      );
+      expect(res.headers.get("access-control-allow-credentials")).toBe("true");
+    } finally {
+      if (prev === undefined) delete process.env["CORS_ORIGINS"];
+      else process.env["CORS_ORIGINS"] = prev;
+    }
+  });
 });
 
 describe("parseCorsOrigins (CORS_ORIGINS env, deploy config)", () => {

@@ -9,6 +9,10 @@
  * Safety: a Jira MUTATION made on a borrowed token is attributed to the token's owner in Jira's
  * history. So a borrower is READ-ONLY against Jira unless an admin explicitly sets `allowWrites`.
  * Delegation is never chained (a source must own its credentials), so there's no resolution cycle.
+ *
+ * v1.67 (ADR-078): sharing is now GRANULAR per provider. `StoredUser.sharedProviders` — when set —
+ * restricts which providers may fall back to the source; a provider left off the list resolves to
+ * null (disconnected) rather than silently borrowing. Absent = legacy share-all (backward compatible).
  */
 
 import { getConnection, findUserById, type StoredConnection, type ConnectionProvider, type StoredUser } from "./userStore.js";
@@ -34,6 +38,10 @@ export function getEffectiveConnection(
   const user = findUserById(userId);
   const sourceId = user?.credentialSourceUserId;
   if (!sourceId) return null;
+
+  // v1.67 (ADR-078) — granular sharing: an explicit `sharedProviders` list restricts fallback to
+  // only the named providers. undefined (the legacy default) shares ALL providers, unchanged.
+  if (user!.sharedProviders !== undefined && !user!.sharedProviders.includes(provider)) return null;
 
   const shared = getConnection(sourceId, provider);
   return shared ? { conn: shared, viaUserId: sourceId } : null;

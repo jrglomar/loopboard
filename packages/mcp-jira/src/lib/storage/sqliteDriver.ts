@@ -17,8 +17,33 @@
  * handle without needing a real process restart to prove "a second open imports nothing."
  */
 
-import Database from "better-sqlite3";
+// better-sqlite3 is an OPTIONAL, native dependency (v1.65, ADR-077 revised): it ships prebuilt
+// binaries but has no musl build and can fall back to compiling from source, which fails in build
+// environments without a prebuilt-binary download or a C/Python toolchain. To keep the WHOLE app
+// buildable and runnable on the default json driver even when better-sqlite3 can't install, its
+// value is loaded LAZILY (only when STORAGE_DRIVER=sqlite actually builds this driver) — a static
+// top-level import here would pull it into every store's module graph and crash on absence. The
+// TYPE import below is erased at runtime, so it never triggers a require.
+import { createRequire } from "node:module";
+import type DatabaseType from "better-sqlite3"; // types only — erased at runtime (better-sqlite3 uses `export =`)
 import type { StorageDriver } from "./port.js";
+
+type DatabaseHandle = DatabaseType.Database;
+type BetterSqlite3Ctor = new (path: string, options?: DatabaseType.Options) => DatabaseHandle;
+
+/** Load the better-sqlite3 constructor on first use; a clear error if the optional dep is absent. */
+function loadDatabaseCtor(): BetterSqlite3Ctor {
+  try {
+    return createRequire(import.meta.url)("better-sqlite3") as BetterSqlite3Ctor;
+  } catch {
+    throw new Error(
+      "STORAGE_DRIVER=sqlite needs the optional 'better-sqlite3' package, which is not installed " +
+        "(its native binary failed to build — it needs either a prebuilt-binary download or a " +
+        "C/Python build toolchain). Set STORAGE_DRIVER=json (the default) to run without it, or " +
+        "rebuild in an environment where better-sqlite3 can install."
+    );
+  }
+}
 
 /** One doc discovered in a JSON store, ready to insert into `docs`. */
 export interface JsonDocRef {
@@ -58,7 +83,7 @@ function defaultLog(message: string): void {
  * import or from ordinary writes. Exported so it can be exercised directly against one
  * `Database` handle to prove idempotency without a real process restart.
  */
-export function runAutoImportIfEmpty(db: Database.Database, opts: SqliteDriverOptions = {}): void {
+export function runAutoImportIfEmpty(db: DatabaseHandle, opts: SqliteDriverOptions = {}): void {
   const row = db.prepare("SELECT COUNT(*) AS count FROM docs").get() as { count: number };
   if (row.count > 0) return;
 
@@ -89,11 +114,11 @@ export function runAutoImportIfEmpty(db: Database.Database, opts: SqliteDriverOp
 }
 
 export function createSqliteDriver(filePath: string, opts: SqliteDriverOptions = {}): StorageDriver {
-  let db: Database.Database | null = null;
+  let db: DatabaseHandle | null = null;
 
-  function ensureOpen(): Database.Database {
+  function ensureOpen(): DatabaseHandle {
     if (db) return db;
-    const conn = new Database(filePath);
+    const conn = new (loadDatabaseCtor())(filePath);
     conn.pragma("journal_mode = WAL");
     conn.exec(CREATE_TABLE_SQL);
     runAutoImportIfEmpty(conn, opts);
