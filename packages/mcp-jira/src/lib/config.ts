@@ -60,6 +60,9 @@ export const DEFAULT_OFFSET_FILE = path.join(_packageDir, ".invokeboard-offset.j
 /** Default path for the Task Helper user store (v1.44) — users + encrypted connections. */
 export const DEFAULT_TASK_HELPER_FILE = path.join(_packageDir, ".invokeboard-users.json");
 
+/** Default path for the PO draft-capacity-plan JSON file — inside the mcp-jira package dir (v1.68). */
+export const DEFAULT_DRAFT_PLAN_FILE = path.join(_packageDir, ".invokeboard-draft-plan.json");
+
 // Config schema — validated lazily on first call to getConfig().
 // All env reads happen inside getConfig(), never at module-import time,
 // so tool modules can be imported in tests without a .env file.
@@ -95,6 +98,8 @@ const configSchema = z.object({
   JIRA_LEAVES_FILE: z.string().default(""),
   // v1.8: optional team roster file path; default resolved from package dir above.
   JIRA_TEAM_FILE: z.string().default(""),
+  // v1.68 (ADR-079): optional PO draft-capacity-plan store path; default resolved above.
+  JIRA_DRAFT_PLAN_FILE: z.string().default(""),
   // v1.16: optional impediments + pull-requests store paths (Huddle daily visibility).
   JIRA_IMPEDIMENTS_FILE: z.string().default(""),
   JIRA_PRS_FILE: z.string().default(""),
@@ -243,6 +248,17 @@ export function getOffsetFilePath(): string {
 export function getTaskHelperFilePath(): string {
   const cfg = getConfig();
   return cfg.TASK_HELPER_FILE || DEFAULT_TASK_HELPER_FILE;
+}
+
+/**
+ * Return the resolved draft-plan file path.
+ * Reads from config at call time (not import time) so tests can override
+ * JIRA_DRAFT_PLAN_FILE before this is called.
+ * Falls back to DEFAULT_DRAFT_PLAN_FILE when JIRA_DRAFT_PLAN_FILE is unset/empty.
+ */
+export function getDraftPlanFilePath(): string {
+  const cfg = getConfig();
+  return resolveStorePath("draft-plan.json", cfg.JIRA_DRAFT_PLAN_FILE, DEFAULT_DRAFT_PLAN_FILE);
 }
 
 /**

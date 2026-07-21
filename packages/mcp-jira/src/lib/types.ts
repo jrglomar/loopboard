@@ -97,6 +97,16 @@ export interface TeamMember {
   displayName: string;
 }
 
+/**
+ * A PO-side DRAFT assignment of a ticket to a dev-team member (v1.68, ADR-079). Used by
+ * get_draft_plan/set_draft_plan to sanity-check ticket load against per-developer capacity
+ * BEFORE real assignment. Persisted to JIRA_DRAFT_PLAN_FILE — these tools NEVER write to Jira.
+ */
+export interface DraftAssignment {
+  accountId: string;
+  displayName: string;
+}
+
 /** Output shape for the get_daily_huddle tool (v1.2). */
 export interface GetDailyHuddleOutput {
   sprintName: string;

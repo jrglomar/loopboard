@@ -11,6 +11,9 @@
  *  [JIRA] POST /api/tools/update_ticket {ticketKey:"DEV-1"} → 400 VALIDATION (refine)
  *  [JIRA] health.ai reports disabled when AI_PROVIDER is empty (v1.1)
  *  [JIRA] POST /api/ai/draft-tickets → 503 AI_UNAVAILABLE when AI disabled (v1.1)
+ *  [JIRA] POST set_draft_plan with one valid assignment → 200, echoes sprintId/devSprintId/assignments (v1.68)
+ *  [JIRA] POST get_draft_plan for an unused sprintId → 200 with devSprintId:null, assignments:{} (v1.68)
+ *  [JIRA] POST set_draft_plan with an invalid (lowercase) assignments key → 400 VALIDATION (v1.68)
  *  [GITHUB] health shape
  *  [GITHUB] /api/tools returns exactly 4 tools with contract names
  *  [GITHUB] POST /api/tools/nope → 404 UNKNOWN_TOOL
@@ -50,6 +53,7 @@ const JIRA_ENV = {
   JIRA_LEAVES_FILE: path.join(os.tmpdir(), `invokeboard-smoke-leaves-${process.pid}.json`),
   JIRA_TEAM_FILE: path.join(os.tmpdir(), `invokeboard-smoke-team-${process.pid}.json`),
   JIRA_OFFSET_FILE: path.join(os.tmpdir(), `invokeboard-smoke-offset-${process.pid}.json`),
+  JIRA_DRAFT_PLAN_FILE: path.join(os.tmpdir(), `invokeboard-smoke-draft-plan-${process.pid}.json`),
   // Pin AI off so the AI_UNAVAILABLE checks are deterministic even when the
   // developer's .env configures a provider (set vars are never overridden by dotenv)
   AI_PROVIDER: "",
@@ -130,6 +134,9 @@ const EXPECTED_JIRA_TOOLS = [
   // v1.54 (ADR-065) — manual-adjustment log
   "add_offset_adjustment",
   "delete_offset_adjustment",
+  // v1.68 — PO draft capacity plan
+  "get_draft_plan",
+  "set_draft_plan",
 ];
 
 const EXPECTED_GITHUB_TOOLS = [
@@ -540,6 +547,9 @@ if (!jiraReady) {
     "set_offset_for_sprint", "set_offset_adjustment",
     // v1.54 (ADR-065) — manual-adjustment log writes reject empty input
     "add_offset_adjustment", "delete_offset_adjustment",
+    // v1.68 — draft-plan store tools reject empty input (sprintId is required on both;
+    // validation precedes any file read/write — draft only, never reaches Jira)
+    "get_draft_plan", "set_draft_plan",
   ]) {
     try {
       const { status, body } = await httpPost(`http://127.0.0.1:${JIRA_PORT}/api/tools/${tool}`, {});
@@ -566,6 +576,68 @@ if (!jiraReady) {
     await httpPost(`http://127.0.0.1:${JIRA_PORT}/api/tools/set_team_members`, { boardId: 1, members: [] });
   } catch (e) {
     fail("[JIRA] team roster round-trip", String(e));
+  }
+
+  // JIRA v1.68 (ADR-079): set_draft_plan with one valid assignment → 200, echoes
+  // { sprintId, devSprintId, assignments } (temp file; DRAFT ONLY — never calls Jira)
+  try {
+    const { status, body } = await httpPost(`http://127.0.0.1:${JIRA_PORT}/api/tools/set_draft_plan`, {
+      sprintId: 9001,
+      devSprintId: 9002,
+      assignments: { "DEV-1": { accountId: "acc-smoke-1", displayName: "Smoke Tester" } },
+    });
+    const ok =
+      status === 200 &&
+      body.ok === true &&
+      body.data?.sprintId === 9001 &&
+      body.data?.devSprintId === 9002 &&
+      body.data?.assignments?.["DEV-1"]?.accountId === "acc-smoke-1";
+    if (ok) {
+      pass("[JIRA] POST set_draft_plan → 200, echoes sprintId/devSprintId/assignments");
+    } else {
+      fail("[JIRA] POST set_draft_plan → 200", `status=${status} body=${JSON.stringify(body).slice(0, 200)}`);
+    }
+    // clear so this smoke run leaves no draft behind in the temp store
+    await httpPost(`http://127.0.0.1:${JIRA_PORT}/api/tools/set_draft_plan`, { sprintId: 9001, assignments: {} });
+  } catch (e) {
+    fail("[JIRA] POST set_draft_plan → 200", String(e));
+  }
+
+  // JIRA v1.68 (ADR-079): get_draft_plan for a sprintId with no saved draft → 200 with the
+  // empty-but-valid shape (devSprintId: null, assignments: {}) — not an error
+  try {
+    const { status, body } = await httpPost(`http://127.0.0.1:${JIRA_PORT}/api/tools/get_draft_plan`, {
+      sprintId: 9099,
+    });
+    const ok =
+      status === 200 &&
+      body.ok === true &&
+      body.data?.sprintId === 9099 &&
+      body.data?.devSprintId === null &&
+      Object.keys(body.data?.assignments ?? { x: 1 }).length === 0;
+    if (ok) {
+      pass("[JIRA] POST get_draft_plan (unused sprintId) → 200 devSprintId:null assignments:{}");
+    } else {
+      fail("[JIRA] POST get_draft_plan (unused sprintId) → 200", `status=${status} body=${JSON.stringify(body).slice(0, 200)}`);
+    }
+  } catch (e) {
+    fail("[JIRA] POST get_draft_plan (unused sprintId) → 200", String(e));
+  }
+
+  // JIRA v1.68 (ADR-079): set_draft_plan with an invalid (lowercase) assignments key → 400
+  // VALIDATION — never reaches the store write
+  try {
+    const { status, body } = await httpPost(`http://127.0.0.1:${JIRA_PORT}/api/tools/set_draft_plan`, {
+      sprintId: 9001,
+      assignments: { "dev-1": { accountId: "acc-smoke-1", displayName: "Smoke Tester" } },
+    });
+    if (status === 400 && body.ok === false && body.error?.code === "VALIDATION") {
+      pass("[JIRA] POST set_draft_plan (invalid assignments key) → 400 VALIDATION");
+    } else {
+      fail("[JIRA] POST set_draft_plan (invalid assignments key) → 400 VALIDATION", `status=${status} code=${body.error?.code}`);
+    }
+  } catch (e) {
+    fail("[JIRA] POST set_draft_plan (invalid assignments key) → 400 VALIDATION", String(e));
   }
 
   // JIRA v1.1: AI endpoint returns 503 AI_UNAVAILABLE when no provider configured

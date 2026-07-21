@@ -40,6 +40,8 @@ export const READ_TOOLS: ReadonlySet<string> = new Set([
   "get_retro",
   // v1.59 (ADR-071): windowed multi-sprint report for trends/KPI questions.
   "get_multi_sprint_report",
+  // v1.68 (ADR-079): PO draft capacity plan (draft only — reading it never touches Jira).
+  "get_draft_plan",
 ]);
 
 /**

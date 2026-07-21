@@ -5,11 +5,11 @@
  * the json driver would have read for that (scope, name).
  *
  * Two sources:
- *  - SHARED_SCOPE: the 10 known store names, honoring each store's `*_FILE` override exactly
+ *  - SHARED_SCOPE: the 11 known store names, honoring each store's `*_FILE` override exactly
  *    like production reads do (via registry.ts).
  *  - Per-user: every subdirectory of `userStoresDir` is a user id (scope); every `*.json`
  *    file inside it is a doc (name = the filename without `.json`) — found by directory scan
- *    rather than a hardcoded list, so it picks up all 9 per-user "team" stores AND `journal`
+ *    rather than a hardcoded list, so it picks up all 10 per-user "team" stores AND `journal`
  *    (which has no shared-scope entry) without needing to enumerate them by hand.
  *
  * `userStoresDir` defaults to config.ts's real `USER_STORES_DIR` (production) but is

@@ -1,5 +1,5 @@
 /**
- * The 10 store names that have a SHARED-scope presence (i.e. can resolve outside a per-user
+ * The 11 store names that have a SHARED-scope presence (i.e. can resolve outside a per-user
  * request context) plus their `*_FILE` env override, if any (v1.65, ADR-077). This is the one
  * place that maps a storage "name" to config.ts's per-store override field — used by the
  * production json driver (index.ts) to stay byte-identical to the pre-port `getXFilePath()`
@@ -25,6 +25,7 @@ export const SHARED_STORE_NAMES: readonly string[] = [
   "retro",
   "offset",
   "users",
+  "draft-plan",
 ];
 
 const OVERRIDE_BY_NAME: Record<string, () => string> = {
@@ -38,6 +39,7 @@ const OVERRIDE_BY_NAME: Record<string, () => string> = {
   retro: () => getConfig().JIRA_RETRO_FILE,
   offset: () => getConfig().JIRA_OFFSET_FILE,
   users: () => getConfig().TASK_HELPER_FILE,
+  "draft-plan": () => getConfig().JIRA_DRAFT_PLAN_FILE,
 };
 
 /** Live override lookup (reads config fresh every call — env changes + resetConfigCache apply). */

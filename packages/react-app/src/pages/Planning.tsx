@@ -21,6 +21,7 @@ import { BoardToggle } from "../components/BoardToggle";
 import { CreateSprintDialog } from "../components/CreateSprintDialog";
 import { LeavesPlotterCard } from "../components/LeavesPlotterCard";
 import { AssignmentList } from "../components/AssignmentList";
+import { DraftPlanCard } from "../components/DraftPlanCard";
 import { TeamManager } from "../components/TeamManager";
 import { SprintGoalEditor } from "../components/SprintGoalEditor";
 import { TicketGen } from "./TicketGen";
@@ -418,6 +419,26 @@ export function Planning({
           teamRevision={teamRevision}
         />
       </section>
+
+      {/* ── Section 3b: Draft Capacity Plan (v1.68, ADR-079) — PO board only ── */}
+      {/*
+        v1.68 (ADR-079): PO-only drag-to-draft plan against the DEV roster's live
+        capacity. Never calls assign_issue — persisted via get_draft_plan/
+        set_draft_plan (draft only). devBoardId reads the Dev board's first
+        project (same array-of-projects model as everywhere else, ADR-037).
+      */}
+      {selectedBoardKey === "po" && (
+        <section aria-label="Draft capacity plan" className="min-w-0">
+          <DraftPlanCard
+            poBoardId={selectedBoardId}
+            sprintId={selectedSprintId}
+            sprint={selectedSprint}
+            devBoardId={boards !== null ? boards.dev[activeProjectIdx]?.id : undefined}
+            teamRevision={teamRevision}
+            onTeamChange={handleTeamChange}
+          />
+        </section>
+      )}
 
       {/* ── Section 4: Assign tickets to developers (v1.8: team roster) ──────── */}
       {/*

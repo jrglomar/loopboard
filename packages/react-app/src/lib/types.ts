@@ -667,3 +667,28 @@ export interface SyncPrLinksOutput {
   linked: Array<{ number: number; ticketKeys: string[] }>;
   skipped: Array<{ number: number; reason: string }>;
 }
+
+// ── Draft capacity plan (CONTRACTS.md §4.30 v1.68, ADR-079) ─────────────────
+
+/**
+ * One PO-sprint ticket drafted onto a Dev-board team member. displayName is
+ * snapshotted alongside accountId so a member later removed from the Dev roster
+ * still renders meaningfully (leaves/capacity are display-name-keyed, ADR-016).
+ * DRAFT ONLY — never written to Jira; real assignment remains assign_issue
+ * (§4.15) from the Dev board's Planning/Linking flow.
+ */
+export interface DraftAssignment {
+  accountId: string;
+  displayName: string;
+}
+
+/**
+ * get_draft_plan / set_draft_plan output — a PO sprint's draft ticket→developer
+ * mapping, paired with the Dev sprint used as the capacity source. No draft saved
+ * yet → { sprintId, devSprintId: null, assignments: {} }.
+ */
+export interface DraftPlan {
+  sprintId: number;
+  devSprintId: number | null;
+  assignments: Record<string, DraftAssignment>;
+}

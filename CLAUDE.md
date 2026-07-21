@@ -125,11 +125,13 @@ Do not add tests that require real credentials or network calls.
 | Jira key regex detection (pure function) | `packages/mcp-github/src/lib/jiraKeys.ts` |
 | AI provider port + adapters (anthropic/github) | `packages/mcp-jira/src/lib/ai/` |
 | Active-sprint selection (latest-first, pure) | `packages/mcp-jira/src/lib/sprintSelect.ts` |
+| PO draft capacity plan store (v1.68) | `packages/mcp-jira/src/lib/draftPlanStore.ts` |
+| Draft Capacity Plan card + PO↔Dev sprint pairing | `packages/react-app/src/components/DraftPlanCard.tsx`, `src/lib/sprintPairing.ts` |
 | React AI client (`getAiStatus`, draft, enhance) | `packages/react-app/src/lib/aiClient.ts` |
 | React HTTP client | `packages/react-app/src/lib/mcpClient.ts` |
 | Chat command router (pure function) | `packages/react-app/src/lib/chatRouter.ts` |
 | MCP tool catalog (Guide reference data) | `packages/react-app/src/lib/toolCatalog.ts` |
 | Ticket draft builder (deterministic, no network) | `packages/react-app/src/lib/ticketTemplates.ts` |
-| Architectural Decision Records | `docs/adr/ADR-001.md` through `ADR-077.md` |
+| Architectural Decision Records | `docs/adr/ADR-001.md` through `ADR-079.md` |
 | Integration contract | `docs/CONTRACTS.md` |
 | Setup guide | `docs/SETUP.md` |

@@ -169,6 +169,32 @@ vi.mock("../components/AssignmentList", () => ({
   ),
 }));
 
+// Mock DraftPlanCard (v1.68, ADR-079) — verify it receives the right props and
+// that Planning only mounts it on the PO board.
+vi.mock("../components/DraftPlanCard", () => ({
+  DraftPlanCard: ({
+    poBoardId,
+    sprintId,
+    devBoardId,
+  }: {
+    poBoardId?: number;
+    sprintId?: number | null;
+    sprint?: unknown;
+    devBoardId?: number;
+    teamRevision?: number;
+    onTeamChange?: () => void;
+  }) => (
+    <div
+      data-testid="draft-plan-card"
+      data-po-board-id={poBoardId ?? ""}
+      data-sprint-id={sprintId ?? ""}
+      data-dev-board-id={devBoardId ?? ""}
+    >
+      Draft Plan Card
+    </div>
+  ),
+}));
+
 // Mock BoardToggle to get clean button roles in tests
 vi.mock("../components/BoardToggle", () => ({
   BoardToggle: ({
@@ -530,6 +556,64 @@ describe("Planning — board change re-defaults sprint target (v1.7, ADR-018)", 
     await waitFor(() => {
       const select = screen.getByRole("combobox", { name: /planning target/i });
       expect((select as HTMLSelectElement).value).toBe(String(poSprintId));
+    });
+  });
+});
+
+describe("Planning — DraftPlanCard slot (v1.68, ADR-079) — PO board only", () => {
+  it("does NOT render DraftPlanCard on the Dev board (default)", async () => {
+    render(<Planning />);
+    await waitFor(() => screen.getByTestId("leaves-plotter-card"));
+    expect(screen.queryByTestId("draft-plan-card")).toBeNull();
+  });
+
+  it("renders DraftPlanCard on the PO board with poBoardId, sprintId, and devBoardId", async () => {
+    const poSprintId = 201;
+    vi.mocked(useJiraModule.useSprintList).mockReturnValue({
+      data: {
+        boardId: 20,
+        active: [],
+        future: [
+          {
+            id: poSprintId,
+            name: "PO Sprint Future",
+            state: "future" as const,
+            startDate: "2026-06-28T00:00:00.000Z",
+            endDate: "2026-07-11T00:00:00.000Z",
+            completeDate: null,
+            goal: null,
+            boardId: 20,
+          },
+        ],
+        closed: [],
+      },
+      loading: false,
+      error: null,
+      run: vi.fn(),
+    });
+
+    render(<Planning />);
+    await waitFor(() => screen.getByRole("button", { name: "PO" }));
+    fireEvent.click(screen.getByRole("button", { name: "PO" }));
+
+    await waitFor(() => {
+      const card = screen.getByTestId("draft-plan-card");
+      // PO board id = 20 (selected board); Dev board id = 10 (always the Dev roster source)
+      expect(card.getAttribute("data-po-board-id")).toBe("20");
+      expect(card.getAttribute("data-sprint-id")).toBe(String(poSprintId));
+      expect(card.getAttribute("data-dev-board-id")).toBe("10");
+    });
+  });
+
+  it("removes DraftPlanCard again when switching back to the Dev board", async () => {
+    render(<Planning />);
+    await waitFor(() => screen.getByRole("button", { name: "PO" }));
+    fireEvent.click(screen.getByRole("button", { name: "PO" }));
+    await waitFor(() => screen.getByTestId("draft-plan-card"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Dev" }));
+    await waitFor(() => {
+      expect(screen.queryByTestId("draft-plan-card")).toBeNull();
     });
   });
 });

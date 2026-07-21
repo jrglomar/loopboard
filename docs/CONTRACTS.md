@@ -139,6 +139,7 @@ so tests run with no `.env`.
 | `JIRA_AGING_DAYS_PER_POINT` | mcp-jira | optional | `1` — aging policy: extra expected days per story point; expected = base + perPoint×points, unpointed = base only (v1.58) |
 | `JIRA_OFFSET_FILE` | mcp-jira | optional | `<mcp-jira pkg>/.invokeboard-offset.json` — JSON store for the offset ledger (v1.26) |
 | `JIRA_TEAM_FILE` | mcp-jira | optional | `<mcp-jira pkg>/.invokeboard-team.json` — JSON store for the per-board team roster (v1.8) |
+| `JIRA_DRAFT_PLAN_FILE` | mcp-jira | optional | `<mcp-jira pkg>/.invokeboard-draft-plan.json` — JSON store for per-PO-sprint draft capacity plans (v1.68) |
 | `GITHUB_TOKEN` | mcp-github | yes (no default) | — |
 | `GITHUB_REPO` | mcp-github | optional (used as default repo) | — |
 | `MCP_JIRA_HTTP_PORT` | mcp-jira | optional | `4001` |
@@ -1097,6 +1098,38 @@ reusing `reportMath.ts` (`makeDodPredicate`/`computeSprintPoints`/`computeByAssi
 - Registered MCP tool; joins the AI Q&A read-allowlist (§4.9, 18 → **19** read tools).
   jira tools **42 → 43** (smoke expected-tools list +1; NOT in the empty-input-validation smoke
   loop — all fields optional, `{}` is valid, same class as `get_velocity`). Keyless/offline tests.
+
+### 4.30 `get_draft_plan` / `set_draft_plan` (v1.68, ADR-079 — PO draft capacity plan)
+
+A PO-side DRAFT mapping of a PO sprint's tickets onto Dev-board team members, used by the
+Planning page's "Draft Capacity Plan" card to sanity-check ticket load against per-developer
+capacity BEFORE real assignment. Same bridge-side store pattern as §4.21 (json | sqlite via the
+storage port, ADR-077) — NOT a Jira object. **Draft only: these tools NEVER write to Jira**;
+real assignment remains `assign_issue` (§4.15) from the Dev board's Planning/Linking flow.
+
+```ts
+export interface DraftAssignment { accountId: string; displayName: string }
+```
+
+- **`get_draft_plan`** — **Input:** `{ sprintId: number }` (the PO sprint). **Output:**
+  `{ sprintId: number; devSprintId: number | null; assignments: Record<string /*issueKey*/, DraftAssignment> }`
+  (no draft saved → `{ sprintId, devSprintId: null, assignments: {} }`).
+- **`set_draft_plan`** (full-replace per sprint) — **Input:**
+  `{ sprintId: number; devSprintId?: number | null; assignments: Record<string, { accountId: string (1+); displayName: string (1+) }> }`
+  (≤ 300 entries; every `assignments` key must match the §4.4 ticketKey regex → else `400 VALIDATION`).
+  Replaces the sprint's whole draft; `devSprintId` omitted → stored as `null`. Empty `assignments`
+  with `devSprintId` null/omitted **deletes** the sprint's entry from the store. **Output:** the
+  updated `{ sprintId, devSprintId, assignments }` (same shape as `get_draft_plan`).
+- Store name `draft-plan` — env `JIRA_DRAFT_PLAN_FILE` (§3), default
+  `<mcp-jira>/.invokeboard-draft-plan.json`, git-ignored. Registered in `storage/registry.ts`
+  (`SHARED_STORE_NAMES` + override map) so the json `*_FILE` override and the sqlite auto-import
+  both apply (ADR-077). Store shape:
+  `{ "<sprintId>": { "devSprintId": number | null, "assignments": { "<issueKey>": DraftAssignment } } }`.
+  Helpers in `src/lib/draftPlanStore.ts` (`readDraftPlans()`/`writeDraftPlans()`, missing/corrupt → `{}`).
+- Both registered MCP tools (stdio + `/api/tools` + bridge) — jira tools 43 → **45**;
+  `get_draft_plan` joins the AI Q&A read-allowlist (§4.9, 19 → **20** read tools). Tests point
+  `JIRA_DRAFT_PLAN_FILE` at a temp path; keyless/offline; cover round-trip, full-replace,
+  clear-deletes-entry, bad issue key → VALIDATION, missing/corrupt-file tolerance.
 
 ## 5. mcp-github tools (Phase 2) — exact IO
 
@@ -3031,3 +3064,28 @@ No tool names, routes, ports, or error codes change. The rename touches identity
     react-app 950 → **958** (+8: 5 Admin console sharing-checkbox/email-edit/inherited-badge
     cases, 3 Connections "Account" card password-change cases); mcp-github unchanged at 57. Total
     **1,641**; smoke 55/55.
+
+## Changelog v1.68 (2026-07-21 — PO draft capacity plan: dev roster + capacity on the PO Planning page; ADR-079)
+
+195. **§4.30 — `get_draft_plan` / `set_draft_plan`.** New per-PO-sprint store tools (same §4.21
+    bridge-side store pattern, storage port json|sqlite, ADR-077): a DRAFT mapping of the PO
+    sprint's tickets onto Dev-board team members (`assignments: Record<issueKey, { accountId,
+    displayName }>` + the paired `devSprintId`). Full-replace per sprint; empty assignments deletes
+    the entry. **Never writes to Jira** — real assignment remains `assign_issue` (§4.15) on the Dev
+    board. jira tools 43 → **45**; `get_draft_plan` joins the AI Q&A read-allowlist (19 → **20**).
+196. **§3 — `JIRA_DRAFT_PLAN_FILE`** (optional, default `<mcp-jira>/.invokeboard-draft-plan.json`);
+    storage `registry.ts` gains the `draft-plan` name (json override + sqlite auto-import, ADR-077).
+197. **react-app — Draft Capacity Plan card (PO board Planning only).** Dev-board roster tiles with
+    per-developer capacity in points (ADR-047 model: `requiredPoints − working leave days`, leaves
+    read from a PAIRED Dev sprint — default picked by date overlap with the PO sprint, overridable
+    via a native select). PO ticket chips drag-and-drop onto developer tiles PLUS a per-ticket
+    native "Draft to…" select fallback (ADR-009 — no dnd dependency); per-tile drafted-points total
+    with an over/under delta chip (advisory only, never blocking); persisted via §4.30 with
+    optimistic save + rollback; in-card "Manage dev team" = the existing `TeamManager` bound to the
+    Dev board id (why devs "didn't show" before: rosters are per-board by design, ADR-019). The
+    card is draft-only and never calls `assign_issue`.
+198. **Tests**: mcp-jira 626 → **644** (+18: 17 draft-plan store/tool cases + 1 AI read-allowlist
+    growth); react-app 958 → **1031** (+73: pairing 13, draft rollups 15, client 7, useDraftPlan
+    hook 10, DraftPlanCard 25, Planning wiring 3); mcp-github unchanged at 57. Total **1,732**;
+    smoke 55/55 → **60/60** (tool count 43 → 45 verified). react-app package version (the UI
+    version pill, v1.13.1) bumped 1.65.0 → **1.68.0** — v1.66/v1.67 had skipped the bump.
