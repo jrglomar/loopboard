@@ -39,6 +39,9 @@ const TEMPLATE = {
 const boss = {
   id: "u1", email: "boss@team.com", role: "admin" as const, bootstrapAdmin: true,
   createdAt: "2026-01-01T00:00:00Z", connections: { jira: true, github: true, ai: false }, config: {},
+  // v1.67 (ADR-078) — owns Jira + GitHub, nothing to inherit (borrows from nobody).
+  effective: { jira: { status: "own" }, github: { status: "own" }, ai: { status: "none" } },
+  sharedProviders: null,
   credentialSourceUserId: null, sharedFrom: null, allowWrites: false, disabled: false,
   readOnly: false, canBeSource: true,
 };
@@ -46,12 +49,21 @@ const dev = {
   id: "u2", email: "dev@team.com", role: "user" as const, bootstrapAdmin: false,
   createdAt: "2026-01-02T00:00:00Z", connections: { jira: false, github: false, ai: false },
   config: { JIRA_PO_BOARD_ID: "999" },
+  effective: { jira: { status: "none" }, github: { status: "none" }, ai: { status: "none" } },
+  sharedProviders: null,
   credentialSourceUserId: null, sharedFrom: null, allowWrites: false, disabled: false,
   readOnly: false, canBeSource: false,
 };
 const viewer = {
   id: "u3", email: "viewer@team.com", role: "user" as const, bootstrapAdmin: false,
   createdAt: "2026-01-03T00:00:00Z", connections: { jira: false, github: false, ai: false }, config: {},
+  // v1.67 (ADR-078) — borrows boss's Jira + GitHub (share-all, sharedProviders unset); no AI to borrow.
+  effective: {
+    jira: { status: "inherited", via: "boss@team.com" },
+    github: { status: "inherited", via: "boss@team.com" },
+    ai: { status: "none" },
+  },
+  sharedProviders: null,
   credentialSourceUserId: "u1", sharedFrom: "boss@team.com", allowWrites: false, disabled: false,
   readOnly: true, canBeSource: false,
 };
@@ -176,7 +188,9 @@ describe("Admin user CRUD + shared credentials (v1.46)", () => {
     fireEvent.click(screen.getByLabelText(/allow jira changes/i));
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
     await waitFor(() =>
-      expect(api.updateUser).toHaveBeenCalledWith("u3", { credentialSourceUserId: "u1", allowWrites: true })
+      expect(api.updateUser).toHaveBeenCalledWith("u3", {
+        email: "viewer@team.com", credentialSourceUserId: "u1", allowWrites: true, sharedProviders: null,
+      })
     );
     expect(api.putUserConfig).not.toHaveBeenCalled(); // board overrides unchanged → access-only save
   });
@@ -215,6 +229,87 @@ describe("Admin user CRUD + shared credentials (v1.46)", () => {
   });
 });
 
+describe("Granular per-provider sharing + email edit (v1.67, ADR-078)", () => {
+  it("shows the 3-state connection indicator: own, inherited-via, and none", async () => {
+    api.getAdminUsers.mockResolvedValue({ users: [boss, viewer], globalConfig: {} });
+    render(<Admin />);
+    await waitFor(() => screen.getByText("viewer@team.com"));
+    // viewer borrows boss's Jira + GitHub (share-all default) but has no AI to borrow — unique to
+    // the viewer row (boss's own badges never say "via").
+    expect(screen.getByText("Jira via boss@team.com")).toBeTruthy();
+    expect(screen.getByText("GitHub via boss@team.com")).toBeTruthy();
+    expect(screen.queryByText(/AI via/i)).toBeNull(); // nothing to inherit — plain "none" badge
+  });
+
+  it("creates a user with a restricted sharedProviders list when not all boxes stay checked", async () => {
+    render(<Admin />);
+    await waitFor(() => screen.getByText("boss@team.com"));
+
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "partial@team.com" } });
+    fireEvent.change(screen.getByLabelText("Temporary password"), { target: { value: "password123" } });
+    fireEvent.change(screen.getByLabelText("Credentials"), { target: { value: "u1" } });
+    // All three default CHECKED; uncheck Jira — only GitHub + AI stay shared.
+    fireEvent.click(screen.getByLabelText("Share Jira"));
+    fireEvent.click(screen.getByRole("button", { name: /create user/i }));
+
+    await waitFor(() =>
+      expect(api.createUser).toHaveBeenCalledWith({
+        email: "partial@team.com", password: "password123", role: "user",
+        credentialSourceUserId: "u1", allowWrites: false, sharedProviders: ["github", "ai"],
+      })
+    );
+  });
+
+  it("omits sharedProviders entirely when all three boxes stay checked (legacy share-all)", async () => {
+    render(<Admin />);
+    await waitFor(() => screen.getByText("boss@team.com"));
+
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "full@team.com" } });
+    fireEvent.change(screen.getByLabelText("Temporary password"), { target: { value: "password123" } });
+    fireEvent.change(screen.getByLabelText("Credentials"), { target: { value: "u1" } });
+    fireEvent.click(screen.getByRole("button", { name: /create user/i }));
+
+    await waitFor(() =>
+      expect(api.createUser).toHaveBeenCalledWith({
+        email: "full@team.com", password: "password123", role: "user",
+        credentialSourceUserId: "u1", allowWrites: false,
+      })
+    );
+  });
+
+  it("restricts sharedProviders for an existing user via the combined save", async () => {
+    api.getAdminUsers.mockResolvedValue({ users: [boss, viewer], globalConfig: {} });
+    render(<Admin />);
+    await waitFor(() => screen.getByText("viewer@team.com"));
+    openManage(1);
+    await waitFor(() => screen.getByRole("button", { name: /save changes/i }));
+    fireEvent.click(screen.getByLabelText("Share Jira")); // viewer's sharedProviders was null (share-all)
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    await waitFor(() =>
+      expect(api.updateUser).toHaveBeenCalledWith("u3", {
+        email: "viewer@team.com", credentialSourceUserId: "u1", allowWrites: false,
+        sharedProviders: ["github", "ai"],
+      })
+    );
+  });
+
+  it("edits a user's email as part of the combined save", async () => {
+    render(<Admin />);
+    await waitFor(() => screen.getByText("dev@team.com"));
+    openManage(1);
+    await waitFor(() => screen.getByRole("button", { name: /save changes/i }));
+    // Two "Email" fields exist while a panel is expanded: AddUserCard's, and this row's setup form.
+    const emailInputs = screen.getAllByLabelText("Email");
+    fireEvent.change(emailInputs[emailInputs.length - 1], { target: { value: "dev2@team.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+    await waitFor(() =>
+      expect(api.updateUser).toHaveBeenCalledWith("u2", {
+        email: "dev2@team.com", credentialSourceUserId: null, allowWrites: false, sharedProviders: null,
+      })
+    );
+  });
+});
+
 describe("Admin user setup — combined save + unsaved guard (v1.52, ADR-063)", () => {
   it("saves access AND board overrides in one click when both changed", async () => {
     api.getAdminUsers.mockResolvedValue({ users: [boss, viewer], globalConfig: {} });
@@ -226,7 +321,9 @@ describe("Admin user setup — combined save + unsaved guard (v1.52, ADR-063)", 
     fireEvent.change(document.getElementById("u-u3-JIRA_DEV_BOARD_ID") as HTMLInputElement, { target: { value: "1038" } });
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
     await waitFor(() =>
-      expect(api.updateUser).toHaveBeenCalledWith("u3", { credentialSourceUserId: "u1", allowWrites: true })
+      expect(api.updateUser).toHaveBeenCalledWith("u3", {
+        email: "viewer@team.com", credentialSourceUserId: "u1", allowWrites: true, sharedProviders: null,
+      })
     );
     await waitFor(() => expect(api.putUserConfig).toHaveBeenCalledWith("u3", { JIRA_DEV_BOARD_ID: "1038" }));
   });

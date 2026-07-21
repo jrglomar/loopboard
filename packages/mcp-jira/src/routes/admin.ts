@@ -24,7 +24,7 @@ import {
 } from "../lib/userStore.js";
 import { adminConfigSchema } from "../lib/adminConfig.js";
 import { hashPassword } from "../lib/auth/password.js";
-import { isDelegated } from "../lib/delegation.js";
+import { isDelegated, getEffectiveConnection } from "../lib/delegation.js";
 
 export const adminRouter = express.Router();
 
@@ -56,6 +56,20 @@ function connFlags(userId: string) {
   };
 }
 
+/**
+ * v1.67 (ADR-078) — per-provider status the admin console can render at a glance: the user's OWN
+ * connection, one INHERITED from a credential source (with the source's email), or NONE — distinct
+ * from the `connections` (own-only) flags, which can't tell "borrowed" apart from "absent".
+ */
+type ProviderStatus = { status: "own" } | { status: "inherited"; via: string } | { status: "none" };
+
+function effectiveStatus(userId: string, provider: "jira" | "github" | "ai"): ProviderStatus {
+  const eff = getEffectiveConnection(userId, provider);
+  if (!eff) return { status: "none" };
+  if (eff.viaUserId === null) return { status: "own" };
+  return { status: "inherited", via: findUserById(eff.viaUserId)?.email ?? "" };
+}
+
 /** Safe-to-surface admin view of a user (no secrets). */
 function userView(u: StoredUser) {
   const sourceId = u.credentialSourceUserId ?? null;
@@ -67,12 +81,21 @@ function userView(u: StoredUser) {
     bootstrapAdmin: isAdminEmail(u.email), // admin via ADMIN_EMAILS → can't be demoted here
     createdAt: u.createdAt,
     connections: own, // the user's OWN connections (not the borrowed ones)
+    // v1.67 (ADR-078) — own / inherited-via / none per provider, so the admin can tell a borrowed
+    // token apart from a genuinely absent one at a glance.
+    effective: {
+      jira: effectiveStatus(u.id, "jira"),
+      github: effectiveStatus(u.id, "github"),
+      ai: effectiveStatus(u.id, "ai"),
+    },
     config: getUserConfig(u.id), // admin-set per-user overrides (non-secret)
     // v1.46 (ADR-056) — shared credentials
     credentialSourceUserId: sourceId,
     sharedFrom: sourceId ? (findUserById(sourceId)?.email ?? "") : null,
     allowWrites: u.allowWrites === true,
     disabled: u.disabled === true,
+    /** v1.67 (ADR-078) — undefined/absent = legacy share-all; an explicit array restricts it. */
+    sharedProviders: u.sharedProviders ?? null,
     /** Effective: a borrower can't mutate Jira unless allowWrites. */
     readOnly: sourceId !== null && !own.jira && u.allowWrites !== true,
     /** Eligible to lend credentials to others: owns a Jira connection and borrows from nobody. */
@@ -144,6 +167,8 @@ const createUserSchema = z.object({
   credentialSourceUserId: z.string().min(1).optional(),
   /** Let a borrower mutate Jira (writes are attributed to the token owner). */
   allowWrites: z.boolean().optional(),
+  /** v1.67 (ADR-078) — restrict fallback-sharing to only these providers. Omitted = share all. */
+  sharedProviders: z.array(z.enum(["jira", "github", "ai"])).optional(),
 });
 
 // POST /api/admin/users — create an account (optionally on shared credentials).
@@ -172,6 +197,7 @@ adminRouter.post("/api/admin/users", requireAdmin, (req: Request, res: Response)
   const created = createUser(body.email, hashPassword(body.password), role, {
     ...(body.credentialSourceUserId ? { credentialSourceUserId: body.credentialSourceUserId } : {}),
     ...(body.allowWrites !== undefined ? { allowWrites: body.allowWrites } : {}),
+    ...(body.sharedProviders !== undefined ? { sharedProviders: body.sharedProviders } : {}),
   });
   res.status(201).json({ ok: true, data: userView(created) });
 });
@@ -183,6 +209,8 @@ const updateUserSchema = z.object({
   credentialSourceUserId: z.string().min(1).nullable().optional(),
   allowWrites: z.boolean().optional(),
   disabled: z.boolean().optional(),
+  /** v1.67 (ADR-078) — null clears the restriction back to share-all. */
+  sharedProviders: z.array(z.enum(["jira", "github", "ai"])).nullable().optional(),
 });
 
 // PUT /api/admin/users/:id — update account fields, delegation, write access, disabled state.
@@ -237,6 +265,7 @@ adminRouter.put("/api/admin/users/:id", requireAdmin, (req: Request, res: Respon
   if (body.credentialSourceUserId !== undefined) patch.credentialSourceUserId = body.credentialSourceUserId;
   if (body.allowWrites !== undefined) patch.allowWrites = body.allowWrites;
   if (body.disabled !== undefined) patch.disabled = body.disabled;
+  if (body.sharedProviders !== undefined) patch.sharedProviders = body.sharedProviders;
 
   const updated = updateUser(target.id, patch);
   res.json({ ok: true, data: userView(updated as StoredUser) });

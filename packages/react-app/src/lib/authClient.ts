@@ -57,3 +57,12 @@ export function login(email: string, password: string): Promise<AuthUser> {
 export function logout(): Promise<{ loggedOut: boolean }> {
   return credFetch<{ loggedOut: boolean }>("/api/auth/logout", "POST");
 }
+
+/**
+ * v1.67 (ADR-078) — self-service password change for the signed-in user (any role). Throws
+ * `401 INVALID_PASSWORD` when `currentPassword` doesn't match; `400 VALIDATION` when `newPassword`
+ * is under 8 chars.
+ */
+export function changePassword(currentPassword: string, newPassword: string): Promise<{ changed: boolean }> {
+  return credFetch<{ changed: boolean }>("/api/auth/password", "PUT", { currentPassword, newPassword });
+}

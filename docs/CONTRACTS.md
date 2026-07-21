@@ -1654,6 +1654,11 @@ timing-safe verify). No native deps (Node `crypto` + JSON store, mirroring §4 s
   `409 EMAIL_TAKEN` if the email exists.
 - `POST /api/auth/login` `{ email, password }` → sets cookie; `{ email }`. `401 BAD_CREDENTIALS` on mismatch.
 - `POST /api/auth/logout` → clears cookie. `GET /api/auth/me` → `{ email }` or `401 UNAUTHENTICATED`.
+- `PUT /api/auth/password` `{ currentPassword, newPassword(≥8) }` (v1.67, ADR-078; requires auth,
+  any role) → verifies `currentPassword` against the stored hash, then updates it;
+  `{ ok, data: { changed: true } }`. `401 INVALID_PASSWORD` on mismatch; `400 VALIDATION` if
+  `newPassword` is under 8 chars. Self-service — distinct from the admin's password RESET
+  (`PUT /api/admin/users/:id { password }`, §9.8.4), which doesn't require the current password.
 
 ### 8.4 Connections (all require auth; tokens NEVER returned)
 
@@ -1850,6 +1855,54 @@ source; config inheritance (source ← own); `canWriteJira` false→true on `all
 resolve/no login; admin CRUD happy paths + every guard; `403 READ_ONLY_USER` on a Jira-write tool and
 **no** 403 on a local-store tool. Frontend: create-with-sharing, source list filtered to `canBeSource`,
 read-only badge, grant-writes, disable, two-step delete, password reset.
+
+---
+
+### 9.8.6 Granular per-provider sharing (v1.67, ADR-078)
+
+Closes the one gap §9.8's per-provider `getEffectiveConnection` resolution left open: today, if
+`credentialSourceUserId` is set, EVERY provider the user hasn't connected themselves silently
+borrows from the source. There was no way to say "only share GitHub."
+
+- `StoredUser` gains `sharedProviders?: ConnectionProvider[]`. **Undefined/absent = share ALL
+  providers the user doesn't own** (the exact §9.8 behavior — every existing shared account is
+  unaffected, no migration). An explicit array restricts fallback-sharing to only the listed
+  providers; a provider left off the list resolves to `null` (shows disconnected) even when the
+  source genuinely has that connection. A user's OWN connection for a provider still always wins,
+  regardless of `sharedProviders` — this only narrows the fallback, never the override.
+- `getEffectiveConnection(userId, provider)`: after resolving `sourceId`, checks
+  `user.sharedProviders` BEFORE falling back — `undefined` or an array that includes `provider`
+  proceeds to borrow; otherwise returns `null`.
+- **Admin CRUD**: `createUserSchema`/`updateUserSchema` (§9.8.4) gain
+  `sharedProviders?: ("jira"|"github"|"ai")[]` (update: `.nullable()` — `null` clears the
+  restriction back to share-all, same convention as `credentialSourceUserId: null`).
+- **Admin view additions**: `userView()` keeps `connections` (own-only booleans, unchanged shape)
+  and adds:
+  - `effective: { jira, github, ai }`, each a `ProviderStatus` = `{ status: "own" } |
+    { status: "inherited"; via: string } | { status: "none" }`, computed via
+    `getEffectiveConnection` — lets the admin see at a glance whether a provider is the user's own,
+    borrowed (and from whom), or genuinely absent, which the own-only `connections` flags can't
+    distinguish (borrowed and absent both read `false` there).
+  - `sharedProviders: ("jira"|"github"|"ai")[] | null` — the restriction as stored (`null` =
+    share-all).
+- **Admin UI**: wherever a credential source is picked (`AddUserCard`, `UserSetupForm`), three
+  checkboxes — "Share Jira" / "Share GitHub" / "Share AI" — default to CHECKED (preserves the
+  legacy all-shared default). `AddUserCard` omits `sharedProviders` from the create payload
+  entirely when all three stay checked; `UserSetupForm` always sends it (`null` when all three are
+  checked) as part of the existing combined "Save changes" access payload (§9.6's v1.52 pattern),
+  alongside a new `email` field (see below). The per-user connection badges in the users list
+  become the 3-state indicator described above instead of a plain on/off badge.
+- **Admin UI — email edit**: `UserSetupForm` gains an `Email` input pre-filled from the user's
+  current email, folded into the same access-dirty tracking and the same single "Save changes"
+  action. No new endpoint — `PUT /api/admin/users/:id` has accepted `email` since §9.8.4 (v1.46);
+  the admin console simply never exposed a field for it until now.
+
+Keyless/offline: `getEffectiveConnection` restriction cases (share-all default; restricted list;
+provider absent from the list → null even when the source has it; own connection still wins);
+admin CRUD create/update with `sharedProviders` + the `effective`/`sharedProviders` view fields
+(own / inherited-via / none). Frontend: the three checkboxes on create and on the combined save
+(checked-by-default, omit-when-all-checked on create, always-send on update), the 3-state badge,
+and the new email field.
 
 ---
 
@@ -2942,3 +2995,39 @@ No tool names, routes, ports, or error codes change. The rename touches identity
     startup — loudly logged, JSON files left untouched as a natural backup. DEPLOYMENT.md:
     production may set `STORAGE_DRIVER=sqlite`; backup guidance covers the single sqlite file;
     the one-replica rule is unchanged (sqlite is still per-instance).
+
+## Changelog v1.67 (2026-07-21 — granular per-provider credential sharing + admin email edit + self-service password change; ADR-078)
+
+190. **§9.8.6 — granular per-provider sharing.** `StoredUser.sharedProviders?: ConnectionProvider[]`
+    (undefined = share ALL providers the user doesn't own, the exact legacy §9.8 behavior — zero
+    migration for existing shared accounts). An explicit array restricts fallback-sharing to only
+    the listed providers; `getEffectiveConnection` returns `null` for a provider left off the list
+    even when the credential source genuinely has that connection. A user's own connection for a
+    provider still always wins. Admin CRUD (`POST`/`PUT /api/admin/users*`) accepts it; `PUT`
+    treats `null` as clearing the restriction back to share-all (same convention as
+    `credentialSourceUserId: null`).
+191. **Admin view: own vs inherited vs none.** `userView()` adds `effective: { jira, github, ai }`
+    (each `{status:"own"} | {status:"inherited", via} | {status:"none"}`, via `getEffectiveConnection`)
+    and `sharedProviders`, alongside the unchanged own-only `connections` flags. The admin console's
+    per-user connection badges become a 3-state indicator ("Jira" own / "Jira via admin@co.com"
+    inherited / "Jira" none) instead of a plain on/off badge, so an admin can tell a borrowed token
+    apart from a genuinely absent one at a glance — previously both read `false`.
+192. **Admin UI: three sharing checkboxes + email edit.** "Share Jira" / "Share GitHub" / "Share AI"
+    checkboxes (default CHECKED) appear next to the existing "allow Jira writes" checkbox wherever a
+    credential source is picked (`AddUserCard`, `UserSetupForm`); create omits `sharedProviders` when
+    all three stay checked (byte-identical legacy payload), the combined "Save changes" (v1.52,
+    ADR-063) always sends it (`null` = all-checked). `UserSetupForm` also gains an `Email` input
+    (the server has accepted `email` on `PUT /api/admin/users/:id` since ADR-056/v1.46 — the admin
+    console just never exposed a field for it), folded into the same access-dirty tracking and save.
+193. **§8.3 — self-service password change.** `PUT /api/auth/password` `{ currentPassword,
+    newPassword(≥8) }` (any signed-in role; `requireAuth`) verifies the current password
+    (`verifyPassword`) before updating the hash — `401 INVALID_PASSWORD` on mismatch, `400
+    VALIDATION` on a too-short new password. Distinct from the admin's password RESET
+    (`PUT /api/admin/users/:id { password }`, §9.8.4), which is an admin acting on someone else's
+    account and doesn't require the old password. Surfaced as an "Account" card on the app-wide
+    (not role-gated) Connections page, reachable by both "user" and "admin" roles.
+194. **Tests**: mcp-jira 613 → **626** (+13: 5 delegation `sharedProviders` restriction cases, 4
+    admin-view own/inherited/none + `sharedProviders` CRUD, 4 self-service password-change route);
+    react-app 950 → **958** (+8: 5 Admin console sharing-checkbox/email-edit/inherited-badge
+    cases, 3 Connections "Account" card password-change cases); mcp-github unchanged at 57. Total
+    **1,641**; smoke 55/55.

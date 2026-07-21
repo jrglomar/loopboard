@@ -275,6 +275,69 @@ describe("Admin user CRUD + shared credentials (v1.46, ADR-056)", () => {
   });
 });
 
+// ── v1.67 (ADR-078): granular per-provider sharing + effective status in the admin view ────────
+
+describe("Granular per-provider sharing + effective status (v1.67, ADR-078)", () => {
+  let adminCookie: string;
+  let bossId: string;
+
+  beforeAll(async () => {
+    adminCookie = (await req("POST", "/api/auth/login", { email: "boss@team.com", password: "password123" })).cookie!;
+    bossId = findUserByEmail("boss@team.com")!.id;
+    // boss already has Jira + GitHub from the earlier describe; add AI too so all three are shareable.
+    upsertConnection(bossId, "ai", {
+      enc: seal("boss-ai-token"),
+      meta: { provider: "github", model: "openai/gpt-4o-mini", hint: "…ai" },
+      updatedAt: new Date().toISOString(),
+    });
+  });
+
+  it("creates a user restricted to sharing only GitHub", async () => {
+    const r = await req("POST", "/api/admin/users",
+      { email: "partial@team.com", password: "password123", credentialSourceUserId: bossId, sharedProviders: ["github"] },
+      adminCookie);
+    expect(r.status).toBe(201);
+    expect(r.json.data.sharedProviders).toEqual(["github"]);
+    expect(r.json.data.effective.github).toEqual({ status: "inherited", via: "boss@team.com" });
+    expect(r.json.data.effective.jira).toEqual({ status: "none" }); // NOT shared, even though boss owns Jira
+    expect(r.json.data.effective.ai).toEqual({ status: "none" });
+  });
+
+  it("updating sharedProviders to null restores share-all", async () => {
+    const users = await req("GET", "/api/admin/users", undefined, adminCookie);
+    const target = users.json.data.users.find((u: { email: string }) => u.email === "partial@team.com");
+
+    const upd = await req("PUT", `/api/admin/users/${target.id}`, { sharedProviders: null }, adminCookie);
+    expect(upd.status).toBe(200);
+    expect(upd.json.data.sharedProviders).toBeNull();
+    expect(upd.json.data.effective.jira).toEqual({ status: "inherited", via: "boss@team.com" });
+    expect(upd.json.data.effective.ai).toEqual({ status: "inherited", via: "boss@team.com" });
+  });
+
+  it("effective status reports OWN when the user has their own connection, even while borrowing others", async () => {
+    const created = await req("POST", "/api/admin/users",
+      { email: "ownjira@team.com", password: "password123", credentialSourceUserId: bossId }, adminCookie);
+    const targetId = created.json.data.id;
+    upsertConnection(targetId, "jira", {
+      enc: seal("own-jira-token"),
+      meta: { baseUrl: "https://own.atlassian.net", email: "ownjira@team.com", hint: "…own" },
+      updatedAt: new Date().toISOString(),
+    });
+    const view = await req("GET", "/api/admin/users", undefined, adminCookie);
+    const u = view.json.data.users.find((x: { email: string }) => x.email === "ownjira@team.com");
+    expect(u.effective.jira).toEqual({ status: "own" });
+    expect(u.effective.github).toEqual({ status: "inherited", via: "boss@team.com" }); // still borrowed
+  });
+
+  it("reports NONE when a user has neither an own connection nor a credential source", async () => {
+    const created = await req("POST", "/api/admin/users", { email: "solo@team.com", password: "password123" }, adminCookie);
+    expect(created.json.data.effective).toEqual({
+      jira: { status: "none" }, github: { status: "none" }, ai: { status: "none" },
+    });
+    expect(created.json.data.sharedProviders).toBeNull();
+  });
+});
+
 // ── v1.47 (ADR-057): reusable admin config templates ──────────────────────────
 
 describe("Admin config templates (v1.47, ADR-057)", () => {

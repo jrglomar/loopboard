@@ -120,3 +120,43 @@ describe("Task Helper auth (v1.44)", () => {
     expect(r.json.error.code).toBe("TASK_HELPER_UNAVAILABLE");
   });
 });
+
+// v1.67 (ADR-078) — self-service password change, any signed-in role. Distinct from the admin's
+// password RESET (which doesn't require the current password): this one proves the current one first.
+describe("Self-service password change (v1.67, ADR-078)", () => {
+  let cookie: string;
+
+  beforeAll(async () => {
+    const s = await req("POST", "/api/auth/signup", { email: "frank@team.com", password: "password123" });
+    cookie = s.cookie!;
+  });
+
+  it("401s without a session", async () => {
+    const r = await req("PUT", "/api/auth/password", { currentPassword: "password123", newPassword: "newpassword456" });
+    expect(r.status).toBe(401);
+  });
+
+  it("400s a newPassword under 8 chars (validation)", async () => {
+    const r = await req("PUT", "/api/auth/password", { currentPassword: "password123", newPassword: "short" }, cookie);
+    expect(r.status).toBe(400);
+    expect(r.json.error.code).toBe("VALIDATION");
+  });
+
+  it("401s INVALID_PASSWORD when currentPassword doesn't match", async () => {
+    const r = await req("PUT", "/api/auth/password", { currentPassword: "wrong-password", newPassword: "newpassword456" }, cookie);
+    expect(r.status).toBe(401);
+    expect(r.json.error.code).toBe("INVALID_PASSWORD");
+  });
+
+  it("changes the password on the happy path, and the new password logs in", async () => {
+    const r = await req("PUT", "/api/auth/password", { currentPassword: "password123", newPassword: "newpassword456" }, cookie);
+    expect(r.status).toBe(200);
+    expect(r.json.data).toEqual({ changed: true });
+
+    const oldLogin = await req("POST", "/api/auth/login", { email: "frank@team.com", password: "password123" });
+    expect(oldLogin.status).toBe(401);
+
+    const newLogin = await req("POST", "/api/auth/login", { email: "frank@team.com", password: "newpassword456" });
+    expect(newLogin.status).toBe(200);
+  });
+});
