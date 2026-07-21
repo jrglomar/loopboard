@@ -3089,3 +3089,50 @@ No tool names, routes, ports, or error codes change. The rename touches identity
     hook 10, DraftPlanCard 25, Planning wiring 3); mcp-github unchanged at 57. Total **1,732**;
     smoke 55/55 → **60/60** (tool count 43 → 45 verified). react-app package version (the UI
     version pill, v1.13.1) bumped 1.65.0 → **1.68.0** — v1.66/v1.67 had skipped the bump.
+
+## Changelog v1.69 (2026-07-21 — Draft Capacity Plan chips gain the usual ticket actions + rename; ADR-080, react-app only)
+
+199. **react-app only — no tool/route/env changes.** The v1.68 Draft Capacity Plan chips dropped
+    the per-ticket actions the Assign Tickets table has; the PO had to scroll to the table for
+    points/status/sprint edits. The card's ticket chips (unplanned AND drafted-in-tile) now carry:
+    inline story-points input; and a per-chip "Edit" expander with **rename** (new `SummaryCell` →
+    `update_ticket { summary }` — §4.5 accepted `summary` all along, so NO backend change), status
+    change (lazy `get_transitions` → `transition_issue`), and move-to-sprint
+    (`move_issue_to_sprint`). Field edits refetch the PO sprint so tile totals/capacity deltas stay
+    truthful; a move initiated FROM the card also removes the ticket's draft entry in the same
+    action (a deliberate move must not leave a "Needs attention" stale row). The expanded editor
+    carries the note "These edits change the real Jira ticket." — the card's "Draft only" badge
+    keeps meaning ASSIGNMENTS (`assign_issue` is still never called).
+200. **Shared cells extracted** — `PointsCell`/`StatusCell`/`MoveSprintCell` move verbatim from
+    `AssignmentList.tsx` to `components/ticketCells.tsx` (+ new `SummaryCell`); both cards import
+    them. `PointsCell` gains an optional `onSaved` callback, wired in BOTH cards — in the Assign
+    Tickets table this fixes the pre-existing stale filtered-points summary after an inline points
+    edit. The table's Summary column becomes the same rename-capable `SummaryCell`. New
+    `updateTicketSummary(ticketKey, summary)` client next to `updateTicketPoints` (useJira.ts).
+201. **Ticket breakdown.** The per-chip editor gains "Break down": a dialog that splits a too-big
+    PO story into N new PO stories (2–6 rows, summary + points each), created in the SAME PO
+    sprint via the existing `create_po_ticket` (§4.1 — `storyPoints` + `sprintId` supported
+    already; NO backend change). Sequential per-row creation with per-row success/error (the
+    Linking page's resilient-bulk pattern); succeeded rows lock so a retry never duplicates;
+    optional "set the original's points to 0 after creating" (one `update_ticket` call); on
+    success the sprint refetches — the new stories appear as unplanned chips ready to draft. No
+    PO↔PO Jira link is created (the configured `JIRA_LINK_TYPE` carries PO→Dev dependency
+    semantics, §4.2); each new story's description records "Broken down from <KEY>".
+202. **Capacity-source transparency (fixes the live "every dev shows 8" report).** All-8s means
+    the leaves read for the paired Dev sprint came back empty — a wrong paired sprint, leaves
+    plotted under a different sprint (the Offset Tracker defaults to the ACTIVE sprint while
+    pairing prefers FUTURE on ties), or a per-user store-scope mismatch (ADR-056) all look
+    identical and silent. Three changes: (1) under the Dev-sprint select the card now shows
+    either "N leave/offset day(s) found across M member(s)" or a warning-toned "No leaves or
+    offsets recorded under this Dev sprint — pick the sprint where the team plotted them
+    (Dev-board Planning or the Offset Tracker)"; (2) the AUTO pairing is no longer persisted as
+    a side effect of drafting — only an explicit pick in the select stores `devSprintId` (draft
+    mutations pass through the STORED value, staying `null` until chosen), with an
+    "Auto-paired" label when the default is in use and a "Reset to auto" button when a stored
+    choice exists; (3) tiles show a loading state while the Dev sprint's leaves load instead of
+    flashing full capacity. The unplanned chip's drag affordance is disabled while its editor is
+    expanded (dragging a draggable ancestor hijacks text selection in the rename/points inputs).
+203. **Tests**: react-app 1031 → **1066** (+35: ticketCells 13, DraftPlanCard +18,
+    AssignmentList +4 rename cases; Planning assertions extended in place); mcp-jira/mcp-github
+    unchanged (644/57) — total **1,767**; smoke unchanged **60/60** (no backend surface touched).
+    react-app package version (the UI version pill) bumped 1.68.0 → **1.69.0**.

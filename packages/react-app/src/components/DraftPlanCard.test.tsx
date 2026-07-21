@@ -25,8 +25,21 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
     // mocked draftPlanClient below, so save() exercises real optimistic/rollback logic.
     // v1.59 (ADR-071): idle/empty shape (anti-drift parity — see Reports.test.tsx's comment).
     useMultiSprintReport: vi.fn().mockReturnValue({ data: null, loading: false, error: null, run: vi.fn() }),
+    // v1.69 (ADR-080): the chip editor's PointsCell/SummaryCell (shared ./ticketCells) and the
+    // breakdown dialog call these client-boundary functions directly (not via a hook).
+    updateTicketPoints: vi.fn(),
+    updateTicketSummary: vi.fn(),
+    createPoTicket: vi.fn(),
   };
 });
+
+// v1.69 (ADR-080): the chip editor's StatusCell/MoveSprintCell (shared ./ticketCells) call
+// these directly — same mocking style as AssignmentList.test.tsx.
+vi.mock("../lib/ticketActionsClient", () => ({
+  getTransitions: vi.fn(),
+  transitionIssue: vi.fn(),
+  moveIssueToSprint: vi.fn(),
+}));
 
 // ── Mock the draft-plan client layer (the actual data boundary for useDraftPlan) ─
 
@@ -52,6 +65,7 @@ vi.mock("./TeamManager", () => ({
 
 import * as useJiraModule from "../hooks/useJira";
 import * as draftPlanClientModule from "../lib/draftPlanClient";
+import * as ticketActionsModule from "../lib/ticketActionsClient";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -80,6 +94,18 @@ const PO_SPRINT: SprintRef = {
   state: "future",
   startDate: "2026-06-28T00:00:00.000Z", // Mon
   endDate: "2026-07-11T00:00:00.000Z",
+  completeDate: null,
+  goal: null,
+  boardId: 20,
+};
+
+// v1.69 (ADR-080): a SECOND PO sprint — the move-to-sprint target for chip tests.
+const PO_SPRINT_2: SprintRef = {
+  id: 101,
+  name: "PO Sprint 9",
+  state: "future",
+  startDate: "2026-07-12T00:00:00.000Z",
+  endDate: "2026-07-25T00:00:00.000Z",
   completeDate: null,
   goal: null,
   boardId: 20,
@@ -121,6 +147,10 @@ const SPRINT_DATA = {
 
 const EMPTY_DRAFT: DraftPlan = { sprintId: 100, devSprintId: 300, assignments: {} };
 const DRAFT_PO1_TO_ALICE: DraftPlan = { sprintId: 100, devSprintId: 300, assignments: { "PO-1": ALICE } };
+// v1.69 (ADR-080): devSprintId genuinely UNSTORED (nothing chosen yet) — distinct from
+// EMPTY_DRAFT above, whose devSprintId (300) happens to already equal the paired default,
+// which would mask the non-sticky-pairing fix.
+const NULL_DEV_DRAFT: DraftPlan = { sprintId: 100, devSprintId: null, assignments: {} };
 
 // ── Mock defaults ─────────────────────────────────────────────────────────────
 
@@ -143,6 +173,27 @@ function mockDefaults(draft: DraftPlan = EMPTY_DRAFT) {
       sprintId, devSprintId, assignments,
     })
   );
+
+  // v1.69 (ADR-080): chip-editor + breakdown-dialog client defaults.
+  vi.mocked(useJiraModule.updateTicketPoints).mockResolvedValue({
+    key: "PO-1", url: "https://jira.example.com/browse/PO-1", updatedFields: ["storyPoints"],
+  });
+  vi.mocked(useJiraModule.updateTicketSummary).mockResolvedValue({
+    key: "PO-1", url: "https://jira.example.com/browse/PO-1", updatedFields: ["summary"],
+  });
+  vi.mocked(useJiraModule.createPoTicket).mockResolvedValue({
+    key: "PO-9", url: "https://jira.example.com/browse/PO-9", board: "PO",
+  });
+  vi.mocked(ticketActionsModule.getTransitions).mockResolvedValue({
+    ticketKey: "PO-1",
+    transitions: [{ id: "21", name: "Start Progress", to: { name: "In Progress", category: "inprogress" } }],
+  });
+  vi.mocked(ticketActionsModule.transitionIssue).mockResolvedValue({
+    ticketKey: "PO-1", status: "In Progress", statusCategory: "inprogress",
+  });
+  vi.mocked(ticketActionsModule.moveIssueToSprint).mockResolvedValue({
+    ticketKey: "PO-1", sprintId: PO_SPRINT_2.id,
+  });
 }
 
 function renderCard(props: Partial<React.ComponentProps<typeof DraftPlanCard>> = {}) {
@@ -154,6 +205,7 @@ function renderCard(props: Partial<React.ComponentProps<typeof DraftPlanCard>> =
       devBoardId={10}
       teamRevision={0}
       onTeamChange={vi.fn()}
+      sprints={[PO_SPRINT_2]}
       {...props}
     />
   );
@@ -183,6 +235,18 @@ function getByFullText(tag: string, expected: string): HTMLElement {
     const normalized = element.textContent?.replace(/\s+/g, " ").trim() ?? "";
     return normalized === expected;
   });
+}
+
+/**
+ * v1.69 (ADR-080): renders the card, opens the given chip's "Edit" panel, then
+ * clicks "Break down" and waits for the dialog. Shared by the breakdown tests below.
+ */
+async function openBreakdownFor(issueKey: string, props: Partial<React.ComponentProps<typeof DraftPlanCard>> = {}) {
+  renderCard(props);
+  await waitFor(() => screen.getByText(issueKey));
+  fireEvent.click(screen.getByRole("button", { name: `Edit ${issueKey}` }));
+  fireEvent.click(screen.getByRole("button", { name: `Break down ${issueKey}` }));
+  await screen.findByRole("dialog");
 }
 
 // ── Setup / teardown ──────────────────────────────────────────────────────────
@@ -563,5 +627,323 @@ describe("DraftPlanCard — mutation error", () => {
 
     // Rolled back — PO-1 is unplanned again.
     expect(screen.getByRole("combobox", { name: "Draft PO-1 to a developer" })).toBeTruthy();
+  });
+});
+
+// ── v1.69 (ADR-080): chip "Edit" expander ─────────────────────────────────────
+
+describe("DraftPlanCard — v1.69 (ADR-080) chip expander", () => {
+  it("opens the chip's edit panel on Edit, exposing rename/status/move/break down", async () => {
+    renderCard();
+    await waitFor(() => screen.getByText("PO-1"));
+
+    const editBtn = screen.getByRole("button", { name: "Edit PO-1" });
+    expect(editBtn.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(editBtn);
+
+    expect(editBtn.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("button", { name: "Rename PO-1" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Change status for PO-1" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Move PO-1 to a sprint" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Break down PO-1" })).toBeTruthy();
+    expect(screen.getByText("These edits change the real Jira ticket.")).toBeTruthy();
+  });
+
+  it("v1.69.1: disables the chip's drag affordance while expanded, so text-selection inside the panel doesn't start a drag", async () => {
+    renderCard();
+    await waitFor(() => screen.getByText("PO-1"));
+
+    const editBtn = screen.getByRole("button", { name: "Edit PO-1" });
+    const chip = editBtn.closest("li")!;
+    expect(chip.getAttribute("draggable")).toBe("true");
+
+    fireEvent.click(editBtn); // expand
+
+    expect(chip.getAttribute("draggable")).toBe("false");
+
+    fireEvent.click(editBtn); // collapse
+
+    expect(chip.getAttribute("draggable")).toBe("true");
+  });
+});
+
+// ── v1.69 (ADR-080): chip rename + status flow ────────────────────────────────
+
+describe("DraftPlanCard — v1.69 (ADR-080) chip rename", () => {
+  it("renaming a ticket calls updateTicketSummary and refetches the PO sprint", async () => {
+    const runSpy = vi.fn();
+    vi.mocked(useJiraModule.useActiveSprint).mockReturnValue({
+      data: SPRINT_DATA, loading: false, error: null, run: runSpy,
+    });
+    renderCard();
+    await waitFor(() => screen.getByText("PO-1"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit PO-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rename PO-1" }));
+
+    const input = screen.getByRole("textbox", { name: "New summary for PO-1" });
+    fireEvent.change(input, { target: { value: "PO-1 renamed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save summary for PO-1" }));
+
+    await waitFor(() =>
+      expect(vi.mocked(useJiraModule.updateTicketSummary)).toHaveBeenCalledWith("PO-1", "PO-1 renamed")
+    );
+    await waitFor(() => expect(runSpy).toHaveBeenCalled());
+  });
+});
+
+describe("DraftPlanCard — v1.69 (ADR-080) chip status flow", () => {
+  it("changing status calls transitionIssue and refetches the PO sprint", async () => {
+    const runSpy = vi.fn();
+    vi.mocked(useJiraModule.useActiveSprint).mockReturnValue({
+      data: SPRINT_DATA, loading: false, error: null, run: runSpy,
+    });
+    renderCard();
+    await waitFor(() => screen.getByText("PO-1"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit PO-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Change status for PO-1" }));
+
+    await waitFor(() => expect(vi.mocked(ticketActionsModule.getTransitions)).toHaveBeenCalledWith("PO-1"));
+    const statusSelect = await screen.findByRole("combobox", { name: "New status for PO-1" });
+    await waitFor(() =>
+      expect(Array.from((statusSelect as HTMLSelectElement).options).some((o) => o.text === "In Progress")).toBe(true)
+    );
+
+    fireEvent.change(statusSelect, { target: { value: "21" } });
+
+    await waitFor(() => expect(vi.mocked(ticketActionsModule.transitionIssue)).toHaveBeenCalledWith("PO-1", "21"));
+    await waitFor(() => expect(runSpy).toHaveBeenCalled());
+  });
+});
+
+// ── v1.69 (ADR-080): move from a chip auto-undrafts ───────────────────────────
+
+describe("DraftPlanCard — v1.69 (ADR-080) move from a chip", () => {
+  it("moving a drafted ticket removes its draft entry (stored devSprintId) and refetches the PO sprint", async () => {
+    mockDefaults(DRAFT_PO1_TO_ALICE); // devSprintId stored = 300
+    const runSpy = vi.fn();
+    vi.mocked(useJiraModule.useActiveSprint).mockReturnValue({
+      data: SPRINT_DATA, loading: false, error: null, run: runSpy,
+    });
+    renderCard();
+
+    await waitFor(() => {
+      const select = screen.getByRole("combobox", { name: "Draft PO-1 to a developer" }) as HTMLSelectElement;
+      expect(select.value).toBe("acc-1");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit PO-1" }));
+    const moveSelect = screen.getByRole("combobox", { name: "Move PO-1 to a sprint" });
+    fireEvent.change(moveSelect, { target: { value: String(PO_SPRINT_2.id) } });
+
+    await waitFor(() =>
+      expect(vi.mocked(ticketActionsModule.moveIssueToSprint)).toHaveBeenCalledWith("PO-1", PO_SPRINT_2.id)
+    );
+    // Draft entry removed WITHOUT the moved key, persisting the STORED devSprintId (300) —
+    // not the effective one (which could differ once auto-pairing is non-sticky).
+    await waitFor(() => {
+      expect(vi.mocked(draftPlanClientModule.setDraftPlan)).toHaveBeenCalledWith(100, 300, {});
+    });
+    await waitFor(() => expect(runSpy).toHaveBeenCalled());
+  });
+
+  it("moving a ticket that was never drafted just refetches the PO sprint (no draft write)", async () => {
+    const runSpy = vi.fn();
+    vi.mocked(useJiraModule.useActiveSprint).mockReturnValue({
+      data: SPRINT_DATA, loading: false, error: null, run: runSpy,
+    });
+    renderCard(); // EMPTY_DRAFT default — PO-1 is unplanned
+    await waitFor(() => screen.getByText("PO-1"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit PO-1" }));
+    const moveSelect = screen.getByRole("combobox", { name: "Move PO-1 to a sprint" });
+    fireEvent.change(moveSelect, { target: { value: String(PO_SPRINT_2.id) } });
+
+    await waitFor(() =>
+      expect(vi.mocked(ticketActionsModule.moveIssueToSprint)).toHaveBeenCalledWith("PO-1", PO_SPRINT_2.id)
+    );
+    await waitFor(() => expect(runSpy).toHaveBeenCalled());
+    expect(vi.mocked(draftPlanClientModule.setDraftPlan)).not.toHaveBeenCalled();
+  });
+});
+
+// ── v1.69 (ADR-080): non-sticky auto-pairing ──────────────────────────────────
+
+describe("DraftPlanCard — v1.69 (ADR-080) non-sticky auto-pairing", () => {
+  it("drafting with nothing stored persists devSprintId: null (not the auto-paired id)", async () => {
+    mockDefaults(NULL_DEV_DRAFT);
+    renderCard();
+    await waitFor(() => screen.getByText("PO-1"));
+
+    // The effective/paired default is still 300 (the only future Dev sprint) for capacity...
+    const select = await screen.findByRole("combobox", { name: "Dev sprint (capacity source)" });
+    expect((select as HTMLSelectElement).value).toBe("300");
+
+    // ...but drafting must NOT persist that guess.
+    const draftSelect = screen.getByRole("combobox", { name: "Draft PO-1 to a developer" });
+    fireEvent.change(draftSelect, { target: { value: "acc-1" } });
+
+    await waitFor(() => {
+      expect(vi.mocked(draftPlanClientModule.setDraftPlan)).toHaveBeenCalledWith(100, null, {
+        "PO-1": ALICE,
+      });
+    });
+  });
+});
+
+// ── v1.69 (ADR-080): "Reset to auto" ───────────────────────────────────────────
+
+describe("DraftPlanCard — v1.69 (ADR-080) Reset to auto", () => {
+  it("does not render when nothing is stored", async () => {
+    mockDefaults(NULL_DEV_DRAFT);
+    renderCard();
+    await waitFor(() => screen.getByText("PO-1"));
+    expect(screen.queryByRole("button", { name: "Reset to auto" })).toBeNull();
+  });
+
+  it("appears when a devSprintId is stored and persists null with unchanged assignments", async () => {
+    mockDefaults(DRAFT_PO1_TO_ALICE); // devSprintId stored = 300
+    renderCard();
+
+    const resetBtn = await screen.findByRole("button", { name: "Reset to auto" });
+    fireEvent.click(resetBtn);
+
+    await waitFor(() => {
+      expect(vi.mocked(draftPlanClientModule.setDraftPlan)).toHaveBeenCalledWith(100, null, {
+        "PO-1": ALICE,
+      });
+    });
+  });
+});
+
+// ── v1.69 (ADR-080): "Auto-paired" label ──────────────────────────────────────
+
+describe("DraftPlanCard — v1.69 (ADR-080) Auto-paired label", () => {
+  it("shows an 'Auto-paired' hint when nothing is stored and a paired default is in use", async () => {
+    mockDefaults(NULL_DEV_DRAFT);
+    renderCard();
+    await waitFor(() => screen.getByText("Auto-paired"));
+  });
+
+  it("hides the hint once a devSprintId is stored", async () => {
+    mockDefaults(DRAFT_PO1_TO_ALICE);
+    renderCard();
+    await waitFor(() => screen.getByText("PO-1"));
+    expect(screen.queryByText("Auto-paired")).toBeNull();
+  });
+});
+
+// ── v1.69 (ADR-080): capacity-source transparency ─────────────────────────────
+
+describe("DraftPlanCard — v1.69 (ADR-080) capacity-source transparency", () => {
+  it("shows the leave/offset day count when the paired sprint's leaves are non-empty", async () => {
+    vi.mocked(useJiraModule.useLeaves).mockReturnValue({
+      data: { Alice: { [DEV_WORK_DAYS[0]!]: "VL", [DEV_WORK_DAYS[1]!]: "VL" } },
+      loading: false, error: null, run: vi.fn(), save: vi.fn(),
+    });
+    renderCard();
+    await waitFor(() => screen.getByText("2 leave/offset day(s) found across 1 member(s)"));
+  });
+
+  it("shows a warning when the paired sprint's leaves come back empty", async () => {
+    renderCard(); // default useLeaves -> data: {}
+    await waitFor(() =>
+      screen.getByText(/No leaves or offsets recorded under this Dev sprint/i)
+    );
+  });
+
+  it("shows a loading placeholder for leaves and 'capacity —' on tiles while leaves load", async () => {
+    vi.mocked(useJiraModule.useLeaves).mockReturnValue({
+      data: null, loading: true, error: null, run: vi.fn(), save: vi.fn(),
+    });
+    renderCard();
+    await waitFor(() => screen.getByText("Loading leaves…"));
+    // Neither tile renders a numeric capacity while leaves load.
+    expect(screen.getAllByText(/capacity —/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText(/free$/)).toBeNull();
+    expect(screen.queryByText("At capacity")).toBeNull();
+    expect(screen.queryByText(/over$/)).toBeNull();
+  });
+
+  it("does not show the indicator when the roster is empty", async () => {
+    vi.mocked(useJiraModule.useTeamMembers).mockReturnValue({
+      data: [], loading: false, error: null, run: vi.fn(), save: vi.fn(),
+    });
+    renderCard();
+    await waitFor(() => screen.getByText(/Manage dev team/i));
+    expect(screen.queryByText(/leave\/offset day/i)).toBeNull();
+    expect(screen.queryByText(/No leaves or offsets recorded/i)).toBeNull();
+  });
+});
+
+// ── v1.69 (ADR-080): breakdown dialog ──────────────────────────────────────────
+
+describe("DraftPlanCard — v1.69 (ADR-080) breakdown dialog", () => {
+  it("creates N new PO stories sequentially with sprintId + description provenance, then refetches", async () => {
+    const runSpy = vi.fn();
+    vi.mocked(useJiraModule.useActiveSprint).mockReturnValue({
+      data: SPRINT_DATA, loading: false, error: null, run: runSpy,
+    });
+    await openBreakdownFor("PO-1");
+
+    fireEvent.click(screen.getByRole("button", { name: /Create \(2\)/ }));
+
+    await waitFor(() => expect(vi.mocked(useJiraModule.createPoTicket)).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(useJiraModule.createPoTicket)).toHaveBeenNthCalledWith(1, {
+      summary: "PO-1 summary (part 1)",
+      description: "Broken down from PO-1: PO-1 summary",
+      storyPoints: 0,
+      sprintId: 100,
+    });
+    expect(vi.mocked(useJiraModule.createPoTicket)).toHaveBeenNthCalledWith(2, {
+      summary: "PO-1 summary (part 2)",
+      description: "Broken down from PO-1: PO-1 summary",
+      storyPoints: 0,
+      sprintId: 100,
+    });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Close breakdown dialog" })).toBeTruthy());
+    await waitFor(() => expect(runSpy).toHaveBeenCalled());
+  });
+
+  it("locks succeeded rows on partial failure; only the failed row is retryable and never duplicated", async () => {
+    vi.mocked(useJiraModule.createPoTicket)
+      .mockResolvedValueOnce({ key: "PO-10", url: "https://jira.example.com/browse/PO-10", board: "PO" })
+      .mockRejectedValueOnce({ code: "UPSTREAM", message: "Jira rejected the create" })
+      .mockResolvedValueOnce({ key: "PO-11", url: "https://jira.example.com/browse/PO-11", board: "PO" });
+
+    await openBreakdownFor("PO-1");
+    fireEvent.click(screen.getByRole("button", { name: /Create \(2\)/ }));
+
+    await waitFor(() => expect(vi.mocked(useJiraModule.createPoTicket)).toHaveBeenCalledTimes(2));
+    // Row 1 succeeded -> a Jira-key link; row 2 failed -> an error + Retry.
+    await waitFor(() => expect(screen.getByRole("link", { name: "Open PO-10 in Jira" })).toBeTruthy());
+    expect(screen.getByText("Jira rejected the create")).toBeTruthy();
+    const retryBtn = screen.getByRole("button", { name: "Retry row 2" });
+
+    fireEvent.click(retryBtn);
+
+    await waitFor(() => expect(vi.mocked(useJiraModule.createPoTicket)).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(screen.getByRole("link", { name: "Open PO-11 in Jira" })).toBeTruthy());
+    // Row 1 was never re-created — exactly one call ever referenced its row summary.
+    expect(
+      vi.mocked(useJiraModule.createPoTicket).mock.calls.filter(
+        ([arg]) => arg.summary === "PO-1 summary (part 1)"
+      )
+    ).toHaveLength(1);
+  });
+
+  it("checking the zero-original option calls updateTicketPoints(key, 0) after all rows succeed", async () => {
+    await openBreakdownFor("PO-1");
+
+    fireEvent.click(screen.getByLabelText("Set PO-1's points to 0 after creating"));
+    fireEvent.click(screen.getByRole("button", { name: /Create \(2\)/ }));
+
+    await waitFor(() => expect(vi.mocked(useJiraModule.createPoTicket)).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(vi.mocked(useJiraModule.updateTicketPoints)).toHaveBeenCalledWith("PO-1", 0)
+    );
   });
 });

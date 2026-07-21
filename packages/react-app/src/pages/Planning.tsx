@@ -436,6 +436,7 @@ export function Planning({
             devBoardId={boards !== null ? boards.dev[activeProjectIdx]?.id : undefined}
             teamRevision={teamRevision}
             onTeamChange={handleTeamChange}
+            sprints={[...activeSprints, ...futureSprints]}
           />
         </section>
       )}

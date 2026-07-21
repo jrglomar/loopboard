@@ -262,6 +262,20 @@ export async function updateTicketPoints(
   return callTool<UpdateTicketOutput>("jira", "update_ticket", { ticketKey, storyPoints });
 }
 
+// ── updateTicketSummary (v1.69, ADR-080) ─────────────────────────────────────
+
+/**
+ * Rename a ticket via update_ticket (a real Jira write). §4.5 has accepted `summary`
+ * since v1.0 — used by the shared SummaryCell (Assign Tickets table's Summary column
+ * and the Draft Capacity Plan card's chip editor) for inline rename.
+ */
+export async function updateTicketSummary(
+  ticketKey: string,
+  summary: string
+): Promise<UpdateTicketOutput> {
+  return callTool<UpdateTicketOutput>("jira", "update_ticket", { ticketKey, summary });
+}
+
 // ── createSprint ──────────────────────────────────────────────────────────────
 
 /**

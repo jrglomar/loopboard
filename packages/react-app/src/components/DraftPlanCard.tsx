@@ -1,4 +1,4 @@
-// DraftPlanCard — Draft Capacity Plan (v1.68, ADR-079; CONTRACTS.md §4.30)
+// DraftPlanCard — Draft Capacity Plan (v1.68, ADR-079; v1.69, ADR-080; CONTRACTS.md §4.30)
 //
 // PO-board-only Planning card: the PO drags PO-sprint ticket chips onto DEV-board
 // team-member tiles to build a DRAFT plan, and sees each developer's drafted
@@ -16,17 +16,31 @@
 // Every draggable chip also carries a native "Draft to…" <select> — the
 // keyboard/screen-reader path (ADR-009: native controls only).
 //
+// v1.69 (ADR-080): chips gain the same per-ticket actions as the Assign Tickets
+// table (rename/status/move — shared ./ticketCells) behind a per-chip "Edit"
+// expander, plus "Break down" (BreakdownDialog) to split an oversized story into
+// several new PO stories. A move initiated from a chip also removes its draft
+// entry in the same action. Draft mutations (draftTo/undraft/clearDraft/a
+// move-triggered removal) persist the STORED devSprintId (null until the PO
+// explicitly picks one) instead of the effective (possibly auto-paired) one —
+// auto-pairing is EPHEMERAL, never a persisted side effect of drafting — and the
+// card now surfaces WHY capacity looks the way it does (leaves found / not found
+// under the paired Dev sprint; a loading placeholder while leaves load, instead
+// of flashing full-confidence numbers).
+//
 // a11y: card section with heading; every interactive control has an aria-label;
 // mutation errors are aria-live.
 // perf: rollups (totals/unplanned/stale) are pure and derived per render from
 // small inputs — no memoisation beyond React.useMemo guards against churn.
 
 import React from "react";
-import { Target, AlertCircle, X } from "lucide-react";
+import { Target, AlertCircle, X, Pencil } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { TeamManager } from "./TeamManager";
+import { PointsCell, StatusCell, MoveSprintCell, SummaryCell } from "./ticketCells";
+import { BreakdownDialog } from "./BreakdownDialog";
 import {
   useActiveSprint,
   useTeamMembers,
@@ -54,49 +68,215 @@ export interface DraftPlanCardProps {
   /** v1.68: increment to force a Dev-roster refetch after TeamManager saves. */
   teamRevision?: number;
   onTeamChange?: () => void;
+  /** v1.69 (ADR-080): PO board active+future sprints — each chip's move-to-sprint control. */
+  sprints?: SprintRef[];
 }
 
-// ── Unplanned ticket chip ─────────────────────────────────────────────────────
+// ── Shared helpers ────────────────────────────────────────────────────────────
 
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
+// ── Chip edit panel (v1.69, ADR-080) — rename / status / move / break down ─────
+
+interface ChipEditPanelProps {
+  issue: IssueSummary;
+  sprints: SprintRef[];
+  onFieldSaved: () => void;
+  onMoved: (issueKey: string) => void;
+  onBreakdown: (issue: IssueSummary) => void;
+}
+
+function ChipEditPanel({ issue, sprints, onFieldSaved, onMoved, onBreakdown }: ChipEditPanelProps) {
+  return (
+    <div className="border-t border-border/60 px-2 py-2 space-y-2">
+      <div className="space-y-1.5">
+        <div>
+          <span className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide block mb-0.5">
+            Summary
+          </span>
+          <SummaryCell issue={issue} onSaved={onFieldSaved} />
+        </div>
+        <div className="flex items-end gap-3 flex-wrap">
+          <div>
+            <span className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide block mb-0.5">
+              Status
+            </span>
+            <StatusCell issue={issue} onChanged={onFieldSaved} />
+          </div>
+          <div>
+            <span className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide block mb-0.5">
+              Move
+            </span>
+            <MoveSprintCell issue={issue} sprints={sprints} onMoved={() => onMoved(issue.key)} />
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-border/50">
+        <p className="text-[0.625rem] text-muted-foreground italic">
+          These edits change the real Jira ticket.
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-6 text-[0.6875rem] flex-shrink-0"
+          onClick={() => onBreakdown(issue)}
+          aria-label={`Break down ${issue.key}`}
+        >
+          Break down
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ── Unplanned ticket chip ─────────────────────────────────────────────────────
+
 interface UnplannedChipProps {
   issue: IssueSummary;
   roster: TeamMember[];
+  sprints: SprintRef[];
   onDraftTo: (issueKey: string, member: TeamMember) => void;
+  /** v1.69 (ADR-080): a points/rename/status edit refetches the PO sprint. */
+  onFieldSaved: () => void;
+  /** v1.69 (ADR-080): a move from this chip also drops its (nonexistent, here) draft entry. */
+  onMoved: (issueKey: string) => void;
+  onBreakdown: (issue: IssueSummary) => void;
 }
 
-function UnplannedChip({ issue, roster, onDraftTo }: UnplannedChipProps) {
+function UnplannedChip({ issue, roster, sprints, onDraftTo, onFieldSaved, onMoved, onBreakdown }: UnplannedChipProps) {
+  const [expanded, setExpanded] = React.useState(false);
+
   return (
     <li
-      draggable
+      // v1.69.1: draggable only while collapsed — HTML5 drag on a draggable ancestor
+      // hijacks mouse text-selection inside the expanded panel's inputs (SummaryCell's
+      // rename field, PointsCell's number field), turning a text-select attempt into a
+      // chip drag in Chromium/Firefox. onDragStart simply won't fire when draggable=false.
+      draggable={!expanded}
       onDragStart={(e) => e.dataTransfer.setData("text/plain", issue.key)}
-      title={issue.summary}
-      className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1.5 text-xs cursor-grab active:cursor-grabbing"
+      className={`rounded-md border border-border bg-background text-xs ${expanded ? "cursor-default" : "cursor-grab active:cursor-grabbing"}`}
     >
-      <span className="font-mono font-bold text-foreground flex-shrink-0">{issue.key}</span>
-      <span className="flex-1 min-w-0 truncate text-muted-foreground">{truncate(issue.summary, 40)}</span>
-      <span className="tabular-nums font-semibold text-foreground flex-shrink-0">
-        {formatPoints(issue.storyPoints ?? 0)}
-      </span>
-      <select
-        aria-label={`Draft ${issue.key} to a developer`}
-        value=""
-        onChange={(e) => {
-          const member = roster.find((m) => m.accountId === e.target.value);
-          if (member) onDraftTo(issue.key, member);
-        }}
-        className={selectCls}
-      >
-        <option value="">Draft to…</option>
-        {roster.map((m) => (
-          <option key={m.accountId} value={m.accountId}>
-            {m.displayName}
-          </option>
-        ))}
-      </select>
+      <div title={issue.summary} className="flex items-center gap-1.5 px-2 py-1.5">
+        <span className="font-mono font-bold text-foreground flex-shrink-0">{issue.key}</span>
+        <span className="flex-1 min-w-0 truncate text-muted-foreground">{truncate(issue.summary, 40)}</span>
+        <PointsCell issue={issue} onSaved={onFieldSaved} />
+        <select
+          aria-label={`Draft ${issue.key} to a developer`}
+          value=""
+          onChange={(e) => {
+            const member = roster.find((m) => m.accountId === e.target.value);
+            if (member) onDraftTo(issue.key, member);
+          }}
+          className={selectCls}
+        >
+          <option value="">Draft to…</option>
+          {roster.map((m) => (
+            <option key={m.accountId} value={m.accountId}>
+              {m.displayName}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          aria-label={`Edit ${issue.key}`}
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring transition-colors flex-shrink-0"
+        >
+          <Pencil className="h-3 w-3" aria-hidden="true" />
+        </button>
+      </div>
+      {expanded && (
+        <ChipEditPanel
+          issue={issue}
+          sprints={sprints}
+          onFieldSaved={onFieldSaved}
+          onMoved={onMoved}
+          onBreakdown={onBreakdown}
+        />
+      )}
+    </li>
+  );
+}
+
+// ── Drafted ticket chip (v1.69, ADR-080 — extracted from DevTile for the shared edit panel) ─
+
+interface DraftedChipProps {
+  issue: IssueSummary;
+  member: TeamMember;
+  roster: TeamMember[];
+  sprints: SprintRef[];
+  onDraftTo: (issueKey: string, member: TeamMember) => void;
+  onRemove: (issueKey: string) => void;
+  onFieldSaved: () => void;
+  onMoved: (issueKey: string) => void;
+  onBreakdown: (issue: IssueSummary) => void;
+}
+
+function DraftedChip({
+  issue,
+  member,
+  roster,
+  sprints,
+  onDraftTo,
+  onRemove,
+  onFieldSaved,
+  onMoved,
+  onBreakdown,
+}: DraftedChipProps) {
+  const [expanded, setExpanded] = React.useState(false);
+
+  return (
+    <li className="rounded-md border border-border/60 bg-background text-xs">
+      <div title={issue.summary} className="flex items-center gap-1.5 px-2 py-1">
+        <span className="font-mono font-bold text-foreground flex-shrink-0">{issue.key}</span>
+        <span className="flex-1 min-w-0 truncate text-muted-foreground">{truncate(issue.summary, 40)}</span>
+        <PointsCell issue={issue} onSaved={onFieldSaved} />
+        <select
+          aria-label={`Draft ${issue.key} to a developer`}
+          value={member.accountId}
+          onChange={(e) => {
+            const target = roster.find((m) => m.accountId === e.target.value);
+            if (target) onDraftTo(issue.key, target);
+          }}
+          className={selectCls}
+        >
+          {roster.map((m) => (
+            <option key={m.accountId} value={m.accountId}>
+              {m.displayName}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          aria-label={`Remove ${issue.key} from ${member.displayName}`}
+          onClick={() => onRemove(issue.key)}
+          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus:outline-none focus:ring-2 focus:ring-ring transition-colors flex-shrink-0"
+        >
+          <X className="h-3 w-3" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          aria-label={`Edit ${issue.key}`}
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring transition-colors flex-shrink-0"
+        >
+          <Pencil className="h-3 w-3" aria-hidden="true" />
+        </button>
+      </div>
+      {expanded && (
+        <ChipEditPanel
+          issue={issue}
+          sprints={sprints}
+          onFieldSaved={onFieldSaved}
+          onMoved={onMoved}
+          onBreakdown={onBreakdown}
+        />
+      )}
     </li>
   );
 }
@@ -108,11 +288,26 @@ interface DevTileProps {
   capacity: number | null;
   drafted: { points: number; count: number; issues: IssueSummary[] };
   roster: TeamMember[];
+  sprints: SprintRef[];
   onDraftTo: (issueKey: string, member: TeamMember) => void;
   onRemove: (issueKey: string) => void;
+  onFieldSaved: () => void;
+  onMoved: (issueKey: string) => void;
+  onBreakdown: (issue: IssueSummary) => void;
 }
 
-function DevTile({ member, capacity, drafted, roster, onDraftTo, onRemove }: DevTileProps) {
+function DevTile({
+  member,
+  capacity,
+  drafted,
+  roster,
+  sprints,
+  onDraftTo,
+  onRemove,
+  onFieldSaved,
+  onMoved,
+  onBreakdown,
+}: DevTileProps) {
   const initials = member.displayName
     .split(" ")
     .map((w) => w[0]?.toUpperCase() ?? "")
@@ -179,40 +374,18 @@ function DevTile({ member, capacity, drafted, roster, onDraftTo, onRemove }: Dev
       {drafted.issues.length > 0 && (
         <ul role="list" className="space-y-1">
           {drafted.issues.map((issue) => (
-            <li
+            <DraftedChip
               key={issue.key}
-              title={issue.summary}
-              className="flex items-center gap-1.5 rounded-md border border-border/60 bg-background px-2 py-1 text-xs"
-            >
-              <span className="font-mono font-bold text-foreground flex-shrink-0">{issue.key}</span>
-              <span className="flex-1 min-w-0 truncate text-muted-foreground">{truncate(issue.summary, 40)}</span>
-              <span className="tabular-nums font-semibold text-foreground flex-shrink-0">
-                {formatPoints(issue.storyPoints ?? 0)}
-              </span>
-              <select
-                aria-label={`Draft ${issue.key} to a developer`}
-                value={member.accountId}
-                onChange={(e) => {
-                  const target = roster.find((m) => m.accountId === e.target.value);
-                  if (target) onDraftTo(issue.key, target);
-                }}
-                className={selectCls}
-              >
-                {roster.map((m) => (
-                  <option key={m.accountId} value={m.accountId}>
-                    {m.displayName}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                aria-label={`Remove ${issue.key} from ${member.displayName}`}
-                onClick={() => onRemove(issue.key)}
-                className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 focus:outline-none focus:ring-2 focus:ring-ring transition-colors flex-shrink-0"
-              >
-                <X className="h-3 w-3" aria-hidden="true" />
-              </button>
-            </li>
+              issue={issue}
+              member={member}
+              roster={roster}
+              sprints={sprints}
+              onDraftTo={onDraftTo}
+              onRemove={onRemove}
+              onFieldSaved={onFieldSaved}
+              onMoved={onMoved}
+              onBreakdown={onBreakdown}
+            />
           ))}
         </ul>
       )}
@@ -229,6 +402,7 @@ export function DraftPlanCard({
   devBoardId,
   teamRevision,
   onTeamChange,
+  sprints = [],
 }: DraftPlanCardProps) {
   const devSprintSelectId = React.useId();
 
@@ -273,7 +447,14 @@ export function DraftPlanCard({
     [sprint, devActive, devFuture]
   );
 
-  const effectiveDevSprintId: number | null = draftState.data?.devSprintId ?? pairedDefault?.id ?? null;
+  // v1.69 (ADR-080): the STORED choice — null until the PO explicitly picks one in the
+  // select. Draft mutations persist THIS, never the effective/auto-paired one, so a
+  // guessed pairing never sticks as if it had been chosen (root cause (b) of the
+  // "everyone shows 8" report).
+  const storedDevSprintId: number | null = draftState.data?.devSprintId ?? null;
+  const isAutoPaired = storedDevSprintId === null && pairedDefault !== undefined;
+
+  const effectiveDevSprintId: number | null = storedDevSprintId ?? pairedDefault?.id ?? null;
 
   const effectiveDevSprint: SprintRef | undefined = React.useMemo(
     () => [...devFuture, ...devActive].find((s) => s.id === effectiveDevSprintId),
@@ -315,6 +496,17 @@ export function DraftPlanCard({
     return map;
   }, [devCaps]);
 
+  // v1.69 (ADR-080): while leaves are loading, capacity is UNKNOWN — never render a
+  // full-confidence number sourced from the PREVIOUS sprint's (possibly stale) leaves.
+  const capacityLoading = leavesState.loading;
+
+  // v1.69 (ADR-080): leave-day total across the roster + how many members have ≥1 day,
+  // for the capacity-source transparency indicator under the select.
+  const membersWithLeaveDays = React.useMemo(
+    () => Object.values(capacity.byAssigneeLeaveDays).filter((d) => d > 0).length,
+    [capacity.byAssigneeLeaveDays]
+  );
+
   // ── Draft rollups (pure — src/lib/draftPlan.ts) ─────────────────────────────
 
   const assignments = draftState.data?.assignments ?? {};
@@ -341,6 +533,7 @@ export function DraftPlanCard({
   // ── Mutations — optimistic full-replace via useDraftPlan.save ───────────────
 
   const [mutationError, setMutationError] = React.useState<string | null>(null);
+  const [breakdownIssue, setBreakdownIssue] = React.useState<IssueSummary | null>(null);
 
   const persist = React.useCallback(
     async (nextAssignments: Record<string, DraftAssignment>, nextDevSprintId: number | null) => {
@@ -359,24 +552,27 @@ export function DraftPlanCard({
     [draftState.save]
   );
 
+  // v1.69 (ADR-080): draftTo/undraft/clearDraft persist the STORED devSprintId (null
+  // until chosen) — NOT the effective/auto-paired one. Only changeDevSprint (an
+  // explicit pick) and "Reset to auto" ever write devSprintId itself.
   const draftTo = React.useCallback(
     (issueKey: string, member: TeamMember) => {
       const next = {
         ...assignments,
         [issueKey]: { accountId: member.accountId, displayName: member.displayName },
       };
-      void persist(next, effectiveDevSprintId);
+      void persist(next, storedDevSprintId);
     },
-    [assignments, persist, effectiveDevSprintId]
+    [assignments, persist, storedDevSprintId]
   );
 
   const undraft = React.useCallback(
     (issueKey: string) => {
       const next = { ...assignments };
       delete next[issueKey];
-      void persist(next, effectiveDevSprintId);
+      void persist(next, storedDevSprintId);
     },
-    [assignments, persist, effectiveDevSprintId]
+    [assignments, persist, storedDevSprintId]
   );
 
   const changeDevSprint = React.useCallback(
@@ -386,9 +582,30 @@ export function DraftPlanCard({
     [assignments, persist]
   );
 
+  const resetToAuto = React.useCallback(() => {
+    void persist(assignments, null);
+  }, [assignments, persist]);
+
   const clearDraft = React.useCallback(() => {
-    void persist({}, effectiveDevSprintId);
-  }, [persist, effectiveDevSprintId]);
+    void persist({}, storedDevSprintId);
+  }, [persist, storedDevSprintId]);
+
+  // v1.69 (ADR-080): a move initiated FROM this card also removes the ticket's draft
+  // entry in the same action (a deliberate move must not leave a "Needs attention"
+  // stale row), then refetches the PO sprint either way — a moved ticket has left it.
+  const handleTicketMoved = React.useCallback(
+    (issueKey: string) => {
+      if (issueKey in assignments) {
+        const next = { ...assignments };
+        delete next[issueKey];
+        void persist(next, storedDevSprintId).then(() => poSprintState.run());
+      } else {
+        poSprintState.run();
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [assignments, persist, storedDevSprintId]
+  );
 
   // ── Footer summary ───────────────────────────────────────────────────────────
 
@@ -492,57 +709,96 @@ export function DraftPlanCard({
 
   const devSprintOptionCount = devFuture.length + devActive.length;
 
+  // v1.69 (ADR-080): capacity-source transparency — only meaningful once dates AND a
+  // roster exist; gated the same way the tiles' own capacity number is.
+  const showLeavesIndicator = capacityKnown && devRoster.length > 0;
+  const leavesWarning = showLeavesIndicator && !capacityLoading && capacity.leavePersonDays === 0;
+
   return (
     <Card className="shadow-sm w-full max-w-full">
       {cardHeader}
       <CardContent className="space-y-4">
         {/* Dev sprint (capacity source) select */}
-        <div className="flex items-end gap-3 flex-wrap">
-          <div className="flex flex-col gap-0.5">
-            <label
-              htmlFor={devSprintSelectId}
-              className="text-xs font-semibold text-muted-foreground uppercase tracking-wide"
-            >
-              Dev sprint (capacity source)
-            </label>
-            <select
-              id={devSprintSelectId}
-              aria-label="Dev sprint (capacity source)"
-              className={selectCls + " max-w-xs"}
-              value={effectiveDevSprintId ?? ""}
-              disabled={devSprintListState.loading || devSprintOptionCount === 0}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v !== "") changeDevSprint(parseInt(v, 10));
-              }}
-            >
-              {devSprintOptionCount === 0 && !devSprintListState.loading && (
-                <option value="">No dev sprints available</option>
-              )}
-              {devSprintListState.loading && <option value="">Loading…</option>}
-              {devFuture.length > 0 && (
-                <optgroup label="Future">
-                  {devFuture.map((s) => (
-                    <option key={s.id} value={s.id} title={s.name}>
-                      {s.name}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              {devActive.length > 0 && (
-                <optgroup label="Active">
-                  {devActive.map((s) => (
-                    <option key={s.id} value={s.id} title={s.name}>
-                      {s.name}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
+        <div className="space-y-1">
+          <div className="flex items-end gap-3 flex-wrap">
+            <div className="flex flex-col gap-0.5">
+              <label
+                htmlFor={devSprintSelectId}
+                className="text-xs font-semibold text-muted-foreground uppercase tracking-wide"
+              >
+                Dev sprint (capacity source)
+              </label>
+              <select
+                id={devSprintSelectId}
+                aria-label="Dev sprint (capacity source)"
+                className={selectCls + " max-w-xs"}
+                value={effectiveDevSprintId ?? ""}
+                disabled={devSprintListState.loading || devSprintOptionCount === 0}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v !== "") changeDevSprint(parseInt(v, 10));
+                }}
+              >
+                {devSprintOptionCount === 0 && !devSprintListState.loading && (
+                  <option value="">No dev sprints available</option>
+                )}
+                {devSprintListState.loading && <option value="">Loading…</option>}
+                {devFuture.length > 0 && (
+                  <optgroup label="Future">
+                    {devFuture.map((s) => (
+                      <option key={s.id} value={s.id} title={s.name}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {devActive.length > 0 && (
+                  <optgroup label="Active">
+                    {devActive.map((s) => (
+                      <option key={s.id} value={s.id} title={s.name}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </div>
+            {/* v1.69 (ADR-080): auto-pairing is ephemeral — a visible label, never a silent guess */}
+            {isAutoPaired && (
+              <span
+                className="text-[0.6875rem] font-medium text-muted-foreground px-1.5 py-0.5 rounded-full bg-muted self-end mb-1.5 whitespace-nowrap"
+                title="Paired by date overlap with the PO sprint. Pick a Dev sprint above to override."
+                aria-label="Auto-paired by date overlap with the PO sprint"
+              >
+                Auto-paired
+              </span>
+            )}
+            {storedDevSprintId != null && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs self-end"
+                aria-label="Reset to auto"
+                onClick={resetToAuto}
+              >
+                Reset to auto
+              </Button>
+            )}
+            {!capacityKnown && (
+              <p className="text-xs text-muted-foreground self-end mb-1.5">
+                Capacity unknown — the paired Dev sprint has no dates yet. Drafting is still enabled.
+              </p>
+            )}
           </div>
-          {!capacityKnown && (
-            <p className="text-xs text-muted-foreground self-end mb-1.5">
-              Capacity unknown — the paired Dev sprint has no dates yet. Drafting is still enabled.
+          {/* v1.69 (ADR-080): capacity-source transparency — fixes the silent "every dev shows 8" state */}
+          {showLeavesIndicator && (
+            <p className={`text-xs ${leavesWarning ? "text-warning-foreground" : "text-muted-foreground"}`}>
+              {capacityLoading
+                ? "Loading leaves…"
+                : capacity.leavePersonDays > 0
+                ? `${capacity.leavePersonDays} leave/offset day(s) found across ${membersWithLeaveDays} member(s)`
+                : "No leaves or offsets recorded under this Dev sprint — pick the sprint where the team plotted them (Dev-board Planning or the Offset Tracker)."}
             </p>
           )}
         </div>
@@ -576,7 +832,16 @@ export function DraftPlanCard({
             ) : (
               <ul role="list" className="space-y-1.5">
                 {unplanned.map((issue) => (
-                  <UnplannedChip key={issue.key} issue={issue} roster={devRoster} onDraftTo={draftTo} />
+                  <UnplannedChip
+                    key={issue.key}
+                    issue={issue}
+                    roster={devRoster}
+                    sprints={sprints}
+                    onDraftTo={draftTo}
+                    onFieldSaved={poSprintState.run}
+                    onMoved={handleTicketMoved}
+                    onBreakdown={setBreakdownIssue}
+                  />
                 ))}
               </ul>
             )}
@@ -595,11 +860,15 @@ export function DraftPlanCard({
                   <DevTile
                     key={member.accountId}
                     member={member}
-                    capacity={capacityKnown ? capacityByName[member.displayName] ?? 0 : null}
+                    capacity={capacityKnown && !capacityLoading ? capacityByName[member.displayName] ?? 0 : null}
                     drafted={totals[member.accountId] ?? { points: 0, count: 0, issues: [] }}
                     roster={devRoster}
+                    sprints={sprints}
                     onDraftTo={draftTo}
                     onRemove={undraft}
+                    onFieldSaved={poSprintState.run}
+                    onMoved={handleTicketMoved}
+                    onBreakdown={setBreakdownIssue}
                   />
                 ))}
               </ul>
@@ -663,6 +932,18 @@ export function DraftPlanCard({
           <TeamManager boardId={devBoardId} onTeamChange={onTeamChange} />
         </div>
       </CardContent>
+
+      {/* Breakdown dialog (v1.69, ADR-080) — split an oversized story into new PO stories.
+          Keyed by issue key so switching chips remounts it with a fresh row set. */}
+      {breakdownIssue && (
+        <BreakdownDialog
+          key={breakdownIssue.key}
+          issue={breakdownIssue}
+          sprintId={sprintId}
+          onClose={() => setBreakdownIssue(null)}
+          onCreated={poSprintState.run}
+        />
+      )}
     </Card>
   );
 }

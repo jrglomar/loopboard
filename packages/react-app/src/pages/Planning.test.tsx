@@ -176,6 +176,7 @@ vi.mock("../components/DraftPlanCard", () => ({
     poBoardId,
     sprintId,
     devBoardId,
+    sprints,
   }: {
     poBoardId?: number;
     sprintId?: number | null;
@@ -183,12 +184,15 @@ vi.mock("../components/DraftPlanCard", () => ({
     devBoardId?: number;
     teamRevision?: number;
     onTeamChange?: () => void;
+    // v1.69 (ADR-080): PO board active+future sprints, for the chip move-to-sprint control.
+    sprints?: unknown[];
   }) => (
     <div
       data-testid="draft-plan-card"
       data-po-board-id={poBoardId ?? ""}
       data-sprint-id={sprintId ?? ""}
       data-dev-board-id={devBoardId ?? ""}
+      data-sprints-count={sprints?.length ?? 0}
     >
       Draft Plan Card
     </div>
@@ -567,7 +571,7 @@ describe("Planning — DraftPlanCard slot (v1.68, ADR-079) — PO board only", (
     expect(screen.queryByTestId("draft-plan-card")).toBeNull();
   });
 
-  it("renders DraftPlanCard on the PO board with poBoardId, sprintId, and devBoardId", async () => {
+  it("renders DraftPlanCard on the PO board with poBoardId, sprintId, devBoardId, and sprints", async () => {
     const poSprintId = 201;
     vi.mocked(useJiraModule.useSprintList).mockReturnValue({
       data: {
@@ -602,6 +606,8 @@ describe("Planning — DraftPlanCard slot (v1.68, ADR-079) — PO board only", (
       expect(card.getAttribute("data-po-board-id")).toBe("20");
       expect(card.getAttribute("data-sprint-id")).toBe(String(poSprintId));
       expect(card.getAttribute("data-dev-board-id")).toBe("10");
+      // v1.69 (ADR-080): sprints = [...active, ...future] for the PO board (1 future, 0 active)
+      expect(card.getAttribute("data-sprints-count")).toBe("1");
     });
   });
 

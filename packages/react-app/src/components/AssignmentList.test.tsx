@@ -15,6 +15,7 @@ vi.mock("../hooks/useJira", async (importOriginal) => {
     useActiveSprint: vi.fn(),
     useTeamMembers: vi.fn(),
     updateTicketPoints: vi.fn(),   // v1.37 (ADR-047): inline points edit
+    updateTicketSummary: vi.fn(),  // v1.69 (ADR-080): inline rename
     // v1.59 (ADR-071): idle/empty shape (anti-drift parity — see Reports.test.tsx's comment).
     useMultiSprintReport: vi.fn().mockReturnValue({ data: null, loading: false, error: null, run: vi.fn() }),
   };
@@ -126,6 +127,11 @@ function setDefaultMocks() {
   // v1.37 (ADR-047): inline points edit → update_ticket
   vi.mocked(useJiraModule.updateTicketPoints).mockResolvedValue({
     ticketKey: "DEV-10", updatedFields: ["storyPoints"],
+  } as never);
+
+  // v1.69 (ADR-080): inline rename → update_ticket
+  vi.mocked(useJiraModule.updateTicketSummary).mockResolvedValue({
+    ticketKey: "DEV-10", updatedFields: ["summary"],
   } as never);
 
   // v1.15 ticket-action defaults
@@ -661,5 +667,93 @@ describe("AssignmentList — v1.37 editable points", () => {
     fireEvent.blur(input);
 
     await waitFor(() => expect(input.value).toBe("5")); // reverted to the committed value
+  });
+});
+
+// ── Tests: v1.69 (ADR-080) — SummaryCell rename (extracted to ./ticketCells) ───
+
+describe("AssignmentList — v1.69 (ADR-080) rename", () => {
+  it("opens the rename editor, saves via updateTicketSummary, and refetches the sprint", async () => {
+    const runSpy = vi.fn();
+    vi.mocked(useJiraModule.useActiveSprint).mockReturnValue({
+      data: DEFAULT_SPRINT_DATA, loading: false, error: null, run: runSpy,
+    });
+
+    render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" />);
+    await waitFor(() => screen.getByText("Implement feature X"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename DEV-10" }));
+
+    const input = (await screen.findByRole("textbox", {
+      name: "New summary for DEV-10",
+    })) as HTMLInputElement;
+    expect(input.value).toBe("Implement feature X");
+
+    fireEvent.change(input, { target: { value: "Implement feature X v2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save summary for DEV-10" }));
+
+    await waitFor(() =>
+      expect(vi.mocked(useJiraModule.updateTicketSummary)).toHaveBeenCalledWith(
+        "DEV-10",
+        "Implement feature X v2"
+      )
+    );
+    // v1.69 (ADR-080): a successful rename refetches the sprint (onSaved -> sprintState.run)
+    await waitFor(() => expect(runSpy).toHaveBeenCalled());
+  });
+
+  it("Cancel reverts to the original summary without writing", async () => {
+    render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" />);
+    await waitFor(() => screen.getByText("Implement feature X"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename DEV-10" }));
+    const input = await screen.findByRole("textbox", { name: "New summary for DEV-10" });
+    fireEvent.change(input, { target: { value: "Something else entirely" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel rename for DEV-10" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: "New summary for DEV-10" })).toBeNull();
+      expect(screen.getByText("Implement feature X")).toBeTruthy();
+    });
+    expect(vi.mocked(useJiraModule.updateTicketSummary)).not.toHaveBeenCalled();
+  });
+
+  it("Escape also cancels the rename and reverts, same as the Cancel button", async () => {
+    render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" />);
+    await waitFor(() => screen.getByText("Implement feature X"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename DEV-10" }));
+    const input = await screen.findByRole("textbox", { name: "New summary for DEV-10" });
+    fireEvent.change(input, { target: { value: "Something else entirely" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: "New summary for DEV-10" })).toBeNull();
+      expect(screen.getByText("Implement feature X")).toBeTruthy();
+    });
+    expect(vi.mocked(useJiraModule.updateTicketSummary)).not.toHaveBeenCalled();
+  });
+
+  it("reverts the input and shows an inline error when the write fails", async () => {
+    vi.mocked(useJiraModule.updateTicketSummary).mockRejectedValueOnce({
+      code: "UPSTREAM",
+      message: "Jira rejected the rename",
+    });
+    render(<AssignmentList boardId={10} sprintId={100} projectKey="DEV" />);
+    await waitFor(() => screen.getByText("Implement feature X"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename DEV-10" }));
+    const input = await screen.findByRole("textbox", { name: "New summary for DEV-10" });
+    fireEvent.change(input, { target: { value: "New broken summary" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Jira rejected the rename/i)).toBeTruthy();
+    });
+    // Reverted to the committed value; the editor stays open so the error is visible.
+    const reverted = screen.getByRole("textbox", {
+      name: "New summary for DEV-10",
+    }) as HTMLInputElement;
+    expect(reverted.value).toBe("Implement feature X");
   });
 });
