@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { useActiveSprint, useTeamMembers } from "../hooks/useJira";
 import { assignIssue } from "../lib/assignClient";
 import { PointsCell, StatusCell, MoveSprintCell, SummaryCell, cellSelectCls } from "./ticketCells";
+import { BreakdownDialog } from "./BreakdownDialog";
 import type { IssueSummary, TeamMember, SprintRef } from "../lib/types";
 import type { McpError } from "../lib/mcpClient";
 import { formatPoints } from "../lib/format";
@@ -38,6 +39,13 @@ export interface AssignmentListProps {
   teamRevision?: number;
   /** v1.15 (ADR-026): active+future sprints for the board, for the move-to-sprint control. */
   sprints?: SprintRef[];
+  /**
+   * v1.70 (ADR-081): PO-board-only — shows a per-row "Break down" action that opens
+   * the real (Jira-ticket-creating) BreakdownDialog, relocated here from the Draft
+   * Capacity Plan card because it writes to Jira (create_po_ticket) and Assign
+   * Tickets is the app's one real-edit surface. Omitted/false on the Dev board.
+   */
+  enableBreakdown?: boolean;
 }
 
 // ── Per-row state ─────────────────────────────────────────────────────────────
@@ -96,9 +104,23 @@ interface TicketRowProps {
   /** v1.37 (ADR-047): bulk-assign selection */
   selected: boolean;
   onToggleSelect: () => void;
+  /** v1.70 (ADR-081): PO-board-only trailing "Break down" action. */
+  enableBreakdown?: boolean;
+  onBreakdown?: (issue: IssueSummary) => void;
 }
 
-function TicketRow({ issue, team, rowState, onAssign, sprints, onChanged, selected, onToggleSelect }: TicketRowProps) {
+function TicketRow({
+  issue,
+  team,
+  rowState,
+  onAssign,
+  sprints,
+  onChanged,
+  selected,
+  onToggleSelect,
+  enableBreakdown,
+  onBreakdown,
+}: TicketRowProps) {
   // v1.8 (ADR-019): team is keyed by accountId
   const currentInTeam =
     rowState.accountId !== null &&
@@ -230,6 +252,23 @@ function TicketRow({ issue, team, rowState, onAssign, sprints, onChanged, select
       <td className="py-2 min-w-[150px]">
         <MoveSprintCell issue={issue} sprints={sprints} onMoved={onChanged} />
       </td>
+
+      {/* Break down — v1.70 (ADR-081), PO-board only: relocated from the Draft
+          Capacity Plan card because it creates real Jira tickets. */}
+      {enableBreakdown && (
+        <td className="py-2 pl-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 text-[0.6875rem] whitespace-nowrap"
+            onClick={() => onBreakdown?.(issue)}
+            aria-label={`Break down ${issue.key}`}
+          >
+            Break down
+          </Button>
+        </td>
+      )}
     </tr>
   );
 }
@@ -243,6 +282,7 @@ export function AssignmentList({
   projectKey: _projectKey,
   teamRevision,
   sprints = [],
+  enableBreakdown = false,
 }: AssignmentListProps) {
   // Fetch the sprint's tickets (all buckets)
   const sprintState = useActiveSprint(boardId, sprintId ?? undefined);
@@ -254,6 +294,10 @@ export function AssignmentList({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkAccountId, setBulkAccountId] = useState<string>("");
   React.useEffect(() => { setAssigneeFilter(null); setSelected(new Set()); }, [boardId, sprintId]);
+
+  // v1.70 (ADR-081): the real breakdown dialog — relocated here from the Draft
+  // Capacity Plan card because it creates new PO stories (create_po_ticket).
+  const [breakdownIssue, setBreakdownIssue] = useState<IssueSummary | null>(null);
 
   // v1.8 (ADR-019): roster from curated team, NOT get_assignable_users
   const { data: team, loading: usersLoading, error: usersError, run: usersRun } =
@@ -600,6 +644,8 @@ export function AssignmentList({
                 <th className="text-left pb-2 pr-3">Assignee</th>
                 <th className="text-left pb-2 pr-3">Status</th>
                 <th className="text-left pb-2">Sprint</th>
+                {/* v1.70 (ADR-081): PO-board-only trailing action column */}
+                {enableBreakdown && <th className="text-left pb-2 pl-2">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -618,6 +664,8 @@ export function AssignmentList({
                   onChanged={sprintState.run}
                   selected={selected.has(issue.key)}
                   onToggleSelect={() => toggleSelect(issue.key)}
+                  enableBreakdown={enableBreakdown}
+                  onBreakdown={setBreakdownIssue}
                 />
               ))}
             </tbody>
@@ -625,6 +673,21 @@ export function AssignmentList({
         </div>
         )}
       </CardContent>
+
+      {/* Breakdown dialog (v1.70, ADR-081) — split an oversized story into new PO
+          stories. Keyed by issue key so switching rows remounts it with a fresh
+          row set. Guarded on sprintState.data because BreakdownDialog needs a
+          resolved numeric sprintId (the prop may be null/undefined even while a
+          sprint is resolved via the board's server-side default). */}
+      {enableBreakdown && breakdownIssue && sprintState.data && (
+        <BreakdownDialog
+          key={breakdownIssue.key}
+          issue={breakdownIssue}
+          sprintId={sprintState.data.sprint.id}
+          onClose={() => setBreakdownIssue(null)}
+          onCreated={sprintState.run}
+        />
+      )}
     </Card>
   );
 }

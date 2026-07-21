@@ -1,4 +1,4 @@
-// draftPlanClient tests — CONTRACTS.md §4.30 v1.68, ADR-079
+// draftPlanClient tests — CONTRACTS.md §4.30 v1.70, ADR-081
 // Keyless/offline — mcpClient.callTool is mocked.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -11,13 +11,16 @@ vi.mock("./mcpClient", () => ({
 
 import * as mcpClientModule from "./mcpClient";
 import { getDraftPlan, setDraftPlan } from "./draftPlanClient";
-import type { DraftAssignment, DraftPlan } from "./types";
+import type { DraftShare, DraftPlan } from "./types";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
-const ASSIGNMENTS: Record<string, DraftAssignment> = {
-  "PO-1": { accountId: "acc-1", displayName: "Alice" },
-  "PO-2": { accountId: "acc-2", displayName: "Bob" },
+const ASSIGNMENTS: Record<string, DraftShare[]> = {
+  "PO-1": [{ accountId: "acc-1", displayName: "Alice", points: 5 }],
+  "PO-2": [
+    { accountId: "acc-2", displayName: "Bob", points: 2 },
+    { accountId: "acc-1", displayName: "Alice", points: 1 },
+  ],
 };
 
 const DRAFT_PLAN: DraftPlan = {
@@ -60,6 +63,17 @@ describe("getDraftPlan", () => {
     expect(result).toEqual({ sprintId: 100, devSprintId: null, assignments: {} });
   });
 
+  it("returns a multi-share array for a split ticket", async () => {
+    vi.mocked(mcpClientModule.callTool).mockResolvedValueOnce(DRAFT_PLAN);
+
+    const result = await getDraftPlan(100);
+    expect(result.assignments["PO-2"]).toHaveLength(2);
+    expect(result.assignments["PO-2"]).toEqual([
+      { accountId: "acc-2", displayName: "Bob", points: 2 },
+      { accountId: "acc-1", displayName: "Alice", points: 1 },
+    ]);
+  });
+
   it("throws McpError on bridge error", async () => {
     const error = { code: "BRIDGE_DOWN", message: "Cannot reach jira bridge" };
     vi.mocked(mcpClientModule.callTool).mockRejectedValueOnce(error);
@@ -71,7 +85,7 @@ describe("getDraftPlan", () => {
 // ── setDraftPlan ──────────────────────────────────────────────────────────────
 
 describe("setDraftPlan — full-replace semantics", () => {
-  it("calls set_draft_plan with sprintId, devSprintId, and assignments", async () => {
+  it("calls set_draft_plan with sprintId, devSprintId, and the share-array assignments", async () => {
     vi.mocked(mcpClientModule.callTool).mockResolvedValueOnce(DRAFT_PLAN);
 
     const result = await setDraftPlan(100, 200, ASSIGNMENTS);

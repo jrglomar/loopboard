@@ -11,7 +11,7 @@
  *  [JIRA] POST /api/tools/update_ticket {ticketKey:"DEV-1"} → 400 VALIDATION (refine)
  *  [JIRA] health.ai reports disabled when AI_PROVIDER is empty (v1.1)
  *  [JIRA] POST /api/ai/draft-tickets → 503 AI_UNAVAILABLE when AI disabled (v1.1)
- *  [JIRA] POST set_draft_plan with one valid assignment → 200, echoes sprintId/devSprintId/assignments (v1.68)
+ *  [JIRA] POST set_draft_plan with one developer share → 200, echoes sprintId/devSprintId/assignments (v1.68; DraftShare[] v1.70)
  *  [JIRA] POST get_draft_plan for an unused sprintId → 200 with devSprintId:null, assignments:{} (v1.68)
  *  [JIRA] POST set_draft_plan with an invalid (lowercase) assignments key → 400 VALIDATION (v1.68)
  *  [GITHUB] health shape
@@ -578,20 +578,25 @@ if (!jiraReady) {
     fail("[JIRA] team roster round-trip", String(e));
   }
 
-  // JIRA v1.68 (ADR-079): set_draft_plan with one valid assignment → 200, echoes
-  // { sprintId, devSprintId, assignments } (temp file; DRAFT ONLY — never calls Jira)
+  // JIRA v1.68 (ADR-079): set_draft_plan with one developer share → 200, echoes
+  // { sprintId, devSprintId, assignments } — assignments values are DraftShare[] (v1.70,
+  // ADR-081: a ticket may be split across multiple developers) (temp file; DRAFT ONLY — never
+  // calls Jira)
   try {
     const { status, body } = await httpPost(`http://127.0.0.1:${JIRA_PORT}/api/tools/set_draft_plan`, {
       sprintId: 9001,
       devSprintId: 9002,
-      assignments: { "DEV-1": { accountId: "acc-smoke-1", displayName: "Smoke Tester" } },
+      assignments: { "DEV-1": [{ accountId: "acc-1", displayName: "Dev One", points: 3 }] },
     });
     const ok =
       status === 200 &&
       body.ok === true &&
       body.data?.sprintId === 9001 &&
       body.data?.devSprintId === 9002 &&
-      body.data?.assignments?.["DEV-1"]?.accountId === "acc-smoke-1";
+      Array.isArray(body.data?.assignments?.["DEV-1"]) &&
+      body.data.assignments["DEV-1"][0]?.accountId === "acc-1" &&
+      body.data.assignments["DEV-1"][0]?.displayName === "Dev One" &&
+      body.data.assignments["DEV-1"][0]?.points === 3;
     if (ok) {
       pass("[JIRA] POST set_draft_plan → 200, echoes sprintId/devSprintId/assignments");
     } else {
@@ -625,11 +630,11 @@ if (!jiraReady) {
   }
 
   // JIRA v1.68 (ADR-079): set_draft_plan with an invalid (lowercase) assignments key → 400
-  // VALIDATION — never reaches the store write
+  // VALIDATION — never reaches the store write (assignments value is DraftShare[], v1.70)
   try {
     const { status, body } = await httpPost(`http://127.0.0.1:${JIRA_PORT}/api/tools/set_draft_plan`, {
       sprintId: 9001,
-      assignments: { "dev-1": { accountId: "acc-smoke-1", displayName: "Smoke Tester" } },
+      assignments: { "dev-1": [{ accountId: "a", displayName: "b", points: 1 }] },
     });
     if (status === 400 && body.ok === false && body.error?.code === "VALIDATION") {
       pass("[JIRA] POST set_draft_plan (invalid assignments key) → 400 VALIDATION");

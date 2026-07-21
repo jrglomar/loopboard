@@ -1101,34 +1101,48 @@ reusing `reportMath.ts` (`makeDodPredicate`/`computeSprintPoints`/`computeByAssi
 
 ### 4.30 `get_draft_plan` / `set_draft_plan` (v1.68, ADR-079 — PO draft capacity plan)
 
-A PO-side DRAFT mapping of a PO sprint's tickets onto Dev-board team members, used by the
+A PO-side DRAFT plan splitting a PO sprint's tickets across Dev-board team members, used by the
 Planning page's "Draft Capacity Plan" card to sanity-check ticket load against per-developer
-capacity BEFORE real assignment. Same bridge-side store pattern as §4.21 (json | sqlite via the
-storage port, ADR-077) — NOT a Jira object. **Draft only: these tools NEVER write to Jira**;
-real assignment remains `assign_issue` (§4.15) from the Dev board's Planning/Linking flow.
+capacity. Same bridge-side store pattern as §4.21 (json | sqlite via the storage port, ADR-077) —
+NOT a Jira object. **Draft only: these tools NEVER write to Jira** — not the assignments, not the
+per-share points. Real assignment remains `assign_issue` (§4.15) and real ticket/points/status
+edits remain `update_ticket`/`transition_issue`/`move_issue_to_sprint` from the **Assign Tickets**
+surface (Dev-board Planning/Linking).
+
+**v1.70 (ADR-081): a ticket may be split across MULTIPLE developers**, each carrying a DRAFT slice
+of the points ("breakdown points" — a big story is usually shared work). So an issue key now maps
+to an ARRAY of shares, not one member. The `points` on a share is a draft figure only (defaults to
+the ticket's real Jira points when drafted whole; over/under-allocation vs the real points is
+allowed and never enforced — capacity is advisory, ADR-079).
 
 ```ts
-export interface DraftAssignment { accountId: string; displayName: string }
+export interface DraftShare { accountId: string; displayName: string; points: number }
 ```
 
 - **`get_draft_plan`** — **Input:** `{ sprintId: number }` (the PO sprint). **Output:**
-  `{ sprintId: number; devSprintId: number | null; assignments: Record<string /*issueKey*/, DraftAssignment> }`
+  `{ sprintId: number; devSprintId: number | null; assignments: Record<string /*issueKey*/, DraftShare[]> }`
   (no draft saved → `{ sprintId, devSprintId: null, assignments: {} }`).
 - **`set_draft_plan`** (full-replace per sprint) — **Input:**
-  `{ sprintId: number; devSprintId?: number | null; assignments: Record<string, { accountId: string (1+); displayName: string (1+) }> }`
-  (≤ 300 entries; every `assignments` key must match the §4.4 ticketKey regex → else `400 VALIDATION`).
-  Replaces the sprint's whole draft; `devSprintId` omitted → stored as `null`. Empty `assignments`
-  with `devSprintId` null/omitted **deletes** the sprint's entry from the store. **Output:** the
-  updated `{ sprintId, devSprintId, assignments }` (same shape as `get_draft_plan`).
+  `{ sprintId: number; devSprintId?: number | null; assignments: Record<string, Array<{ accountId: string (1+); displayName: string (1+); points: number (≥ 0) }>> }`.
+  Constraints (→ else `400 VALIDATION`): ≤ 300 issue keys; every key matches the §4.4 ticketKey
+  regex; each key's share array has 1–50 entries and is **de-duped by `accountId`** (a developer
+  appears at most once per ticket — last write wins); an **empty share array for a key is invalid**
+  (omit the key to leave a ticket undrafted). Replaces the sprint's whole draft; `devSprintId`
+  omitted → stored `null`. Empty `assignments` with `devSprintId` null/omitted **deletes** the
+  sprint's entry. **Output:** the updated `{ sprintId, devSprintId, assignments }`.
 - Store name `draft-plan` — env `JIRA_DRAFT_PLAN_FILE` (§3), default
   `<mcp-jira>/.invokeboard-draft-plan.json`, git-ignored. Registered in `storage/registry.ts`
   (`SHARED_STORE_NAMES` + override map) so the json `*_FILE` override and the sqlite auto-import
   both apply (ADR-077). Store shape:
-  `{ "<sprintId>": { "devSprintId": number | null, "assignments": { "<issueKey>": DraftAssignment } } }`.
-  Helpers in `src/lib/draftPlanStore.ts` (`readDraftPlans()`/`writeDraftPlans()`, missing/corrupt → `{}`).
-- Both registered MCP tools (stdio + `/api/tools` + bridge) — jira tools 43 → **45**;
-  `get_draft_plan` joins the AI Q&A read-allowlist (§4.9, 19 → **20** read tools). Tests point
-  `JIRA_DRAFT_PLAN_FILE` at a temp path; keyless/offline; cover round-trip, full-replace,
+  `{ "<sprintId>": { "devSprintId": number | null, "assignments": { "<issueKey>": DraftShare[] } } }`.
+  **Legacy read migration (v1.68→v1.70):** `readDraftPlans()` normalizes any pre-v1.70 single-object
+  value (`{ accountId, displayName }`) to a one-element array `[{ accountId, displayName, points: 0 }]`
+  — no crash, no data loss beyond the (previously nonexistent) point split. Helpers in
+  `src/lib/draftPlanStore.ts` (`readDraftPlans()`/`writeDraftPlans()`, missing/corrupt → `{}`).
+- Both registered MCP tools (unchanged count: jira tools **45**); `get_draft_plan` remains on the
+  AI Q&A read-allowlist (§4.9, **20** read tools). Tests point `JIRA_DRAFT_PLAN_FILE` at a temp path;
+  keyless/offline; cover multi-share round-trip, per-ticket accountId de-dupe, points validation,
+  empty-array-key → VALIDATION, the legacy single-object → array migration, full-replace,
   clear-deletes-entry, bad issue key → VALIDATION, missing/corrupt-file tolerance.
 
 ## 5. mcp-github tools (Phase 2) — exact IO
@@ -3136,3 +3150,36 @@ No tool names, routes, ports, or error codes change. The rename touches identity
     AssignmentList +4 rename cases; Planning assertions extended in place); mcp-jira/mcp-github
     unchanged (644/57) — total **1,767**; smoke unchanged **60/60** (no backend surface touched).
     react-app package version (the UI version pill) bumped 1.68.0 → **1.69.0**.
+
+## Changelog v1.70 (2026-07-21 — Draft Capacity Plan: pure-draft multi-developer point split + full-width redesign; Assign Tickets owns Jira writes; ADR-081)
+
+204. **§4.30 shape change — a ticket splits across MULTIPLE developers.** `DraftShare[]` per issue
+    key (`{ accountId, displayName, points }`) replaces the single `DraftAssignment`. One PO story
+    can now be drafted to several developers, each carrying a DRAFT slice of the points ("breakdown
+    points"). Points are draft-only — defaulting to the ticket's real Jira points when drafted
+    whole, over/under-allocation allowed, **never written to Jira**. `readDraftPlans()` migrates any
+    pre-v1.70 single-object value to a one-element array (`points: 0`); tool count unchanged (45).
+205. **The Draft Capacity Plan card is now strictly Jira-write-free** (fixes the reported concern
+    that draft-card edits hit Jira). Removed from the card: inline points WRITE, rename, status
+    change, move-to-sprint, and the real (ticket-creating) breakdown. Real Jira points show
+    **read-only**. What stays: draft ticket→developer splits (server-side draft store), per-share
+    DRAFT point manipulation, per-developer capacity vs drafted load with over/under, the v1.69
+    leaves/offset capacity-source transparency + non-sticky pairing, and the embedded dev
+    `TeamManager`.
+206. **Assign Tickets is the single real-edit surface** (per the user's note "Assign Tickets should
+    handle those actual changes in JIRA"). It keeps points/status/move/rename (v1.15/v1.37/v1.69)
+    and **gains the real breakdown** — the `BreakdownDialog` (creates new PO stories via
+    `create_po_ticket`, §4.1) relocates here from the draft card. No new tools/routes.
+207. **Full-width two-tier redesign of the Draft Capacity Plan card** (UI/UX pass, `frontend-design`).
+    Developers on TOP as a full-width responsive grid of capacity cards (drop targets: capacity pts,
+    drafted load = Σ share points, over/under chip, their share chips with an inline DRAFT points
+    input + remove); PO tickets on the BOTTOM at full width (real points read-only, an "N of M pts
+    drafted" allocation indicator, the developers a ticket is split across, drag + a native
+    "Draft to…/Add developer" select — ADR-009 a11y path). Replaces the cramped left/right split so
+    both tiers get full width.
+208. **Tests**: mcp-jira 644 → **654** (+10: draft-plan multi-share round-trip, per-ticket de-dupe,
+    points + empty-array validation, legacy single-object migration); react-app 1066 → **1099**
+    (+33: draftPlan rollup over shares, DraftPlanCard multi-share/split/point-edit/read-only/
+    full-width, AssignmentList breakdown relocation, ticketCells unchanged); mcp-github 57 — total
+    **1,810**; smoke 60/60 (shape checks updated, no count change). react-app version pill
+    1.69.0 → **1.70.0**.

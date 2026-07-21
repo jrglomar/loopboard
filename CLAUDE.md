@@ -127,12 +127,14 @@ Do not add tests that require real credentials or network calls.
 | Active-sprint selection (latest-first, pure) | `packages/mcp-jira/src/lib/sprintSelect.ts` |
 | PO draft capacity plan store (v1.68) | `packages/mcp-jira/src/lib/draftPlanStore.ts` |
 | Draft Capacity Plan card + PO↔Dev sprint pairing | `packages/react-app/src/components/DraftPlanCard.tsx`, `src/lib/sprintPairing.ts` |
-| Shared per-ticket action cells (points/status/move/rename) | `packages/react-app/src/components/ticketCells.tsx` |
+| Shared per-ticket action cells (points/status/move/rename) — Assign Tickets only (v1.70) | `packages/react-app/src/components/ticketCells.tsx` |
+| Real breakdown dialog (creates PO sub-stories) — Assign Tickets (v1.70) | `packages/react-app/src/components/BreakdownDialog.tsx` |
+| Draft point-split rollups (per-developer share totals) | `packages/react-app/src/lib/draftPlan.ts` |
 | React AI client (`getAiStatus`, draft, enhance) | `packages/react-app/src/lib/aiClient.ts` |
 | React HTTP client | `packages/react-app/src/lib/mcpClient.ts` |
 | Chat command router (pure function) | `packages/react-app/src/lib/chatRouter.ts` |
 | MCP tool catalog (Guide reference data) | `packages/react-app/src/lib/toolCatalog.ts` |
 | Ticket draft builder (deterministic, no network) | `packages/react-app/src/lib/ticketTemplates.ts` |
-| Architectural Decision Records | `docs/adr/ADR-001.md` through `ADR-080.md` |
+| Architectural Decision Records | `docs/adr/ADR-001.md` through `ADR-081.md` |
 | Integration contract | `docs/CONTRACTS.md` |
 | Setup guide | `docs/SETUP.md` |

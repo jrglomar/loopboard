@@ -45,7 +45,7 @@ import {
   type LinkedIssue,
   type MultiSprintReport,
   type DraftPlan,
-  type DraftAssignment,
+  type DraftShare,
 } from "../lib/types";
 import { useMCP, type UseMCPState } from "./useMCP";
 
@@ -1221,7 +1221,7 @@ export function useMultiSprintReport(
   return hookState;
 }
 
-// ── useDraftPlan (v1.68, ADR-079) ─────────────────────────────────────────────
+// ── useDraftPlan (v1.68, ADR-079; v1.70 share-array shape, ADR-081) ──────────
 
 export interface UseDraftPlanState {
   /** The PO sprint's draft capacity plan, or null before the first load. */
@@ -1230,10 +1230,11 @@ export interface UseDraftPlanState {
   error: McpError | null;
   run: () => void;
   /**
-   * Full-replace the sprint's draft (devSprintId + the whole assignments map),
-   * optimistic with rollback on error. DRAFT ONLY — never writes to Jira.
+   * Full-replace the sprint's draft (devSprintId + the whole assignments map
+   * of issueKey -> DraftShare[]), optimistic with rollback on error. DRAFT
+   * ONLY — never writes to Jira.
    */
-  save: (devSprintId: number | null, assignments: Record<string, DraftAssignment>) => Promise<void>;
+  save: (devSprintId: number | null, assignments: Record<string, DraftShare[]>) => Promise<void>;
 }
 
 /**
@@ -1241,7 +1242,7 @@ export interface UseDraftPlanState {
  * card, PO board only). Loads automatically on mount and when sprintId changes.
  * Pass null to skip loading (no PO sprint selected yet).
  *
- * CONTRACTS.md §4.30 v1.68, ADR-079
+ * CONTRACTS.md §4.30 v1.70, ADR-081
  */
 export function useDraftPlan(sprintId: number | null): UseDraftPlanState {
   const [data, setData] = useState<DraftPlan | null>(null);
@@ -1268,7 +1269,7 @@ export function useDraftPlan(sprintId: number | null): UseDraftPlanState {
   }, [sprintId]);
 
   const save = useCallback(
-    async (devSprintId: number | null, assignments: Record<string, DraftAssignment>) => {
+    async (devSprintId: number | null, assignments: Record<string, DraftShare[]>) => {
       if (sprintId === null) return;
       // Optimistic update: apply immediately, rollback on error
       const prev = data;

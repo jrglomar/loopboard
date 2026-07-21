@@ -153,30 +153,35 @@ vi.mock("../components/AssignmentList", () => ({
     boardId,
     sprintId,
     projectKey,
+    enableBreakdown,
   }: {
     boardId?: number;
     sprintId?: number | null;
     projectKey?: string;
+    // v1.70 (ADR-081): PO-board-only real breakdown gate.
+    enableBreakdown?: boolean;
   }) => (
     <div
       data-testid="assignment-list"
       data-board-id={boardId ?? ""}
       data-sprint-id={sprintId ?? ""}
       data-project-key={projectKey ?? ""}
+      data-enable-breakdown={enableBreakdown ? "true" : "false"}
     >
       Assignment List
     </div>
   ),
 }));
 
-// Mock DraftPlanCard (v1.68, ADR-079) — verify it receives the right props and
-// that Planning only mounts it on the PO board.
+// Mock DraftPlanCard (v1.68, ADR-079; v1.70 redesign, ADR-081) — verify it
+// receives the right props and that Planning only mounts it on the PO board.
+// v1.70: the card no longer takes a `sprints` prop (move/breakdown-from-the-card
+// are gone — it's strictly draft-only now).
 vi.mock("../components/DraftPlanCard", () => ({
   DraftPlanCard: ({
     poBoardId,
     sprintId,
     devBoardId,
-    sprints,
   }: {
     poBoardId?: number;
     sprintId?: number | null;
@@ -184,15 +189,12 @@ vi.mock("../components/DraftPlanCard", () => ({
     devBoardId?: number;
     teamRevision?: number;
     onTeamChange?: () => void;
-    // v1.69 (ADR-080): PO board active+future sprints, for the chip move-to-sprint control.
-    sprints?: unknown[];
   }) => (
     <div
       data-testid="draft-plan-card"
       data-po-board-id={poBoardId ?? ""}
       data-sprint-id={sprintId ?? ""}
       data-dev-board-id={devBoardId ?? ""}
-      data-sprints-count={sprints?.length ?? 0}
     >
       Draft Plan Card
     </div>
@@ -527,6 +529,38 @@ describe("Planning — AssignmentList slot (v1.7, ADR-018)", () => {
   });
 });
 
+describe("Planning — AssignmentList enableBreakdown gating (v1.70, ADR-081)", () => {
+  it("does NOT enable breakdown on the Dev board (default)", async () => {
+    render(<Planning />);
+    await waitFor(() => screen.getByTestId("assignment-list"));
+    expect(screen.getByTestId("assignment-list").getAttribute("data-enable-breakdown")).toBe("false");
+  });
+
+  it("enables breakdown once the PO board is selected", async () => {
+    render(<Planning />);
+    await waitFor(() => screen.getByRole("button", { name: "PO" }));
+    fireEvent.click(screen.getByRole("button", { name: "PO" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("assignment-list").getAttribute("data-enable-breakdown")).toBe("true");
+    });
+  });
+
+  it("disables breakdown again when switching back to the Dev board", async () => {
+    render(<Planning />);
+    await waitFor(() => screen.getByRole("button", { name: "PO" }));
+    fireEvent.click(screen.getByRole("button", { name: "PO" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("assignment-list").getAttribute("data-enable-breakdown")).toBe("true")
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Dev" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("assignment-list").getAttribute("data-enable-breakdown")).toBe("false")
+    );
+  });
+});
+
 describe("Planning — board change re-defaults sprint target (v1.7, ADR-018)", () => {
   it("switching to PO board re-defaults the sprint picker to the PO future sprint", async () => {
     const poSprintId = 201;
@@ -571,7 +605,7 @@ describe("Planning — DraftPlanCard slot (v1.68, ADR-079) — PO board only", (
     expect(screen.queryByTestId("draft-plan-card")).toBeNull();
   });
 
-  it("renders DraftPlanCard on the PO board with poBoardId, sprintId, devBoardId, and sprints", async () => {
+  it("renders DraftPlanCard on the PO board with poBoardId, sprintId, and devBoardId", async () => {
     const poSprintId = 201;
     vi.mocked(useJiraModule.useSprintList).mockReturnValue({
       data: {
@@ -606,10 +640,12 @@ describe("Planning — DraftPlanCard slot (v1.68, ADR-079) — PO board only", (
       expect(card.getAttribute("data-po-board-id")).toBe("20");
       expect(card.getAttribute("data-sprint-id")).toBe(String(poSprintId));
       expect(card.getAttribute("data-dev-board-id")).toBe("10");
-      // v1.69 (ADR-080): sprints = [...active, ...future] for the PO board (1 future, 0 active)
-      expect(card.getAttribute("data-sprints-count")).toBe("1");
     });
   });
+
+  // v1.70 (ADR-081): DraftPlanCard no longer moves tickets or hosts the real
+  // breakdown dialog, so it no longer receives (or needs) the PO board's
+  // `sprints` list — confirmed by the mock above not even destructuring it.
 
   it("removes DraftPlanCard again when switching back to the Dev board", async () => {
     render(<Planning />);

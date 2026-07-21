@@ -98,13 +98,16 @@ export interface TeamMember {
 }
 
 /**
- * A PO-side DRAFT assignment of a ticket to a dev-team member (v1.68, ADR-079). Used by
- * get_draft_plan/set_draft_plan to sanity-check ticket load against per-developer capacity
- * BEFORE real assignment. Persisted to JIRA_DRAFT_PLAN_FILE — these tools NEVER write to Jira.
+ * A PO-side DRAFT share of a ticket assigned to one dev-team member (v1.68, ADR-079; multi-
+ * developer point split v1.70, ADR-081). A ticket may be split across MULTIPLE developers, each
+ * carrying a DraftShare — used by get_draft_plan/set_draft_plan to sanity-check ticket load
+ * against per-developer capacity BEFORE real assignment. `points` is a DRAFT figure only — it is
+ * never written to Jira. Persisted to JIRA_DRAFT_PLAN_FILE — these tools NEVER write to Jira.
  */
-export interface DraftAssignment {
+export interface DraftShare {
   accountId: string;
   displayName: string;
+  points: number;
 }
 
 /** Output shape for the get_daily_huddle tool (v1.2). */

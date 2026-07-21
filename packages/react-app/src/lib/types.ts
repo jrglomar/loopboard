@@ -668,27 +668,37 @@ export interface SyncPrLinksOutput {
   skipped: Array<{ number: number; reason: string }>;
 }
 
-// ── Draft capacity plan (CONTRACTS.md §4.30 v1.68, ADR-079) ─────────────────
+// ── Draft capacity plan (CONTRACTS.md §4.30 v1.70, ADR-081) ─────────────────
 
 /**
- * One PO-sprint ticket drafted onto a Dev-board team member. displayName is
+ * One developer's DRAFT point slice of a PO-sprint ticket. displayName is
  * snapshotted alongside accountId so a member later removed from the Dev roster
  * still renders meaningfully (leaves/capacity are display-name-keyed, ADR-016).
- * DRAFT ONLY — never written to Jira; real assignment remains assign_issue
- * (§4.15) from the Dev board's Planning/Linking flow.
+ * `points` is a draft figure only — defaults to the ticket's real Jira points
+ * when drafted whole to one person, splits when a second share is added;
+ * over/under vs the real points is allowed and never enforced (capacity is
+ * advisory, ADR-079). DRAFT ONLY — never written to Jira; real assignment
+ * remains assign_issue (§4.15) from the Dev board's Planning/Linking flow.
+ *
+ * v1.70 (ADR-081): replaces the single-member `DraftAssignment` — a ticket now
+ * maps to an ARRAY of shares (`DraftPlan.assignments[issueKey]: DraftShare[]`),
+ * so one PO story can be split across several developers.
  */
-export interface DraftAssignment {
+export interface DraftShare {
   accountId: string;
   displayName: string;
+  points: number;
 }
 
 /**
- * get_draft_plan / set_draft_plan output — a PO sprint's draft ticket→developer
- * mapping, paired with the Dev sprint used as the capacity source. No draft saved
- * yet → { sprintId, devSprintId: null, assignments: {} }.
+ * get_draft_plan / set_draft_plan output — a PO sprint's draft ticket→developer-
+ * shares mapping, paired with the Dev sprint used as the capacity source. No
+ * draft saved yet → { sprintId, devSprintId: null, assignments: {} }. An empty
+ * share array for a key is invalid server-side — omit the key to leave a ticket
+ * undrafted.
  */
 export interface DraftPlan {
   sprintId: number;
   devSprintId: number | null;
-  assignments: Record<string, DraftAssignment>;
+  assignments: Record<string, DraftShare[]>;
 }

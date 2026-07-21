@@ -1,4 +1,5 @@
-// Draft-plan store tools — v1.68, ADR-079. Keyless/offline (temp JSON file).
+// Draft-plan store tools — v1.68, ADR-079; multi-developer point split v1.70, ADR-081.
+// Keyless/offline (temp JSON file).
 // DRAFT ONLY: get_draft_plan/set_draft_plan never call Jira.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
@@ -28,10 +29,16 @@ afterEach(() => {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
 });
 
+interface DraftShareOut {
+  accountId: string;
+  displayName: string;
+  points: number;
+}
+
 interface DraftPlanOutput {
   sprintId: number;
   devSprintId: number | null;
-  assignments: Record<string, { accountId: string; displayName: string }>;
+  assignments: Record<string, DraftShareOut[]>;
 }
 
 describe("get_draft_plan (v1.68)", () => {
@@ -51,18 +58,65 @@ describe("set_draft_plan → get_draft_plan round-trip (v1.68)", () => {
       sprintId: 500,
       devSprintId: 700,
       assignments: {
-        "DEV-1": { accountId: "acc-1", displayName: "Alice" },
-        "DEV-2": { accountId: "acc-2", displayName: "Bob" },
+        "DEV-1": [{ accountId: "acc-1", displayName: "Alice", points: 5 }],
+        "DEV-2": [{ accountId: "acc-2", displayName: "Bob", points: 3 }],
       },
     })) as DraftPlanOutput;
 
     expect(setOut.sprintId).toBe(500);
     expect(setOut.devSprintId).toBe(700);
-    expect(setOut.assignments["DEV-1"]).toEqual({ accountId: "acc-1", displayName: "Alice" });
-    expect(setOut.assignments["DEV-2"]).toEqual({ accountId: "acc-2", displayName: "Bob" });
+    expect(setOut.assignments["DEV-1"]).toEqual([{ accountId: "acc-1", displayName: "Alice", points: 5 }]);
+    expect(setOut.assignments["DEV-2"]).toEqual([{ accountId: "acc-2", displayName: "Bob", points: 3 }]);
 
     const getOut = (await getDraftPlanTool.handler({ sprintId: 500 })) as DraftPlanOutput;
     expect(getOut).toEqual(setOut);
+  });
+
+  it("supports a ticket split across multiple developer shares, each with its own draft points", async () => {
+    const setOut = (await setDraftPlanTool.handler({
+      sprintId: 511,
+      devSprintId: 700,
+      assignments: {
+        "DEV-1": [
+          { accountId: "acc-1", displayName: "Alice", points: 3 },
+          { accountId: "acc-2", displayName: "Bob", points: 2 },
+          { accountId: "acc-3", displayName: "Carl", points: 1 },
+        ],
+      },
+    })) as DraftPlanOutput;
+
+    expect(setOut.assignments["DEV-1"]).toEqual([
+      { accountId: "acc-1", displayName: "Alice", points: 3 },
+      { accountId: "acc-2", displayName: "Bob", points: 2 },
+      { accountId: "acc-3", displayName: "Carl", points: 1 },
+    ]);
+
+    const getOut = (await getDraftPlanTool.handler({ sprintId: 511 })) as DraftPlanOutput;
+    expect(getOut).toEqual(setOut);
+  });
+
+  it("de-dupes a ticket's shares by accountId — a developer appears once, last write wins", async () => {
+    const setOut = (await setDraftPlanTool.handler({
+      sprintId: 512,
+      assignments: {
+        "DEV-1": [
+          { accountId: "acc-1", displayName: "Alice (stale)", points: 8 },
+          { accountId: "acc-2", displayName: "Bob", points: 2 },
+          { accountId: "acc-1", displayName: "Alice", points: 5 },
+        ],
+      },
+    })) as DraftPlanOutput;
+
+    expect(setOut.assignments["DEV-1"]).toHaveLength(2);
+    expect(setOut.assignments["DEV-1"]).toContainEqual({ accountId: "acc-1", displayName: "Alice", points: 5 });
+    expect(setOut.assignments["DEV-1"]).toContainEqual({ accountId: "acc-2", displayName: "Bob", points: 2 });
+    // The stale duplicate is gone entirely.
+    expect(setOut.assignments["DEV-1"]).not.toContainEqual(
+      expect.objectContaining({ displayName: "Alice (stale)" })
+    );
+
+    const getOut = (await getDraftPlanTool.handler({ sprintId: 512 })) as DraftPlanOutput;
+    expect(getOut.assignments["DEV-1"]).toHaveLength(2);
   });
 
   it("devSprintId persists when provided, and defaults to null when omitted", async () => {
@@ -78,7 +132,7 @@ describe("set_draft_plan → get_draft_plan round-trip (v1.68)", () => {
 
     const withoutDev = (await setDraftPlanTool.handler({
       sprintId: 502,
-      assignments: { "DEV-3": { accountId: "acc-3", displayName: "Carl" } },
+      assignments: { "DEV-3": [{ accountId: "acc-3", displayName: "Carl", points: 2 }] },
     })) as DraftPlanOutput;
     expect(withoutDev.devSprintId).toBeNull();
   });
@@ -86,7 +140,7 @@ describe("set_draft_plan → get_draft_plan round-trip (v1.68)", () => {
   it("is per-sprint (sprint 900 unaffected by sprint 501)", async () => {
     await setDraftPlanTool.handler({
       sprintId: 501,
-      assignments: { "DEV-3": { accountId: "acc-3", displayName: "Carl" } },
+      assignments: { "DEV-3": [{ accountId: "acc-3", displayName: "Carl", points: 2 }] },
     });
     const other = (await getDraftPlanTool.handler({ sprintId: 900 })) as DraftPlanOutput;
     expect(other.assignments).toEqual({});
@@ -97,15 +151,15 @@ describe("set_draft_plan → get_draft_plan round-trip (v1.68)", () => {
     await setDraftPlanTool.handler({
       sprintId: 503,
       assignments: {
-        "DEV-1": { accountId: "acc-1", displayName: "Alice" },
-        "DEV-2": { accountId: "acc-2", displayName: "Bob" },
+        "DEV-1": [{ accountId: "acc-1", displayName: "Alice", points: 3 }],
+        "DEV-2": [{ accountId: "acc-2", displayName: "Bob", points: 5 }],
       },
     });
 
     const second = (await setDraftPlanTool.handler({
       sprintId: 503,
       devSprintId: 900,
-      assignments: { "DEV-9": { accountId: "acc-9", displayName: "Zoe" } },
+      assignments: { "DEV-9": [{ accountId: "acc-9", displayName: "Zoe", points: 1 }] },
     })) as DraftPlanOutput;
 
     expect(Object.keys(second.assignments)).toEqual(["DEV-9"]);
@@ -119,7 +173,7 @@ describe("set_draft_plan → get_draft_plan round-trip (v1.68)", () => {
     await setDraftPlanTool.handler({
       sprintId: 504,
       devSprintId: 111,
-      assignments: { "DEV-1": { accountId: "acc-1", displayName: "Alice" } },
+      assignments: { "DEV-1": [{ accountId: "acc-1", displayName: "Alice", points: 4 }] },
     });
 
     const cleared = (await setDraftPlanTool.handler({
@@ -140,7 +194,7 @@ describe("set_draft_plan → get_draft_plan round-trip (v1.68)", () => {
     await setDraftPlanTool.handler({
       sprintId: 508,
       devSprintId: 222,
-      assignments: { "DEV-1": { accountId: "acc-1", displayName: "Alice" } },
+      assignments: { "DEV-1": [{ accountId: "acc-1", displayName: "Alice", points: 4 }] },
     });
     await setDraftPlanTool.handler({ sprintId: 508, devSprintId: null, assignments: {} });
 
@@ -149,7 +203,7 @@ describe("set_draft_plan → get_draft_plan round-trip (v1.68)", () => {
   });
 });
 
-describe("set_draft_plan validation (v1.68)", () => {
+describe("set_draft_plan validation (v1.68; points + share-array bounds v1.70)", () => {
   it("rejects missing sprintId", async () => {
     await expect(setDraftPlanTool.handler({ assignments: {} })).rejects.toThrow();
   });
@@ -158,31 +212,79 @@ describe("set_draft_plan validation (v1.68)", () => {
     await expect(
       setDraftPlanTool.handler({
         sprintId: 505,
-        assignments: { "dev-1": { accountId: "acc-1", displayName: "Alice" } },
+        assignments: { "dev-1": [{ accountId: "acc-1", displayName: "Alice", points: 1 }] },
       })
     ).rejects.toThrow();
   });
 
-  it("rejects an assignment entry with an empty accountId or displayName", async () => {
+  it("rejects a share with an empty accountId or displayName", async () => {
     await expect(
       setDraftPlanTool.handler({
         sprintId: 505,
-        assignments: { "DEV-1": { accountId: "", displayName: "Alice" } },
+        assignments: { "DEV-1": [{ accountId: "", displayName: "Alice", points: 1 }] },
       })
     ).rejects.toThrow();
 
     await expect(
       setDraftPlanTool.handler({
         sprintId: 505,
-        assignments: { "DEV-1": { accountId: "acc-1", displayName: "" } },
+        assignments: { "DEV-1": [{ accountId: "acc-1", displayName: "", points: 1 }] },
       })
     ).rejects.toThrow();
+  });
+
+  it("rejects a share with negative points", async () => {
+    await expect(
+      setDraftPlanTool.handler({
+        sprintId: 505,
+        assignments: { "DEV-1": [{ accountId: "acc-1", displayName: "Alice", points: -1 }] },
+      })
+    ).rejects.toThrow();
+  });
+
+  it("accepts zero points on a share (an unpointed/unsized draft slice)", async () => {
+    const out = (await setDraftPlanTool.handler({
+      sprintId: 509,
+      assignments: { "DEV-1": [{ accountId: "acc-1", displayName: "Alice", points: 0 }] },
+    })) as DraftPlanOutput;
+    expect(out.assignments["DEV-1"]).toEqual([{ accountId: "acc-1", displayName: "Alice", points: 0 }]);
+  });
+
+  it("rejects an empty share array for a key (omit the key instead)", async () => {
+    await expect(
+      setDraftPlanTool.handler({
+        sprintId: 505,
+        assignments: { "DEV-1": [] },
+      })
+    ).rejects.toThrow();
+  });
+
+  it("rejects more than 50 shares on a single ticket", async () => {
+    const shares = [];
+    for (let i = 0; i < 51; i++) {
+      shares.push({ accountId: `acc-${i}`, displayName: `Person ${i}`, points: 1 });
+    }
+    await expect(
+      setDraftPlanTool.handler({ sprintId: 513, assignments: { "DEV-1": shares } })
+    ).rejects.toThrow();
+  });
+
+  it("accepts exactly 50 shares on a single ticket", async () => {
+    const shares = [];
+    for (let i = 0; i < 50; i++) {
+      shares.push({ accountId: `acc-${i}`, displayName: `Person ${i}`, points: 1 });
+    }
+    const out = (await setDraftPlanTool.handler({
+      sprintId: 514,
+      assignments: { "DEV-1": shares },
+    })) as DraftPlanOutput;
+    expect(out.assignments["DEV-1"]).toHaveLength(50);
   });
 
   it("rejects more than 300 assignment entries", async () => {
-    const assignments: Record<string, { accountId: string; displayName: string }> = {};
+    const assignments: Record<string, Array<{ accountId: string; displayName: string; points: number }>> = {};
     for (let i = 0; i < 301; i++) {
-      assignments[`DEV-${i}`] = { accountId: `acc-${i}`, displayName: `Person ${i}` };
+      assignments[`DEV-${i}`] = [{ accountId: `acc-${i}`, displayName: `Person ${i}`, points: 1 }];
     }
     await expect(
       setDraftPlanTool.handler({ sprintId: 506, assignments })
@@ -190,9 +292,9 @@ describe("set_draft_plan validation (v1.68)", () => {
   });
 
   it("accepts exactly 300 assignment entries", async () => {
-    const assignments: Record<string, { accountId: string; displayName: string }> = {};
+    const assignments: Record<string, Array<{ accountId: string; displayName: string; points: number }>> = {};
     for (let i = 0; i < 300; i++) {
-      assignments[`DEV-${i}`] = { accountId: `acc-${i}`, displayName: `Person ${i}` };
+      assignments[`DEV-${i}`] = [{ accountId: `acc-${i}`, displayName: `Person ${i}`, points: 1 }];
     }
     const out = (await setDraftPlanTool.handler({ sprintId: 507, assignments })) as DraftPlanOutput;
     expect(Object.keys(out.assignments)).toHaveLength(300);
@@ -216,6 +318,69 @@ describe("draft-plan store — missing/corrupt file tolerance (v1.68)", () => {
     fs.writeFileSync(draftPlanFile, JSON.stringify([1, 2, 3]), "utf8");
     const out = (await getDraftPlanTool.handler({ sprintId: 999 })) as DraftPlanOutput;
     expect(out).toEqual({ sprintId: 999, devSprintId: null, assignments: {} });
+  });
+});
+
+describe("legacy migration — pre-v1.70 single-object assignment normalizes to DraftShare[] (v1.70, ADR-081)", () => {
+  it("wraps a legacy {accountId,displayName} value to a one-element array with points:0", async () => {
+    // Write the OLD (v1.68/v1.69) shape directly to the temp store file, bypassing
+    // setDraftPlanTool (which only ever writes the current shape).
+    const legacyDoc = {
+      "600": {
+        devSprintId: 42,
+        assignments: {
+          "DEV-9": { accountId: "acc-9", displayName: "Zoe" },
+        },
+      },
+    };
+    fs.writeFileSync(draftPlanFile, JSON.stringify(legacyDoc), "utf8");
+
+    const out = (await getDraftPlanTool.handler({ sprintId: 600 })) as DraftPlanOutput;
+    expect(out.devSprintId).toBe(42);
+    expect(out.assignments).toEqual({
+      "DEV-9": [{ accountId: "acc-9", displayName: "Zoe", points: 0 }],
+    });
+  });
+
+  it("passes an already-migrated array value through untouched, and drops a garbage value", async () => {
+    const mixedDoc = {
+      "601": {
+        devSprintId: null,
+        assignments: {
+          "DEV-1": { accountId: "acc-1", displayName: "Alice" }, // legacy single object
+          "DEV-2": [{ accountId: "acc-2", displayName: "Bob", points: 4 }], // already an array
+          "DEV-3": "garbage", // neither array nor object — dropped
+        },
+      },
+    };
+    fs.writeFileSync(draftPlanFile, JSON.stringify(mixedDoc), "utf8");
+
+    const out = (await getDraftPlanTool.handler({ sprintId: 601 })) as DraftPlanOutput;
+    expect(out.assignments["DEV-1"]).toEqual([{ accountId: "acc-1", displayName: "Alice", points: 0 }]);
+    expect(out.assignments["DEV-2"]).toEqual([{ accountId: "acc-2", displayName: "Bob", points: 4 }]);
+    expect(out.assignments["DEV-3"]).toBeUndefined();
+  });
+
+  it("a legacy write is only ever read back once migrated — a fresh set_draft_plan re-save stores the current array shape", async () => {
+    fs.writeFileSync(
+      draftPlanFile,
+      JSON.stringify({
+        "602": { devSprintId: null, assignments: { "DEV-9": { accountId: "acc-9", displayName: "Zoe" } } },
+      }),
+      "utf8"
+    );
+
+    // Re-save via set_draft_plan (as the UI would after loading + editing a migrated draft).
+    await setDraftPlanTool.handler({
+      sprintId: 602,
+      assignments: { "DEV-9": [{ accountId: "acc-9", displayName: "Zoe", points: 3 }] },
+    });
+
+    const raw = JSON.parse(fs.readFileSync(draftPlanFile, "utf8")) as Record<
+      string,
+      { assignments: Record<string, unknown> }
+    >;
+    expect(raw["602"]?.assignments["DEV-9"]).toEqual([{ accountId: "acc-9", displayName: "Zoe", points: 3 }]);
   });
 });
 

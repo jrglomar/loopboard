@@ -426,6 +426,9 @@ export function Planning({
         capacity. Never calls assign_issue — persisted via get_draft_plan/
         set_draft_plan (draft only). devBoardId reads the Dev board's first
         project (same array-of-projects model as everywhere else, ADR-037).
+        v1.70 (ADR-081): the card no longer moves tickets between sprints or
+        opens the (now-relocated) breakdown dialog, so it no longer needs the
+        PO board's `sprints` list.
       */}
       {selectedBoardKey === "po" && (
         <section aria-label="Draft capacity plan" className="min-w-0">
@@ -436,7 +439,6 @@ export function Planning({
             devBoardId={boards !== null ? boards.dev[activeProjectIdx]?.id : undefined}
             teamRevision={teamRevision}
             onTeamChange={handleTeamChange}
-            sprints={[...activeSprints, ...futureSprints]}
           />
         </section>
       )}
@@ -446,6 +448,9 @@ export function Planning({
         v1.8 (ADR-019): roster from curated team; pre-selects current assignee
         by assigneeAccountId; off-team assignees shown as disabled option.
         teamRevision triggers a re-fetch after TeamManager saves.
+        v1.70 (ADR-081): AssignmentList is the one real-edit surface for planning,
+        so it now also hosts the real (Jira-ticket-creating) breakdown dialog —
+        PO-board only, since it creates new PO stories.
       */}
       <section aria-label="Ticket assignment" className="min-w-0">
         <AssignmentList
@@ -454,6 +459,7 @@ export function Planning({
           projectKey={selectedProjectKey}
           teamRevision={teamRevision}
           sprints={[...activeSprints, ...futureSprints]}
+          enableBreakdown={selectedBoardKey === "po"}
         />
       </section>
     </div>

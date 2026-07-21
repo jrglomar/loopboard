@@ -1,4 +1,4 @@
-// useDraftPlan hook tests — CONTRACTS.md §4.30 v1.68, ADR-079
+// useDraftPlan hook tests — CONTRACTS.md §4.30 v1.70, ADR-081
 // Keyless/offline — draftPlanClient is mocked.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -13,17 +13,17 @@ vi.mock("../lib/draftPlanClient", () => ({
 
 import * as draftPlanClientModule from "../lib/draftPlanClient";
 import { useDraftPlan } from "./useJira";
-import type { DraftAssignment, DraftPlan } from "../lib/types";
+import type { DraftShare, DraftPlan } from "../lib/types";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
-const ALICE: DraftAssignment = { accountId: "acc-1", displayName: "Alice" };
-const BOB: DraftAssignment = { accountId: "acc-2", displayName: "Bob" };
+const ALICE: DraftShare = { accountId: "acc-1", displayName: "Alice", points: 5 };
+const BOB: DraftShare = { accountId: "acc-2", displayName: "Bob", points: 3 };
 
 const PLAN: DraftPlan = {
   sprintId: 100,
   devSprintId: 200,
-  assignments: { "PO-1": ALICE },
+  assignments: { "PO-1": [ALICE] },
 };
 
 const EMPTY_PLAN: DraftPlan = { sprintId: 100, devSprintId: null, assignments: {} };
@@ -129,7 +129,7 @@ describe("useDraftPlan — run() refetch", () => {
 // ── save() ────────────────────────────────────────────────────────────────────
 
 describe("useDraftPlan — save(devSprintId, assignments)", () => {
-  it("calls setDraftPlan with the full replacement and updates local state", async () => {
+  it("calls setDraftPlan with the full replacement (share arrays) and updates local state", async () => {
     vi.mocked(draftPlanClientModule.getDraftPlan).mockResolvedValueOnce(EMPTY_PLAN);
     vi.mocked(draftPlanClientModule.setDraftPlan).mockResolvedValueOnce(PLAN);
 
@@ -137,11 +137,11 @@ describe("useDraftPlan — save(devSprintId, assignments)", () => {
     await waitFor(() => expect(result.current.data).toEqual(EMPTY_PLAN));
 
     await act(async () => {
-      await result.current.save(200, { "PO-1": ALICE });
+      await result.current.save(200, { "PO-1": [ALICE] });
     });
 
     expect(vi.mocked(draftPlanClientModule.setDraftPlan)).toHaveBeenCalledWith(100, 200, {
-      "PO-1": ALICE,
+      "PO-1": [ALICE],
     });
     expect(result.current.data).toEqual(PLAN);
   });
@@ -157,17 +157,37 @@ describe("useDraftPlan — save(devSprintId, assignments)", () => {
 
     let savePromise!: Promise<void>;
     act(() => {
-      savePromise = result.current.save(200, { "PO-1": ALICE, "PO-2": BOB });
+      savePromise = result.current.save(200, { "PO-1": [ALICE], "PO-2": [BOB] });
     });
 
     // Optimistic: applied before the server call resolves.
     expect(result.current.data).toEqual({
       sprintId: 100,
       devSprintId: 200,
-      assignments: { "PO-1": ALICE, "PO-2": BOB },
+      assignments: { "PO-1": [ALICE], "PO-2": [BOB] },
     });
 
     resolveSave!(PLAN);
+    await act(async () => { await savePromise; });
+  });
+
+  it("applies an optimistic multi-share array (a split ticket) before the server responds", async () => {
+    vi.mocked(draftPlanClientModule.getDraftPlan).mockResolvedValueOnce(EMPTY_PLAN);
+    let resolveSave: (v: DraftPlan) => void;
+    const pending = new Promise<DraftPlan>((res) => { resolveSave = res; });
+    vi.mocked(draftPlanClientModule.setDraftPlan).mockReturnValueOnce(pending);
+
+    const { result } = renderHook(() => useDraftPlan(100));
+    await waitFor(() => expect(result.current.data).toEqual(EMPTY_PLAN));
+
+    let savePromise!: Promise<void>;
+    act(() => {
+      savePromise = result.current.save(200, { "PO-1": [ALICE, BOB] });
+    });
+
+    expect(result.current.data?.assignments["PO-1"]).toEqual([ALICE, BOB]);
+
+    resolveSave!({ sprintId: 100, devSprintId: 200, assignments: { "PO-1": [ALICE, BOB] } });
     await act(async () => { await savePromise; });
   });
 
@@ -195,7 +215,7 @@ describe("useDraftPlan — save(devSprintId, assignments)", () => {
     const { result } = renderHook(() => useDraftPlan(null));
 
     await act(async () => {
-      await result.current.save(200, { "PO-1": ALICE });
+      await result.current.save(200, { "PO-1": [ALICE] });
     });
 
     expect(vi.mocked(draftPlanClientModule.setDraftPlan)).not.toHaveBeenCalled();
