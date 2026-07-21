@@ -233,11 +233,6 @@ function IssueCard({
           <div className="flex items-center gap-1 flex-shrink-0">
             {/* v1.27 (ADR-039): linked-PR badge — clickable, opens newest PR */}
             <PrBadge prs={prs} />
-            {/* v1.58 (ADR-070): work-item age — only when the changelog resolved a start date.
-                v1.61 (ADR-073, item 173): In Progress column only. */}
-            {showAgeChip && (
-              <AgeChip issue={issue} policy={agingPolicy} sprintStartDate={sprintStartDate} />
-            )}
             {issue.storyPoints != null && (
               <Badge
                 variant="outline"
