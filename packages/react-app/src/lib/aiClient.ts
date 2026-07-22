@@ -17,6 +17,8 @@ import type {
   PlanDevTicketsResponse,
   AskRequest,
   AskResponse,
+  AskCard,
+  AskStreamEvent,
 } from "./types";
 
 /** HTTP bridge base URL — same as mcpClient jira base */
@@ -169,4 +171,159 @@ export async function aiPlanDevTickets(
  */
 export async function aiAsk(body: AskRequest): Promise<AskResponse> {
   return postAi<AskResponse>("/api/ai/ask", body);
+}
+
+/** Handlers for the streaming Ask endpoint (v1.71, ADR-082) — all optional. */
+export interface AskStreamHandlers {
+  /** A read-tool batch is about to run (drives the live "Looking at…" indicator). */
+  onStep?: (tools: string[]) => void;
+  /** A chunk of the streamed answer — append in order. */
+  onDelta?: (text: string) => void;
+  /** Rich cards captured so far (≤3). */
+  onCards?: (cards: AskCard[]) => void;
+}
+
+/**
+ * Parse one SSE frame ("event: <name>\n data: <json>") into a typed event. The bridge sends the whole
+ * event object as data; we trust the SSE event NAME for the discriminant. Returns null for frames
+ * with no/invalid data (e.g. comments/keep-alives).
+ */
+function parseSseFrame(frame: string): AskStreamEvent | null {
+  let event = "message";
+  const dataLines: string[] = [];
+  for (const line of frame.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
+  }
+  if (dataLines.length === 0) return null;
+  try {
+    const data = JSON.parse(dataLines.join("\n")) as Record<string, unknown>;
+    return { ...data, type: event } as AskStreamEvent;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * POST /api/ai/ask/stream — streaming AI Q&A assistant (v1.71, ADR-082).
+ * Consumes the SSE stream, forwarding progress to `handlers`, and resolves to the final AskResponse
+ * (from the `done` or `proposed` event). Pre-flush failures arrive as a JSON error envelope and throw
+ * the same McpError shape as {@link aiAsk} (incl. AI_UNAVAILABLE / BRIDGE_DOWN), so callers can fall
+ * back to the non-streaming endpoint. An `error` event mid-stream also throws.
+ */
+export async function aiAskStream(
+  body: AskRequest,
+  handlers: AskStreamHandlers = {}
+): Promise<AskResponse> {
+  const url = `${JIRA_BASE}/api/ai/ask/stream`;
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+      credentials: "include",
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw bridgeDownError();
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+
+  // Pre-flush failure (validation / config / AI_UNAVAILABLE) → JSON error envelope, like postAi.
+  if (!response.ok || contentType.includes("application/json")) {
+    let parsed: unknown;
+    try {
+      parsed = await response.json();
+    } catch {
+      const err: McpError = {
+        code: "INTERNAL",
+        message: `Bridge returned non-JSON error (status ${response.status})`,
+      };
+      throw err;
+    }
+    if (typeof parsed === "object" && parsed !== null && "error" in parsed) {
+      const e = (parsed as { error: { code: string; message: string; issues?: unknown[] } }).error;
+      const err: McpError = { code: e.code, message: e.message, issues: e.issues };
+      throw err;
+    }
+    const err: McpError = { code: "INTERNAL", message: "Unexpected error from AI stream endpoint" };
+    throw err;
+  }
+
+  if (!response.body) {
+    const err: McpError = { code: "INTERNAL", message: "AI stream endpoint returned no body" };
+    throw err;
+  }
+
+  let result: AskResponse | null = null;
+  const handle = (ev: AskStreamEvent): void => {
+    switch (ev.type) {
+      case "step":
+        handlers.onStep?.(ev.tools);
+        break;
+      case "delta":
+        handlers.onDelta?.(ev.text);
+        break;
+      case "cards":
+        handlers.onCards?.(ev.cards);
+        break;
+      case "proposed":
+        result = {
+          answer: ev.answer,
+          toolsUsed: ev.toolsUsed,
+          provider: ev.provider,
+          model: ev.model,
+          proposedAction: ev.proposedAction,
+        };
+        break;
+      case "done":
+        result = {
+          answer: ev.answer,
+          toolsUsed: ev.toolsUsed,
+          provider: ev.provider,
+          model: ev.model,
+          ...(ev.cards ? { cards: ev.cards } : {}),
+        };
+        break;
+      case "error": {
+        const err: McpError = { code: ev.code, message: ev.message };
+        throw err;
+      }
+    }
+  };
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (value) buffer += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buffer.indexOf("\n\n")) !== -1) {
+        const frame = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        const ev = parseSseFrame(frame);
+        if (ev) handle(ev);
+      }
+      if (done) break;
+    }
+    const tail = buffer.trim();
+    if (tail) {
+      const ev = parseSseFrame(tail);
+      if (ev) handle(ev);
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      /* already closed */
+    }
+  }
+
+  if (result) return result;
+  const err: McpError = { code: "INTERNAL", message: "AI stream ended without a final answer" };
+  throw err;
 }

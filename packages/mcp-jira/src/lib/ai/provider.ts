@@ -68,6 +68,20 @@ export interface AiProvider {
     messages: AiToolMessage[],
     tools: AiToolSpec[]
   ): Promise<ChatWithToolsResult>;
+
+  /**
+   * Streaming variant of chatWithTools (v1.71, ADR-082). Same return contract, but
+   * invokes onDelta(chunk) as final-answer text arrives. When the turn resolves to
+   * tool_calls instead of a final answer, onDelta may not be called at all. Anthropic
+   * streams true token deltas; GitHub Models buffers and emits the whole answer once.
+   * Throws UpstreamError on API failure.
+   */
+  chatWithToolsStream(
+    system: string,
+    messages: AiToolMessage[],
+    tools: AiToolSpec[],
+    onDelta: (chunk: string) => void
+  ): Promise<ChatWithToolsResult>;
 }
 
 /**
