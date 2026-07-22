@@ -84,6 +84,28 @@ export interface ProposedAction {
   args: Record<string, unknown>;
 }
 
+/**
+ * v1.71 (ADR-082): a rich card captured from a read tool's in-process result, so the UI can
+ * render the same result cards the deterministic commands use — no extra model call.
+ */
+export interface AskCard {
+  kind: "ticket" | "sprint" | "huddle";
+  data: unknown;
+}
+
+/**
+ * Card-able read tools: name → card kind. Only tools whose output shape matches an existing
+ * ChatPanel result-card renderer are here (PR cards deferred — the jira get_pull_requests shape
+ * differs from the pr-list renderer).
+ */
+const CARD_TOOLS: Record<string, AskCard["kind"]> = {
+  get_ticket: "ticket",
+  get_active_sprint: "sprint",
+  get_daily_huddle: "huddle",
+};
+
+const MAX_CARDS = 3;
+
 export interface AskResult {
   answer: string;
   toolsUsed: string[];
@@ -91,6 +113,64 @@ export interface AskResult {
   model: string;
   /** v1.19: a write the model wants to make — surfaced for human confirmation, NOT executed. */
   proposedAction?: ProposedAction;
+  /** v1.71 (ADR-082): rich cards captured from the read tools the loop ran (≤3). */
+  cards: AskCard[];
+}
+
+/**
+ * v1.71 (ADR-082): progress events emitted by askAssistantStream. The bridge serializes these as
+ * SSE frames; askAssistant collects them into an AskResult. `error` is emitted by the bridge (on a
+ * post-flush failure), not by the service.
+ */
+export type AskStreamEvent =
+  | { type: "step"; tools: string[] }
+  | { type: "delta"; text: string }
+  | { type: "cards"; cards: AskCard[] }
+  | {
+      type: "proposed";
+      answer: string;
+      proposedAction: ProposedAction;
+      toolsUsed: string[];
+      provider: "anthropic" | "github";
+      model: string;
+    }
+  | {
+      type: "done";
+      answer: string;
+      toolsUsed: string[];
+      provider: "anthropic" | "github";
+      model: string;
+      cards: AskCard[];
+    };
+
+/**
+ * Pure mapping (v1.71, ADR-082): a card-able tool's result → an AskCard, or null when the tool is
+ * not card-able, the result isn't an object, or it's an error payload. Exported for unit testing.
+ */
+export function cardForTool(toolName: string, result: unknown): AskCard | null {
+  const kind = CARD_TOOLS[toolName];
+  if (!kind) return null;
+  if (result === null || typeof result !== "object") return null;
+  if ("error" in (result as Record<string, unknown>)) return null;
+  return { kind, data: result };
+}
+
+/**
+ * Record a card-able tool result into `cardMap` (keyed for dedupe: tickets by key, sprint/huddle
+ * are singletons). The map preserves insertion order so the most-recent MAX_CARDS can be taken.
+ */
+function captureCard(cardMap: Map<string, AskCard>, toolName: string, result: unknown): void {
+  const card = cardForTool(toolName, result);
+  if (!card) return;
+  const key =
+    card.kind === "ticket"
+      ? `ticket:${typeof (result as { key?: unknown }).key === "string" ? (result as { key: string }).key : "?"}`
+      : card.kind;
+  cardMap.set(key, card);
+}
+
+function cardsFrom(cardMap: Map<string, AskCard>): AskCard[] {
+  return Array.from(cardMap.values()).slice(-MAX_CARDS);
 }
 
 function buildToolSpecs(): { specs: AiToolSpec[]; readByName: Map<string, ToolDef> } {
@@ -149,70 +229,147 @@ function buildSystem(ctx: AskContext): string {
 }
 
 /**
- * Run the assistant loop. `provider.chatWithTools` is called until the model returns a
- * final answer, or the turn cap is reached (then one final no-tools call synthesizes).
+ * Run the assistant loop, emitting progress as it goes (v1.71, ADR-082).
+ * `provider.chatWithToolsStream` is called until the model returns a final answer (streamed via
+ * `delta` events), a write is proposed, or the turn cap is reached (one final no-tools synthesis).
+ * Read tool batches announce themselves with a `step` event before running; card-able results are
+ * captured and surfaced via `cards`/`done`. Read tools run IN-PROCESS; writes are only proposed.
+ */
+export async function askAssistantStream(
+  provider: AiProvider,
+  question: string,
+  ctx: AskContext,
+  emit: (e: AskStreamEvent) => void
+): Promise<void> {
+  const { specs, readByName } = buildToolSpecs();
+  const system = buildSystem(ctx);
+  const messages: AiToolMessage[] = [{ role: "user", content: question }];
+  const toolsUsed: string[] = [];
+  const cardMap = new Map<string, AskCard>();
+
+  // Accumulates the *terminating* turn's streamed text. Reset each turn: text streamed on a turn
+  // that then calls tools is preamble, superseded by the `step` event the client uses to clear it.
+  let acc = "";
+  const onDelta = (chunk: string) => {
+    if (!chunk) return;
+    acc += chunk;
+    emit({ type: "delta", text: chunk });
+  };
+
+  const emitDone = (answer: string) => {
+    emit({
+      type: "done",
+      answer: answer.trim() || "I don't have enough information to answer that.",
+      toolsUsed,
+      provider: provider.name,
+      model: provider.model,
+      cards: cardsFrom(cardMap),
+    });
+  };
+
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    // On the last allowed turn, offer no tools so the model must answer.
+    const offerTools = turn < MAX_TURNS - 1 ? specs : [];
+    acc = "";
+    const res = await provider.chatWithToolsStream(system, messages, offerTools, onDelta);
+
+    if (res.type === "final") {
+      emitDone(res.text || acc);
+      return;
+    }
+
+    // A WRITE request is NOT executed — surface it for the UI to confirm (ADR-030), then stop.
+    const writeCall = res.calls.find((c) => WRITE_TOOLS.has(c.name));
+    if (writeCall) {
+      emit({
+        type: "proposed",
+        answer: acc.trim(),
+        proposedAction: {
+          tool: writeCall.name,
+          args: (writeCall.args ?? {}) as Record<string, unknown>,
+        },
+        toolsUsed: [...toolsUsed, writeCall.name],
+        provider: provider.name,
+        model: provider.model,
+      });
+      return;
+    }
+
+    // All reads — announce the batch, run each in-process, feed results back, capture cards.
+    emit({ type: "step", tools: res.calls.map((c) => c.name) });
+    messages.push({ role: "assistant_tool_calls", calls: res.calls });
+    for (const call of res.calls) {
+      toolsUsed.push(call.name);
+      const def = readByName.get(call.name);
+      let resultObj: unknown;
+      if (!def) {
+        resultObj = { error: `Tool '${call.name}' is not available.` };
+      } else {
+        try {
+          resultObj = await def.handler(call.args);
+        } catch (err) {
+          resultObj = { error: err instanceof Error ? err.message : String(err) };
+        }
+      }
+      captureCard(cardMap, call.name, resultObj);
+      messages.push({ role: "tool_result", id: call.id, name: call.name, content: JSON.stringify(resultObj) });
+    }
+    if (cardMap.size > 0) emit({ type: "cards", cards: cardsFrom(cardMap) });
+  }
+
+  // Turn cap hit while still calling tools — one no-tools call to synthesize a (streamed) answer.
+  acc = "";
+  const finalRes = await provider.chatWithToolsStream(system, messages, [], onDelta);
+  emitDone(
+    finalRes.type === "final" ? finalRes.text || acc : "I couldn't complete that within the step limit."
+  );
+}
+
+/**
+ * Non-streaming wrapper (v1.18, ADR-029): drives {@link askAssistantStream} and collects its
+ * events into a single AskResult. `step` clears any streamed preamble (same semantics the UI uses),
+ * so the returned `answer` is the terminating turn's text.
  */
 export async function askAssistant(
   provider: AiProvider,
   question: string,
   ctx: AskContext
 ): Promise<AskResult> {
-  const { specs, readByName } = buildToolSpecs();
-  const system = buildSystem(ctx);
-  const messages: AiToolMessage[] = [{ role: "user", content: question }];
-  const toolsUsed: string[] = [];
+  let answer = "";
+  let toolsUsed: string[] = [];
+  let cards: AskCard[] = [];
+  let proposedAction: ProposedAction | undefined;
 
-  const finish = (answer: string): AskResult => ({
-    answer: answer.trim() || "I don't have enough information to answer that.",
+  await askAssistantStream(provider, question, ctx, (e) => {
+    switch (e.type) {
+      case "delta":
+        answer += e.text;
+        break;
+      case "step":
+        answer = ""; // preamble before a tool batch is not the final answer
+        break;
+      case "cards":
+        cards = e.cards;
+        break;
+      case "proposed":
+        answer = e.answer;
+        toolsUsed = e.toolsUsed;
+        proposedAction = e.proposedAction;
+        break;
+      case "done":
+        answer = e.answer;
+        toolsUsed = e.toolsUsed;
+        cards = e.cards;
+        break;
+    }
+  });
+
+  return {
+    answer,
     toolsUsed,
     provider: provider.name,
     model: provider.model,
-  });
-
-  for (let turn = 0; turn < MAX_TURNS; turn++) {
-    // On the last allowed turn, offer no tools so the model must answer.
-    const offerTools = turn < MAX_TURNS - 1 ? specs : [];
-    const res = await provider.chatWithTools(system, messages, offerTools);
-
-    if (res.type === "final") return finish(res.text);
-
-    // A WRITE request is NOT executed — return it for the UI to confirm (ADR-030).
-    const writeCall = res.calls.find((c) => WRITE_TOOLS.has(c.name));
-    if (writeCall) {
-      return {
-        answer: "",
-        toolsUsed: [...toolsUsed, writeCall.name],
-        provider: provider.name,
-        model: provider.model,
-        proposedAction: {
-          tool: writeCall.name,
-          args: (writeCall.args ?? {}) as Record<string, unknown>,
-        },
-      };
-    }
-
-    // All reads — run each in-process, feed results back.
-    messages.push({ role: "assistant_tool_calls", calls: res.calls });
-    for (const call of res.calls) {
-      toolsUsed.push(call.name);
-      const def = readByName.get(call.name);
-      let content: string;
-      if (!def) {
-        content = JSON.stringify({ error: `Tool '${call.name}' is not available.` });
-      } else {
-        try {
-          content = JSON.stringify(await def.handler(call.args));
-        } catch (err) {
-          content = JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
-        }
-      }
-      messages.push({ role: "tool_result", id: call.id, name: call.name, content });
-    }
-  }
-
-  // Turn cap hit while still calling tools — one no-tools call to synthesize an answer.
-  const finalRes = await provider.chatWithTools(system, messages, []);
-  return finish(
-    finalRes.type === "final" ? finalRes.text : "I couldn't complete that within the step limit."
-  );
+    cards,
+    ...(proposedAction ? { proposedAction } : {}),
+  };
 }

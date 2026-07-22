@@ -4,9 +4,10 @@ import { callTool, type McpError } from "../lib/mcpClient";
 import { createTicketPair, enhanceTicket } from "../hooks/useJira";
 import { linkPr } from "../hooks/useGithub";
 import { buildDraftPair } from "../lib/ticketTemplates";
-import { aiDraftTickets, aiEnhanceTicket, aiAsk } from "../lib/aiClient";
+import { aiDraftTickets, aiEnhanceTicket, aiAsk, aiAskStream } from "../lib/aiClient";
 import { ConfirmActionDialog } from "./ConfirmActionDialog";
-import type { ProposedAction } from "../lib/types";
+import { Markdown } from "./Markdown";
+import type { ProposedAction, AskCard, AskResponse } from "../lib/types";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,6 +21,56 @@ import type {
   LinkPrOutput,
   AiStatus,
 } from "../lib/types";
+
+// ── Tool-transparency labels (v1.71, ADR-082) ─────────────────────────────────
+
+const TOOL_LABELS: Record<string, string> = {
+  get_active_sprint: "active sprint",
+  get_daily_huddle: "today's huddle",
+  get_impediments: "impediments",
+  get_pull_requests: "pull requests",
+  get_issue_pull_requests: "PRs on the ticket",
+  get_post_scrum: "post-scrum notes",
+  get_meeting_goal: "meeting goal",
+  get_meeting_notes: "meeting notes",
+  get_leaves: "leaves",
+  get_all_leaves: "all leaves",
+  get_offset_ledger: "offset ledger",
+  get_sprint_report: "sprint report",
+  get_multi_sprint_report: "multi-sprint trends",
+  get_velocity: "velocity",
+  get_team_members: "team members",
+  get_ticket: "ticket details",
+  list_sprints: "sprint list",
+  get_linked_issues: "linked issues",
+  get_retro: "retrospective",
+  get_draft_plan: "draft capacity plan",
+  update_ticket: "ticket update",
+  transition_issue: "status change",
+  move_issue_to_sprint: "sprint move",
+  create_sprint: "sprint creation",
+  set_sprint_goal: "sprint goal",
+  assign_issue: "assignment",
+  set_leaves: "leave filing",
+};
+
+function labelFor(tool: string): string {
+  return TOOL_LABELS[tool] ?? tool.replace(/^(get_|list_|set_)/, "").replace(/_/g, " ");
+}
+
+/** Distinct, human-friendly labels for a list of tool names (order preserved). */
+function traceLabels(tools: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of tools) {
+    const label = labelFor(t);
+    if (!seen.has(label)) {
+      seen.add(label);
+      out.push(label);
+    }
+  }
+  return out;
+}
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -47,6 +98,16 @@ interface ChatMessage {
   text: string;
   // Rich result payload rendered as a card
   result?: ToolResult;
+  // v1.71 (ADR-082): render `text` as markdown (AI answers) vs plain (commands/help/errors).
+  markdown?: boolean;
+  // v1.71: streaming state for AI answers.
+  streaming?: boolean;
+  /** Live "Looking at…" label while a tool batch runs (cleared once answer text streams). */
+  stepLabel?: string;
+  /** Rich cards captured from the read tools the assistant ran. */
+  cards?: AskCard[];
+  /** Names of tools the assistant used — rendered as a "Looked at: …" trace. */
+  toolsUsed?: string[];
 }
 
 type ToolResult =
@@ -264,6 +325,38 @@ function ResultCard({ result }: { result: ToolResult }) {
   }
 }
 
+// ── AI assistant chrome (v1.71, ADR-082) — cards, live step, tool trace ────────
+
+/** Render an AI-captured card with the same components the deterministic commands use. */
+function AskCardView({ card }: { card: AskCard }) {
+  switch (card.kind) {
+    case "ticket": return <TicketResultCard data={card.data as GetTicketOutput} />;
+    case "sprint": return <SprintResultCard data={card.data as GetActiveSprintOutput} />;
+    case "huddle": return <HuddleResultCard data={card.data as GetDailyHuddleOutput} />;
+  }
+}
+
+/** Live "Looking at active sprint…" indicator shown while a tool batch runs. */
+function StepIndicator({ label }: { label: string }) {
+  return (
+    <p className="flex items-center gap-1.5 text-xs text-muted-foreground italic" aria-live="polite">
+      <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary/70 animate-pulse" aria-hidden="true" />
+      {label}
+    </p>
+  );
+}
+
+/** Persistent "Looked at: active sprint · impediments" transparency trace under an answer. */
+function ToolTrace({ tools }: { tools: string[] }) {
+  const labels = traceLabels(tools);
+  if (labels.length === 0) return null;
+  return (
+    <p className="mt-2 text-[0.6875rem] text-muted-foreground">
+      <span className="font-medium">Looked at:</span> {labels.join(" · ")}
+    </p>
+  );
+}
+
 // ── Tool executor ─────────────────────────────────────────────────────────────
 
 // perf: Each action dispatches at most 2 network calls (create pair). No streaming.
@@ -472,39 +565,81 @@ export function ChatPanel({ className, selectedSprintId, aiStatus, assigneeFilte
       // a free-form question for the AI assistant. Known commands stay deterministic (fast).
       const isUnknownCommand = action.kind === "help" && text.trim().toLowerCase() !== "help";
 
-      let responseText: string;
-      let result: ToolResult | undefined;
       if (isUnknownCommand && aiStatus.enabled) {
-        const res = await aiAsk({
+        // v1.71 (ADR-082): stream the AI answer into the bubble. Falls back to the non-streaming
+        // endpoint on any stream failure (old browser / buffering proxy) so no environment loses it.
+        const askBody = {
           question: text,
           ...(boardId !== undefined ? { boardId } : {}),
           ...(contextSprintId != null ? { sprintId: contextSprintId } : {}),
           // v1.40 (ADR-050): prior turns give the assistant conversation memory.
           ...(askHistoryRef.current.length > 0 ? { history: askHistoryRef.current } : {}),
-        });
+        };
+
+        const patchLoading = (partial: Partial<ChatMessage>) =>
+          setMessages((prev) => prev.map((m) => (m.id === loadingId ? { ...m, ...partial } : m)));
+
+        // Turn the loading bubble into a live streaming assistant message.
+        patchLoading({ role: "assistant", text: "", markdown: true, streaming: true, stepLabel: "Thinking…" });
+
+        let acc = "";
+        let res: AskResponse;
+        try {
+          res = await aiAskStream(askBody, {
+            onStep: (tools) => {
+              acc = ""; // preamble before a tool batch isn't the final answer — clear it
+              patchLoading({ text: "", stepLabel: `Looking at ${traceLabels(tools).join(", ")}…` });
+            },
+            onDelta: (chunk) => {
+              acc += chunk;
+              patchLoading({ text: acc, stepLabel: undefined });
+            },
+            onCards: (cards) => patchLoading({ cards }),
+          });
+        } catch (streamErr) {
+          const mcpErr = streamErr as McpError;
+          // AI genuinely disabled → surface as an error. Any OTHER stream failure → fall back.
+          if (mcpErr.code === "AI_UNAVAILABLE") throw streamErr;
+          res = await aiAsk(askBody);
+        }
+
         if (res.proposedAction) {
           // v1.19 (ADR-030): the assistant wants to make a change — confirm in a modal.
-          responseText = res.answer || "I can do that — please review and confirm.";
           setPendingAction(res.proposedAction);
           setConfirmOpen(true);
+          patchLoading({
+            role: "assistant",
+            text: res.answer || "I can do that — please review and confirm.",
+            markdown: true,
+            streaming: false,
+            stepLabel: undefined,
+            toolsUsed: res.toolsUsed,
+            ...(res.cards ? { cards: res.cards } : {}),
+          });
           rememberAskTurn("user", text);
           rememberAskTurn("assistant", `[proposed ${res.proposedAction.tool}]`);
         } else {
-          responseText = res.answer;
+          patchLoading({
+            role: "assistant",
+            text: res.answer,
+            markdown: true,
+            streaming: false,
+            stepLabel: undefined,
+            toolsUsed: res.toolsUsed,
+            ...(res.cards ? { cards: res.cards } : {}),
+          });
           rememberAskTurn("user", text);
           rememberAskTurn("assistant", res.answer);
         }
-      } else {
-        const out = await executeAction(action, aiStatus, selectedSprintId, assigneeFilter);
-        responseText = out.text;
-        result = out.result;
+        return; // AI branch fully handled the bubble; finally still clears busy
       }
 
-      // Replace loading message
+      // Deterministic command path — replace the loading bubble with the result.
+      const out = await executeAction(action, aiStatus, selectedSprintId, assigneeFilter);
       setMessages((prev) =>
         prev.map((m) =>
           m.id === loadingId
-            ? { id: loadingId, role: "assistant" as const, text: responseText, result }
+            ? { id: loadingId, role: "assistant" as const, text: out.text, result: out.result }
             : m
         )
       );
@@ -582,12 +717,19 @@ export function ChatPanel({ className, selectedSprintId, aiStatus, assigneeFilte
                 msg.role === "loading" && "text-muted-foreground italic"
               )}
             >
-              {msg.text.split("\n").map((line, i) => (
-                <Fragment key={i}>
-                  {line}
-                  {i < msg.text.split("\n").length - 1 && <br />}
-                </Fragment>
-              ))}
+              {msg.markdown ? (
+                msg.text ? <Markdown text={msg.text} /> : null
+              ) : (
+                msg.text.split("\n").map((line, i) => (
+                  <Fragment key={i}>
+                    {line}
+                    {i < msg.text.split("\n").length - 1 && <br />}
+                  </Fragment>
+                ))
+              )}
+              {msg.stepLabel && <StepIndicator label={msg.stepLabel} />}
+              {msg.cards?.map((c, i) => <AskCardView key={i} card={c} />)}
+              {msg.toolsUsed && !msg.streaming && <ToolTrace tools={msg.toolsUsed} />}
               {msg.result && <ResultCard result={msg.result} />}
             </div>
           </div>

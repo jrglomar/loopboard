@@ -576,8 +576,31 @@ export interface AiProvider {
   loop stops and returns the requested call as `proposedAction: { tool, args }`. The UI confirms it
   in a modal and only then executes the write (via the existing tool). The AI never mutates Jira.
 - **Output:** `{ answer: string; toolsUsed: string[]; provider: "anthropic" | "github"; model: string;
-  proposedAction?: { tool: string; args: Record<string, unknown> } }`. When `proposedAction` is
-  present, `answer` is a short lead-in (may be empty) and the UI shows the confirmation modal.
+  proposedAction?: { tool: string; args: Record<string, unknown> }; cards?: AskCard[] }`. When
+  `proposedAction` is present, `answer` is a short lead-in (may be empty) and the UI shows the
+  confirmation modal. **v1.71 (ADR-082):** `cards` (≤3) mirrors the read tools the loop actually ran
+  for **card-able** tools — `AskCard = { kind: "ticket" | "sprint" | "huddle"; data: <that tool's
+  output> }` (`get_ticket`→`ticket`, `get_active_sprint`→`sprint`, `get_daily_huddle`→`huddle`) — so
+  the UI can render the same rich result cards the deterministic commands use. Deterministic capture
+  from the in-process tool results; **no extra model call**.
+
+`POST /api/ai/ask/stream` (v1.71 — streaming variant of `/api/ai/ask`; ADR-082)
+- **Input (zod):** identical to `/api/ai/ask` (`askInputSchema` is shared).
+- **Behavior:** runs the same agentic loop but emits progress over **Server-Sent Events**
+  (`Content-Type: text/event-stream`). Each event is an SSE frame `event: <type>\ndata: <json>\n\n`:
+  | `event` | `data` shape | meaning |
+  |---|---|---|
+  | `step` | `{ tools: string[] }` | the loop is about to run this batch of read tools (drives the live "Looking at…" indicator) |
+  | `delta` | `{ text: string }` | a chunk of the final answer (token-ish; concatenate in order) |
+  | `cards` | `{ cards: AskCard[] }` | card-able tool results captured so far (≤3) |
+  | `proposed` | `{ answer: string; proposedAction: { tool, args }; toolsUsed, provider, model }` | a write the model wants — the stream then ends; the UI confirms in a modal (write is NOT executed) |
+  | `done` | `{ answer, toolsUsed, provider, model, cards? }` | terminal success; `answer` equals the concatenated deltas |
+  | `error` | `{ code, message }` | terminal failure (same codes as the JSON endpoint; used when the failure happens **after** SSE headers are flushed) |
+  Pre-flush failures (validation / provider config / `AI_UNAVAILABLE`) use the normal JSON envelope +
+  HTTP status, exactly like `/api/ai/ask`, so the client can fall back. **Anthropic** streams true
+  token deltas; **GitHub Models** uses a buffered fallback (still emits `step`s, but the answer arrives
+  as a single `delta`). Bridge-only REST, NEVER an MCP tool. The non-streaming `/api/ai/ask` remains
+  for fallback and tests. Adds `chatWithToolsStream` to the `AiProvider` port + both adapters.
 
 **Errors (all AI endpoints):**
 | Case | Status | `code` |
@@ -3183,3 +3206,21 @@ No tool names, routes, ports, or error codes change. The rename touches identity
     full-width, AssignmentList breakdown relocation, ticketCells unchanged); mcp-github 57 — total
     **1,810**; smoke 60/60 (shape checks updated, no count change). react-app version pill
     1.69.0 → **1.70.0**.
+
+209. **§4.9 — streaming Ask assistant (ADR-082).** New `POST /api/ai/ask/stream` runs the same
+    agentic loop but emits SSE frames (`step` / `delta` / `cards` / `proposed` / `done` / `error`).
+    `chatWithToolsStream(system, messages, tools, onDelta)` added to the `AiProvider` port: Anthropic
+    streams true token deltas via `messages.stream`; GitHub Models uses a **buffered fallback**
+    (delegates to `chatWithTools`, emits the final text as one `delta`). Pre-flush errors still use the
+    JSON envelope so the client can fall back to `/api/ai/ask`.
+210. **§4.9 — `cards` on Ask output.** Both Ask endpoints now return `cards?: AskCard[]` (≤3),
+    deterministically captured from the in-process results of card-able read tools
+    (`get_ticket`→`ticket`, `get_active_sprint`→`sprint`, `get_daily_huddle`→`huddle`) — **no extra
+    model call**. The ChatPanel renders them with the same result-card components the deterministic
+    commands use, and renders assistant answers as **markdown** (`marked` + DOMPurify) with a
+    tool-transparency trace ("Looked at: …").
+211. **Tests**: mcp-jira 654 → **661** (+7: askAssistantStream event sequence + write-proposal
+    short-circuit, cardForTool mapping, Anthropic/GitHub provider streaming); react-app +**12**
+    (Markdown sanitize/render 4, aiClient SSE parser 5, ChatPanel stream + trace + card + fallback 3);
+    mcp-github 57 unchanged; smoke 60 → **61** (stream 503 parity). react-app version pill 1.70.0 →
+    **1.71.0**.

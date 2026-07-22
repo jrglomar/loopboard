@@ -133,6 +133,63 @@ export class AnthropicProvider implements AiProvider {
       throw mapAnthropicError(err);
     }
   }
+
+  /**
+   * Streaming tool-calling turn (v1.71, ADR-082). Forwards text deltas to onDelta as
+   * they arrive; resolves to the same {final|tool_calls} shape as chatWithTools once the
+   * message completes. Uses the SDK's messages.stream helper (finalMessage() gives the
+   * assembled content incl. tool_use blocks).
+   */
+  async chatWithToolsStream(
+    system: string,
+    messages: AiToolMessage[],
+    tools: AiToolSpec[],
+    onDelta: (chunk: string) => void
+  ): Promise<ChatWithToolsResult> {
+    try {
+      const stream = this.client.messages.stream({
+        model: this.model,
+        max_tokens: 2048,
+        system,
+        messages: toAnthropicMessages(messages),
+        ...(tools.length > 0
+          ? {
+              tools: tools.map((t) => ({
+                name: t.name,
+                description: t.description,
+                input_schema: t.parameters as Anthropic.Tool.InputSchema,
+              })),
+            }
+          : {}),
+      });
+
+      // 'text' fires for text-content deltas only (never tool_use input) — safe to forward.
+      stream.on("text", (delta: string) => {
+        if (delta) onDelta(delta);
+      });
+
+      const res = await stream.finalMessage();
+
+      const toolUses = res.content.filter(
+        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+      );
+      if (res.stop_reason === "tool_use" && toolUses.length > 0) {
+        return {
+          type: "tool_calls",
+          calls: toolUses.map((b) => ({ id: b.id, name: b.name, args: b.input })),
+        };
+      }
+
+      const text = res.content
+        .filter((b): b is Anthropic.TextBlock => b.type === "text")
+        .map((b) => b.text)
+        .join("\n")
+        .trim();
+      return { type: "final", text };
+    } catch (err) {
+      throw mapAnthropicError(err);
+    }
+  }
 }
 
 /**

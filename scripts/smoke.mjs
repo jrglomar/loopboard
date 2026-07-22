@@ -728,6 +728,23 @@ if (!jiraReady) {
     fail("[JIRA] POST /api/ai/ask → 503 AI_UNAVAILABLE", String(e));
   }
 
+  // JIRA v1.71 (ADR-082): streaming assistant /api/ai/ask/stream → 503 AI_UNAVAILABLE (pre-flush
+  // failure uses the JSON envelope + status, exactly like /api/ai/ask, so clients can fall back).
+  try {
+    const { status, body } = await httpPost(
+      `http://127.0.0.1:${JIRA_PORT}/api/ai/ask/stream`,
+      { question: "any impediments today?" }
+    );
+    if (status === 503 && body.ok === false && body.error?.code === "AI_UNAVAILABLE") {
+      pass("[JIRA] POST /api/ai/ask/stream → 503 AI_UNAVAILABLE when AI disabled");
+    } else {
+      fail("[JIRA] POST /api/ai/ask/stream → 503 AI_UNAVAILABLE",
+        `status=${status} code=${body.error?.code} body=${JSON.stringify(body).slice(0, 200)}`);
+    }
+  } catch (e) {
+    fail("[JIRA] POST /api/ai/ask/stream → 503 AI_UNAVAILABLE", String(e));
+  }
+
   // JIRA v1.18: /api/ai/ask {} → 400 VALIDATION (question required)
   try {
     const { status, body } = await httpPost(`http://127.0.0.1:${JIRA_PORT}/api/ai/ask`, {});

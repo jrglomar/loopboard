@@ -26,7 +26,7 @@ import { UpstreamError, ConfigError } from "./lib/errors.js";
 import { ZodError } from "zod";
 import { getAiProvider, getAiStatus } from "./lib/ai/provider.js";
 import { draftTickets, enhanceTicket, draftSprintSummary, planDevTickets } from "./lib/ai/draftService.js";
-import { askAssistant } from "./lib/ai/askService.js";
+import { askAssistant, askAssistantStream } from "./lib/ai/askService.js";
 import { taskHelperRouter } from "./routes/taskHelper.js";
 import { adminRouter } from "./routes/admin.js";
 import { perUserContext } from "./lib/auth/perUserContext.js";
@@ -557,6 +557,79 @@ app.post("/api/ai/ask", async (req, res) => {
     }
     const msg = err instanceof Error ? err.message : "Internal server error";
     errorResponse(res, 500, "INTERNAL", msg);
+  }
+});
+
+// POST /api/ai/ask/stream (v1.71, §4.9, ADR-082) — SSE streaming variant of /api/ai/ask.
+// Pre-flush failures (validation / config / AI_UNAVAILABLE) use the JSON envelope + status, exactly
+// like /api/ai/ask, so the client can fall back. Once headers are flushed, failures are `error` frames.
+app.post("/api/ai/ask/stream", async (req, res) => {
+  const parsed = askInputSchema.safeParse(req.body);
+  if (!parsed.success) {
+    errorResponse(res, 400, "VALIDATION", "Input validation failed", parsed.error.issues);
+    return;
+  }
+
+  let provider;
+  try {
+    provider = await getAiProvider();
+  } catch (err) {
+    if (err instanceof ConfigError) {
+      errorResponse(res, 500, "CONFIG", err.message);
+      return;
+    }
+    const msg = err instanceof Error ? err.message : "Internal server error";
+    errorResponse(res, 500, "INTERNAL", msg);
+    return;
+  }
+
+  if (provider === null) {
+    errorResponse(res, 503, "AI_UNAVAILABLE", AI_UNAVAILABLE_MSG);
+    return;
+  }
+
+  // Open the SSE stream — headers flush here, so any later error becomes an `error` frame.
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no", // disable proxy buffering (nginx) so frames arrive promptly
+  });
+
+  let closed = false;
+  req.on("close", () => {
+    closed = true;
+  });
+
+  // Each event is an SSE frame; the client keys off the event NAME. Sending the whole event object
+  // as data is a harmless superset of the documented per-event shapes.
+  const send = (event: string, data: unknown) => {
+    if (closed) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  try {
+    await askAssistantStream(
+      provider,
+      parsed.data.question,
+      {
+        boardId: parsed.data.boardId,
+        sprintId: parsed.data.sprintId,
+        today: new Date().toISOString().slice(0, 10),
+        history: parsed.data.history,
+      },
+      (e) => send(e.type, e)
+    );
+  } catch (err) {
+    const [code, message] =
+      err instanceof UpstreamError
+        ? (["UPSTREAM", err.message] as const)
+        : err instanceof ConfigError
+          ? (["CONFIG", err.message] as const)
+          : (["INTERNAL", err instanceof Error ? err.message : "Internal server error"] as const);
+    send("error", { code, message });
+  } finally {
+    if (!closed) res.end();
   }
 });
 

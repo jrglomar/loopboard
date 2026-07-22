@@ -137,6 +137,23 @@ export class GithubProvider implements AiProvider {
     return { type: "final", text: typeof message.content === "string" ? message.content : "" };
   }
 
+  /**
+   * Streaming tool-calling turn (v1.71, ADR-082) — BUFFERED FALLBACK. GitHub Models is the
+   * secondary provider and accumulating its fragmented tool_call stream is fiddly, so this
+   * delegates to the non-streaming chatWithTools and emits any final text as one delta. The
+   * live tool-step events still come from the askService loop, so the UX degrades gracefully.
+   */
+  async chatWithToolsStream(
+    system: string,
+    messages: AiToolMessage[],
+    tools: AiToolSpec[],
+    onDelta: (chunk: string) => void
+  ): Promise<ChatWithToolsResult> {
+    const res = await this.chatWithTools(system, messages, tools);
+    if (res.type === "final" && res.text) onDelta(res.text);
+    return res;
+  }
+
   private async fetchCompletion(
     system: string,
     messages: Array<{ role: "user" | "assistant"; content: string }>,

@@ -53,6 +53,25 @@ vi.mock("../lib/aiClient", async (importOriginal) => {
       provider: "anthropic",
       model: "claude-opus-4-8",
     }),
+    // v1.71 (ADR-082): the streaming Ask endpoint is the primary path; forward a delta then resolve.
+    aiAskStream: vi.fn().mockImplementation(
+      async (
+        _body: unknown,
+        handlers?: {
+          onStep?: (t: string[]) => void;
+          onDelta?: (t: string) => void;
+          onCards?: (c: unknown[]) => void;
+        }
+      ) => {
+        handlers?.onDelta?.("You have 1 impediment: infra is down.");
+        return {
+          answer: "You have 1 impediment: infra is down.",
+          toolsUsed: ["get_impediments"],
+          provider: "anthropic",
+          model: "claude-opus-4-8",
+        };
+      }
+    ),
   };
 });
 
@@ -160,9 +179,9 @@ describe("ChatPanel", () => {
     });
   });
 
-  it("v1.18: a free-form question routes to the AI assistant when AI is on", async () => {
+  it("v1.18/v1.71: a free-form question streams from the AI assistant when AI is on", async () => {
     const user = userEvent.setup();
-    const { aiAsk } = await import("../lib/aiClient");
+    const { aiAskStream } = await import("../lib/aiClient");
 
     render(<ChatPanel selectedSprintId={50} aiStatus={AI_ON} boardId={10} contextSprintId={50} />);
 
@@ -171,14 +190,87 @@ describe("ChatPanel", () => {
     await user.click(screen.getByRole("button", { name: /send/i }));
 
     await waitFor(() => {
-      expect(aiAsk).toHaveBeenCalledWith({ question: "any impediments today?", boardId: 10, sprintId: 50 });
+      // Primary path is the streaming endpoint; the body carries the Huddle context.
+      expect(aiAskStream).toHaveBeenCalledWith(
+        { question: "any impediments today?", boardId: 10, sprintId: 50 },
+        expect.anything()
+      );
     });
+    expect(await screen.findByText(/infra is down/)).toBeTruthy();
+  });
+
+  it("v1.71: renders the tool-transparency trace under a streamed answer", async () => {
+    const user = userEvent.setup();
+    render(<ChatPanel selectedSprintId={50} aiStatus={AI_ON} boardId={10} contextSprintId={50} />);
+
+    const input = screen.getByRole("textbox", { name: /sprint command/i });
+    await user.type(input, "any impediments today?");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    // toolsUsed: ["get_impediments"] → "Looked at: impediments" (scope to the trace paragraph,
+    // since "impediments" also appears in the greeting and the echoed user message).
+    const traceLabel = await screen.findByText(/Looked at:/);
+    expect(traceLabel.closest("p")?.textContent).toContain("impediments");
+  });
+
+  it("v1.71: renders a rich card the assistant returned (sprint card)", async () => {
+    const user = userEvent.setup();
+    const { aiAskStream } = await import("../lib/aiClient");
+    vi.mocked(aiAskStream).mockImplementationOnce(async (_body, handlers) => {
+      handlers?.onCards?.([
+        {
+          kind: "sprint",
+          data: {
+            sprint: { id: 1, name: "Sprint 42", goal: null, state: "active", startDate: null, endDate: null },
+            totals: { total: 3, done: 1, blocked: 0, storyPointsTotal: 8, storyPointsDone: 3 },
+            issuesByStatus: { todo: [], inprogress: [], codereview: [], done: [] },
+          },
+        },
+      ] as never);
+      handlers?.onDelta?.("The sprint is on track.");
+      return {
+        answer: "The sprint is on track.",
+        toolsUsed: ["get_active_sprint"],
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        cards: [
+          {
+            kind: "sprint",
+            data: {
+              sprint: { id: 1, name: "Sprint 42", goal: null, state: "active", startDate: null, endDate: null },
+              totals: { total: 3, done: 1, blocked: 0, storyPointsTotal: 8, storyPointsDone: 3 },
+              issuesByStatus: { todo: [], inprogress: [], codereview: [], done: [] },
+            },
+          },
+        ] as never,
+      };
+    });
+
+    render(<ChatPanel selectedSprintId={50} aiStatus={AI_ON} boardId={10} contextSprintId={50} />);
+    const input = screen.getByRole("textbox", { name: /sprint command/i });
+    await user.type(input, "how is the sprint doing?");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    expect(await screen.findByText(/Sprint: Sprint 42/)).toBeTruthy();
+  });
+
+  it("v1.71: falls back to the non-streaming endpoint when the stream fails", async () => {
+    const user = userEvent.setup();
+    const { aiAskStream, aiAsk } = await import("../lib/aiClient");
+    vi.mocked(aiAskStream).mockRejectedValueOnce({ code: "BRIDGE_DOWN", message: "stream down" });
+
+    render(<ChatPanel selectedSprintId={50} aiStatus={AI_ON} boardId={10} contextSprintId={50} />);
+    const input = screen.getByRole("textbox", { name: /sprint command/i });
+    await user.type(input, "any impediments today?");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => expect(aiAsk).toHaveBeenCalledOnce());
     expect(await screen.findByText(/infra is down/)).toBeTruthy();
   });
 
   it("v1.40: the SECOND ask carries the first Q/A as history (conversation memory)", async () => {
     const user = userEvent.setup();
-    const { aiAsk } = await import("../lib/aiClient");
+    const { aiAskStream } = await import("../lib/aiClient");
 
     render(<ChatPanel selectedSprintId={50} aiStatus={AI_ON} boardId={10} contextSprintId={50} />);
     const input = screen.getByRole("textbox", { name: /sprint command/i });
@@ -186,14 +278,14 @@ describe("ChatPanel", () => {
     // First ask — no history yet.
     await user.type(input, "any impediments today?");
     await user.click(screen.getByRole("button", { name: /send/i }));
-    await waitFor(() => expect(aiAsk).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(aiAsk).mock.calls[0]![0].history).toBeUndefined();
+    await waitFor(() => expect(aiAskStream).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(aiAskStream).mock.calls[0]![0].history).toBeUndefined();
 
     // Second ask — includes the first question + the assistant's answer.
     await user.type(input, "who owns it?");
     await user.click(screen.getByRole("button", { name: /send/i }));
-    await waitFor(() => expect(aiAsk).toHaveBeenCalledTimes(2));
-    const second = vi.mocked(aiAsk).mock.calls[1]![0];
+    await waitFor(() => expect(aiAskStream).toHaveBeenCalledTimes(2));
+    const second = vi.mocked(aiAskStream).mock.calls[1]![0];
     expect(second.history).toBeDefined();
     expect(second.history![0]).toEqual({ role: "user", content: "any impediments today?" });
     expect(second.history![1]!.role).toBe("assistant");
@@ -202,8 +294,8 @@ describe("ChatPanel", () => {
 
   it("v1.19: a proposed write surfaces the confirm modal (does not auto-execute)", async () => {
     const user = userEvent.setup();
-    const { aiAsk } = await import("../lib/aiClient");
-    vi.mocked(aiAsk).mockResolvedValueOnce({
+    const { aiAskStream } = await import("../lib/aiClient");
+    vi.mocked(aiAskStream).mockResolvedValueOnce({
       answer: "",
       toolsUsed: ["update_ticket"],
       provider: "anthropic",
@@ -224,7 +316,7 @@ describe("ChatPanel", () => {
 
   it("v1.18: a free-form question does NOT call the assistant when AI is off (help fallback)", async () => {
     const user = userEvent.setup();
-    const { aiAsk } = await import("../lib/aiClient");
+    const { aiAsk, aiAskStream } = await import("../lib/aiClient");
 
     render(<ChatPanel selectedSprintId={null} aiStatus={AI_OFF} />);
 
@@ -236,6 +328,7 @@ describe("ChatPanel", () => {
       expect(screen.getAllByText(/Unknown command/i).length).toBeGreaterThan(0);
     });
     expect(aiAsk).not.toHaveBeenCalled();
+    expect(aiAskStream).not.toHaveBeenCalled();
   });
 
   it("Enter key sends the message (Shift+Enter does not)", async () => {

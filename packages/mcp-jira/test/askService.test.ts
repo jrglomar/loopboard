@@ -6,7 +6,9 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { resetConfigCache } from "../src/lib/config.js";
-import { askAssistant, READ_TOOLS, WRITE_TOOLS } from "../src/lib/ai/askService.js";
+import {
+  askAssistant, askAssistantStream, cardForTool, READ_TOOLS, WRITE_TOOLS, type AskStreamEvent,
+} from "../src/lib/ai/askService.js";
 import type {
   AiProvider, AiToolMessage, AiToolSpec, ChatWithToolsResult,
 } from "../src/lib/ai/provider.js";
@@ -38,13 +40,27 @@ interface FakeProvider extends AiProvider {
 function fakeProvider(steps: ChatWithToolsResult[]): FakeProvider {
   const calls: Array<{ messages: AiToolMessage[]; tools: AiToolSpec[] }> = [];
   let i = 0;
+  const next = (messages: AiToolMessage[], tools: AiToolSpec[]): ChatWithToolsResult => {
+    calls.push({ messages: structuredClone(messages), tools });
+    return steps[Math.min(i++, steps.length - 1)]!;
+  };
   return {
     name: "github",
     model: "test-model",
     complete: async () => ({ text: "" }),
-    chatWithTools: async (_system: string, messages: AiToolMessage[], tools: AiToolSpec[]) => {
-      calls.push({ messages: structuredClone(messages), tools });
-      return steps[Math.min(i++, steps.length - 1)]!;
+    chatWithTools: async (_system: string, messages: AiToolMessage[], tools: AiToolSpec[]) =>
+      next(messages, tools),
+    // v1.71 (ADR-082): askAssistant now drives the streaming loop; mirror chatWithTools and emit
+    // any final text as a single delta so onDelta-based assertions and accumulation still work.
+    chatWithToolsStream: async (
+      _system: string,
+      messages: AiToolMessage[],
+      tools: AiToolSpec[],
+      onDelta: (chunk: string) => void
+    ) => {
+      const res = next(messages, tools);
+      if (res.type === "final" && res.text) onDelta(res.text);
+      return res;
     },
     calls,
   };
@@ -82,6 +98,11 @@ describe("askService v1.40 (ADR-050) — allowlist growth + conversation memory"
         systems.push(system);
         return { type: "final", text: "ok" };
       },
+      chatWithToolsStream: async (system: string, _m, _t, onDelta) => {
+        systems.push(system);
+        onDelta("ok");
+        return { type: "final", text: "ok" };
+      },
     };
     await askAssistant(provider, "and who owns it?", {
       today: "2026-07-04",
@@ -103,6 +124,11 @@ describe("askService v1.40 (ADR-050) — allowlist growth + conversation memory"
       complete: async () => ({ text: "" }),
       chatWithTools: async (system: string) => {
         systems.push(system);
+        return { type: "final", text: "ok" };
+      },
+      chatWithToolsStream: async (system: string, _m, _t, onDelta) => {
+        systems.push(system);
+        onDelta("ok");
         return { type: "final", text: "ok" };
       },
     };
@@ -170,5 +196,80 @@ describe("askService loop (v1.18)", () => {
     expect(toolResult && JSON.stringify(toolResult)).toContain("not available");
     // The store on disk is unchanged — no write happened.
     expect(fs.readFileSync(impFile, "utf8")).toBe(before);
+  });
+});
+
+describe("askAssistantStream (v1.71, ADR-082)", () => {
+  it("emits step → delta → done, runs the read tool, and yields no cards for a non-card-able tool", async () => {
+    const provider = fakeProvider([
+      { type: "tool_calls", calls: [{ id: "c1", name: "get_impediments", args: { sprintId: 100 } }] },
+      { type: "final", text: "You have 1 impediment: infra is down." },
+    ]);
+
+    const events: AskStreamEvent[] = [];
+    await askAssistantStream(
+      provider,
+      "any impediments today?",
+      { sprintId: 100, today: "2026-06-24" },
+      (e) => events.push(e)
+    );
+
+    const types = events.map((e) => e.type);
+    expect(types).toContain("step");
+    expect(types).toContain("delta");
+    expect(types[types.length - 1]).toBe("done"); // terminal
+
+    const step = events.find((e): e is Extract<AskStreamEvent, { type: "step" }> => e.type === "step")!;
+    expect(step.tools).toEqual(["get_impediments"]);
+
+    const delta = events.find((e): e is Extract<AskStreamEvent, { type: "delta" }> => e.type === "delta")!;
+    expect(delta.text).toContain("infra is down");
+
+    const done = events.at(-1) as Extract<AskStreamEvent, { type: "done" }>;
+    expect(done.answer).toContain("infra is down");
+    expect(done.toolsUsed).toEqual(["get_impediments"]);
+    expect(done.cards).toEqual([]); // get_impediments is not card-able
+  });
+
+  it("emits a `proposed` event for a write — no `done`, and the write is never executed", async () => {
+    const before = fs.readFileSync(impFile, "utf8");
+    const provider = fakeProvider([
+      { type: "tool_calls", calls: [{ id: "w1", name: "update_ticket", args: { ticketKey: "VRDB-2700", storyPoints: 2 } }] },
+      { type: "final", text: "(should not be reached)" },
+    ]);
+
+    const events: AskStreamEvent[] = [];
+    await askAssistantStream(
+      provider,
+      "set VRDB-2700 to 2pts",
+      { sprintId: 100, today: "2026-06-24" },
+      (e) => events.push(e)
+    );
+
+    const proposed = events.find(
+      (e): e is Extract<AskStreamEvent, { type: "proposed" }> => e.type === "proposed"
+    );
+    expect(proposed).toBeDefined();
+    expect(proposed!.proposedAction).toEqual({ tool: "update_ticket", args: { ticketKey: "VRDB-2700", storyPoints: 2 } });
+    // Terminal at the proposal — never a done, and the loop stopped after one turn.
+    expect(events.some((e) => e.type === "done")).toBe(false);
+    expect(provider.calls).toHaveLength(1);
+    // The impediments store (proxy for "no side effects") is untouched.
+    expect(fs.readFileSync(impFile, "utf8")).toBe(before);
+  });
+});
+
+describe("cardForTool (v1.71, ADR-082)", () => {
+  it("maps the card-able read tools to their card kind, passing the result through as data", () => {
+    expect(cardForTool("get_ticket", { key: "DEV-1" })).toEqual({ kind: "ticket", data: { key: "DEV-1" } });
+    expect(cardForTool("get_active_sprint", { sprint: { name: "S1" } })?.kind).toBe("sprint");
+    expect(cardForTool("get_daily_huddle", { sprintName: "S1" })?.kind).toBe("huddle");
+  });
+
+  it("returns null for non-card-able tools, error payloads, and non-objects", () => {
+    expect(cardForTool("get_impediments", { items: [] })).toBeNull();
+    expect(cardForTool("get_ticket", { error: "not found" })).toBeNull();
+    expect(cardForTool("get_ticket", "DEV-1")).toBeNull();
+    expect(cardForTool("get_ticket", null)).toBeNull();
   });
 });

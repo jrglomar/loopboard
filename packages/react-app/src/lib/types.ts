@@ -469,6 +469,15 @@ export interface ProposedAction {
   args: Record<string, unknown>;
 }
 
+/**
+ * A rich card the assistant captured from a read tool it ran (v1.71, ADR-082) — rendered with the
+ * same result-card components the deterministic commands use. `data` is that tool's output.
+ */
+export interface AskCard {
+  kind: "ticket" | "sprint" | "huddle";
+  data: GetTicketOutput | GetActiveSprintOutput | GetDailyHuddleOutput;
+}
+
 /** POST /api/ai/ask output. */
 export interface AskResponse {
   answer: string;
@@ -476,7 +485,35 @@ export interface AskResponse {
   provider: "anthropic" | "github";
   model: string;
   proposedAction?: ProposedAction;
+  /** v1.71 (ADR-082): rich cards captured from the read tools the loop ran (≤3). */
+  cards?: AskCard[];
 }
+
+/**
+ * One decoded SSE frame from POST /api/ai/ask/stream (v1.71, ADR-082). The client keys off the SSE
+ * event name; `error` is only used when the failure happens after the stream has started.
+ */
+export type AskStreamEvent =
+  | { type: "step"; tools: string[] }
+  | { type: "delta"; text: string }
+  | { type: "cards"; cards: AskCard[] }
+  | {
+      type: "proposed";
+      answer: string;
+      proposedAction: ProposedAction;
+      toolsUsed: string[];
+      provider: "anthropic" | "github";
+      model: string;
+    }
+  | {
+      type: "done";
+      answer: string;
+      toolsUsed: string[];
+      provider: "anthropic" | "github";
+      model: string;
+      cards?: AskCard[];
+    }
+  | { type: "error"; code: string; message: string };
 
 // ── Huddle stores (CONTRACTS.md §4.21/§4.22 v1.16, ADR-027) ──────────────────
 
