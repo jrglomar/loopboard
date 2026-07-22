@@ -15,7 +15,7 @@ npm install                   # install workspace dependencies
 npm run typecheck             # tsc --noEmit across all packages
 npm run build                 # build all packages
 npm run test                  # vitest across all packages (no .env, no network required)
-node scripts/smoke.mjs        # keyless smoke: boots both bridges with stub creds, 19 checks
+node scripts/smoke.mjs        # keyless smoke: boots both bridges with stub creds
 ```
 
 ### Start the three dev processes (each in its own terminal)
@@ -125,10 +125,10 @@ Do not add tests that require real credentials or network calls.
 | Jira key regex detection (pure function) | `packages/mcp-github/src/lib/jiraKeys.ts` |
 | AI provider port + adapters (anthropic/github) | `packages/mcp-jira/src/lib/ai/` |
 | Active-sprint selection (latest-first, pure) | `packages/mcp-jira/src/lib/sprintSelect.ts` |
-| PO draft capacity plan store (v1.68) | `packages/mcp-jira/src/lib/draftPlanStore.ts` |
+| PO draft capacity plan store | `packages/mcp-jira/src/lib/draftPlanStore.ts` |
 | Draft Capacity Plan card + PO↔Dev sprint pairing | `packages/react-app/src/components/DraftPlanCard.tsx`, `src/lib/sprintPairing.ts` |
-| Shared per-ticket action cells (points/status/move/rename) — Assign Tickets only (v1.70) | `packages/react-app/src/components/ticketCells.tsx` |
-| Real breakdown dialog (creates PO sub-stories) — Assign Tickets (v1.70) | `packages/react-app/src/components/BreakdownDialog.tsx` |
+| Shared per-ticket action cells (points/status/move/rename) — Assign Tickets only | `packages/react-app/src/components/ticketCells.tsx` |
+| Real breakdown dialog (creates PO sub-stories) — Assign Tickets | `packages/react-app/src/components/BreakdownDialog.tsx` |
 | Draft point-split rollups (per-developer share totals) | `packages/react-app/src/lib/draftPlan.ts` |
 | React AI client (`getAiStatus`, draft, enhance) | `packages/react-app/src/lib/aiClient.ts` |
 | React HTTP client | `packages/react-app/src/lib/mcpClient.ts` |
