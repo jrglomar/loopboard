@@ -17,7 +17,6 @@ import {
   useLinkedIssues,
 } from "../hooks/useJira";
 import { useBoards, useAgingPolicy } from "../lib/boards";
-import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import type { BoardKey, SharedSprintProps, LinkedIssue } from "../lib/types";
 
 // a11y: main landmark is provided by the App shell; Dashboard uses the slot.
@@ -68,15 +67,11 @@ export function Dashboard({
   const sprint = useActiveSprint(selectedBoardId, selectedSprintId, true);
   const huddle = useDailyHuddle(selectedBoardId, selectedSprintId);
 
-  // v1.40 (ADR-050): freshness — refetch every 5 minutes; stamp the last data arrival.
+  // v1.40 (ADR-050): freshness stamp — records when sprint data last arrived.
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   useEffect(() => {
     if (sprint.data) setLastUpdated(new Date());
   }, [sprint.data]);
-  useAutoRefresh(() => {
-    sprint.run();
-    huddle.run();
-  }, 5 * 60_000);
 
   // v1.27 (ADR-040): the OPPOSITE board's active sprint feeds the dual fly-in tracker
   // (default project on that side). One extra read; no-op when that board has no sprint.
@@ -180,10 +175,10 @@ export function Dashboard({
 
   return (
     <div className="space-y-4">
-      {/* v1.40 (ADR-050): freshness stamp — the page refetches itself every 5 minutes */}
+      {/* v1.40 (ADR-050): freshness stamp — last time data arrived */}
       {lastUpdated && (
         <p className="text-[0.6875rem] text-muted-foreground text-right -mb-3" aria-live="polite">
-          Auto-refreshes every 5 min · Updated{" "}
+          Updated{" "}
           {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
         </p>
       )}
